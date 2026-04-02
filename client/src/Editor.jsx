@@ -120,7 +120,7 @@ function standMarkerIcon(type, selected) {
 
 function NorthArrowSVG() {
   return (
-    <svg viewBox="0 0 100 100" width="70%" height="70%">
+    <svg viewBox="23 8 54 54" width="100%" height="100%">
       <path d="M50 10 L75 60 L50 48 L25 60 Z" fill="#000" />
     </svg>
   );
@@ -148,147 +148,18 @@ function pickNiceMeters(maxMeters) {
 
 // Plan Scale bar (transparent background — map visible through)
 function ScaleBarSVG() {
-  const width = 220;
-  const height = 62;
-
-  const barX = 22;
-  const barY = 24;
-  const barW = 168;
-  const barH = 10;
-  const strokeW = 0.9;
-
-  const majorW = barW / 4;
-  const miniW = majorW / 2;
-
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      width="100%"
-      height="100%"
-      preserveAspectRatio="xMidYMid meet"
+    <img
+      src="/scale-bar.svg"
+      alt="Plan Scale"
       style={{
         display: "block",
+        width: "100%",
+        height: "100%",
+        objectFit: "fill",
         background: "transparent",
-        overflow: "visible",
       }}
-    >
-      {/* Title */}
-      <text
-        x={width / 2}
-        y="10"
-        textAnchor="middle"
-        fontFamily="Arial, Helvetica, sans-serif"
-        fontSize="7"
-        fontWeight="400"
-        fill="#000"
-      >
-        Plan Scale
-      </text>
-
-      {/* Top ticks */}
-      {[0, 1, 2, 3, 4].map((i) => {
-        const x = barX + i * majorW;
-        return (
-          <line
-            key={`tick-${i}`}
-            x1={x}
-            y1={12}
-            x2={x}
-            y2={barY}
-            stroke="#000"
-            strokeWidth={strokeW}
-          />
-        );
-      })}
-
-      {/* Outer border */}
-      <rect
-        x={barX}
-        y={barY}
-        width={barW}
-        height={barH}
-        fill="none"
-        stroke="#000"
-        strokeWidth={strokeW}
-      />
-
-      {/* Top row */}
-      <rect x={barX + 2 * majorW} y={barY} width={majorW} height={barH / 2} fill="#000" />
-
-      {/* Bottom left mini checker */}
-      {[0, 1, 2, 3].map((i) => (
-        <rect
-          key={`mini-${i}`}
-          x={barX + i * miniW}
-          y={barY}
-          width={miniW}
-          
-height={barH}
-          fill={i % 2 === 0 ? "#000" : "none"}
-        />
-      ))}
-
-      {/* Bottom middle + right */}
-      <rect
-  x={barX + majorW + majorW / 2}
-  y={barY + barH / 2}
-  width={majorW / 2}
-  height={barH / 2}
-  fill="#000"
-/>
-      <rect
-        x={barX + 3 * majorW}
-        y={barY + barH / 2}
-        width={majorW}
-        height={barH / 2}
-        fill="#000"
-      />
-
-      {/* Major divisions */}
-      {[1, 2, 3].map((i) => {
-        const x = barX + i * majorW;
-        return (
-          <line
-            key={`div-${i}`}
-            x1={x}
-            y1={barY}
-            x2={x}
-            y2={barY + barH}
-            stroke="#000"
-            strokeWidth={strokeW}
-          />
-        );
-      })}
-
-      {/* Small left divisions */}
-      {[1, 2, 3].map((i) => {
-        const x = barX + i * miniW;
-        return (
-          <line
-            key={`mini-div-${i}`}
-            x1={x}
-            y1={barY + barH / 2}
-            x2={x}
-            y2={barY + barH}
-            stroke="#000"
-            strokeWidth={strokeW}
-          />
-        );
-      })}
-
-      {/* Bottom text */}
-      <text
-        x={width / 2}
-        y="50"
-        textAnchor="middle"
-        fontFamily="Arial, Helvetica, sans-serif"
-        fontSize="8"
-        fontWeight="400"
-        fill="#000"
-      >
-        1 : 500 (1cm = 5m)
-      </text>
-    </svg>
+    />
   );
 }
 function MapScrollbars({ mapRef }) {
@@ -4366,64 +4237,7 @@ if (activeTool === "work_area" && isDrawingWorkArea) {
         return;
       }
 
- if (uiDrag.type === "resizeScale") {
-  const { id, corner, startSize, startPointerPx } = uiDrag;
-  const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
-
-  const curPointerPx = curPx; // use map-projected DIV px (stable in onMapMouseMove)
-  if (!curPointerPx || !startPointerPx) return;
-
-  const dx = curPointerPx.x - startPointerPx.x;
-  const dy = curPointerPx.y - startPointerPx.y;
-  const baseDx = unscalePx(dx, zRef);
-  const baseDy = unscalePx(dy, zRef);
-
-  let w = startSize.wPx;
-  let h = startSize.hPx;
-
-  // corners
-  if (corner === "se") { w = startSize.wPx + baseDx; h = startSize.hPx + baseDy; }
-  if (corner === "sw") { w = startSize.wPx - baseDx; h = startSize.hPx + baseDy; }
-  if (corner === "ne") { w = startSize.wPx + baseDx; h = startSize.hPx - baseDy; }
-  if (corner === "nw") { w = startSize.wPx - baseDx; h = startSize.hPx - baseDy; }
-
-  // side bars (same behavior as Legend)
-  if (corner === "e") w = startSize.wPx + baseDx;
-  if (corner === "w") w = startSize.wPx - baseDx;
-  if (corner === "s") h = startSize.hPx + baseDy;
-  if (corner === "n") h = startSize.hPx - baseDy;
-
-  w = clamp(w, 200, 900);
-  h = clamp(h, 90, 300);
-
-  scheduleScaleUpdate(() => {
-  setScales((prev) =>
-    prev.map((s) => (s.id === id ? { ...s, wPx: w, hPx: h } : s))
-  );
-});
-
-  return;
-}
-if (uiDrag.type === "moveScale") {
-  const { scaleId, startPx, startPos } = uiDrag;
-
-  // curPx is in DIV pixel space (from the map's projection)
-  const dx = curPx.x - startPx.x;
-  const dy = curPx.y - startPx.y;
-
-  const startPosPx = latLngToPx(startPos);
-  if (!startPosPx) return;
-
-  const nextPos = pxToLatLng({ x: startPosPx.x + dx, y: startPosPx.y + dy });
-  if (!nextPos) return;
-
-  scheduleScaleUpdate(() => {
-  setScales((prev) =>
-    prev.map((s) => (s.id === scaleId ? { ...s, pos: nextPos } : s))
-  );
-});
-  return;
-}
+      // resizeScale + moveScale are now handled by the dedicated window-level useEffect
 
       if (uiDrag.type === "createStand") {
         setUiDrag((d) => (d ? { ...d, hoverPos: cur2 } : d));
@@ -4699,7 +4513,7 @@ if (activeTool === "scale") {
 
   setScales((prev) => [
     ...prev,
-    { id, pos: p, wPx: 320, hPx: 110, zRef: zoomNow, rotDeg: 0 },
+    { id, pos: p, wPx: 320, hPx: 180, zRef: zoomNow, rotDeg: 0 },
   ]);
 
   setSelectedEntity({ kind: "scale", id });
@@ -5918,6 +5732,61 @@ if (corner === "n") h = startSize.hPx - baseDy;
     window.addEventListener("mousemove", onMove);
     return () => window.removeEventListener("mousemove", onMove);
   }, [uiDrag]);
+
+  /* ================= Scale resize + move: smooth window mousemove ================= */
+  useEffect(() => {
+    if (!uiDrag || (uiDrag.type !== "resizeScale" && uiDrag.type !== "moveScale")) return;
+
+    function onMove(ev) {
+      const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
+      if (!curPointerPx) return;
+
+      if (uiDrag.type === "resizeScale") {
+        const { id, corner, startSize, startPointerPx } = uiDrag;
+        const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
+        const dx = curPointerPx.x - startPointerPx.x;
+        const dy = curPointerPx.y - startPointerPx.y;
+        const baseDx = unscalePx(dx, zRef);
+        const baseDy = unscalePx(dy, zRef);
+        let w = startSize.wPx;
+        let h = startSize.hPx;
+        if (corner === "se") { w = startSize.wPx + baseDx; h = startSize.hPx + baseDy; }
+        if (corner === "sw") { w = startSize.wPx - baseDx; h = startSize.hPx + baseDy; }
+        if (corner === "ne") { w = startSize.wPx + baseDx; h = startSize.hPx - baseDy; }
+        if (corner === "nw") { w = startSize.wPx - baseDx; h = startSize.hPx - baseDy; }
+        if (corner === "e") w = startSize.wPx + baseDx;
+        if (corner === "w") w = startSize.wPx - baseDx;
+        if (corner === "s") h = startSize.hPx + baseDy;
+        if (corner === "n") h = startSize.hPx - baseDy;
+        w = clamp(w, 200, 900);
+        h = clamp(h, 90, 300);
+        setScales((prev) => prev.map((s) => (s.id === id ? { ...s, wPx: w, hPx: h } : s)));
+        return;
+      }
+
+      if (uiDrag.type === "moveScale") {
+        const { scaleId, startGrabPx, startPos } = uiDrag;
+        // dx/dy = how far pointer has moved since grab — element center follows same delta
+        const dx = curPointerPx.x - startGrabPx.x;
+        const dy = curPointerPx.y - startGrabPx.y;
+        const startPosPx = latLngToPx(startPos);
+        if (!startPosPx) return;
+        const nextPos = pxToLatLng({ x: startPosPx.x + dx, y: startPosPx.y + dy });
+        if (!nextPos) return;
+        setScales((prev) => prev.map((s) => (s.id === scaleId ? { ...s, pos: nextPos } : s)));
+      }
+    }
+
+    function onUp() { setUiDrag(null); lockMapInteractions(false); }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [uiDrag]);
+
   useEffect(() => {
     if (!uiDrag || uiDrag.type !== "resizePageFrame") return;
 
@@ -6472,16 +6341,19 @@ const beginResizeScale = (id, corner, clientPt, startSize) => {
   });
 };
 
-const beginMoveScale = (scaleId, startLatLng) => {
+const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
   if (!projectionReady) return;
-  const sp = latLngToPx(startLatLng);
-  if (!sp) return;
+  const centerPx = latLngToPx(startLatLng);
+  if (!centerPx) return;
+  // Record where the user actually grabbed (not element center) so there's no snap-jump
+  const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
+  if (!grabPx) return;
   lockMapInteractions(true);
   setUiDrag({
     type: "moveScale",
     scaleId,
-    startPx: sp,      // DIV px (like Legend)
-    startPos: startLatLng,
+    startGrabPx: grabPx,   // pointer position at drag start
+    startPos: startLatLng,  // element center as lat/lng
   });
 };
   const beginMoveSign = (signId, startLatLng, grabClientPt) => {
@@ -9286,7 +9158,7 @@ height: pendingPictureTool.hPx * elementScale,
     // ✅ only start move if NOT clicking a handle
     if (e.target?.dataset?.handle === "1") return;
 
-    beginMoveScale(scale.id, scale.pos);
+    beginMoveScale(scale.id, scale.pos, { x: e.clientX, y: e.clientY });
   }}
   style={{
     transformOrigin: "center center",
