@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "api": "node dev-server.js",
     "build": "vite build",
     "generate:signs": "node scripts/generateSignCatalog.js",
     "lint": "eslint .",
@@ -12,15 +13,17 @@
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.8",
+    "@supabase/supabase-js": "^2.101.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.1.0",
     "konva": "^10.2.0",
     "mapbox-gl": "^3.18.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "resend": "^4.8.0",
     "react-konva": "^19.2.1",
-    "react-router-dom": "^7.13.0"
+    "react-router-dom": "^7.13.0",
+    "resend": "^4.8.0",
+    "stripe": "^22.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

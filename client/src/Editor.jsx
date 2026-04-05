@@ -2327,9 +2327,13 @@ async function importAerialPhotoForFrame() {
   /* ================= Selection / Drag ================= */
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [uiDrag, setUiDrag] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, entityType, entityId, typeId }
+  const [legendExclusions, setLegendExclusions] = useState(new Set()); // Set of typeId strings hidden from legend
+  const [clipboard, setClipboard] = useState(null); // { kind, data }
   // Live rotation accumulator for signs (avoids stale closures + reattaching listeners)
   const rotateSignLiveRef = useRef(null); // { lastAngleDeg: number, accumulatedDeg: number } | null
   const lastPointerMoveTsRef = useRef(0);
+  const lastMousePosRef = useRef({ x: 0, y: 0 }); // tracks cursor for paste-at-cursor
   // ================= SCALE SMOOTH DRAG (RAF throttle) =================
 const rafScaleRef = React.useRef(null);
 const pendingScaleUpdateRef = React.useRef(null);
@@ -4097,89 +4101,17 @@ if (activeTool === "work_area" && isDrawingWorkArea) {
       // Sign move uses the same window listener (clientToDivPx). Handling it here too
       // duplicates updates in a different projection space and causes lag / jumping.
       if (uiDrag.type === "moveSign") return;
+      // These are handled by the window-level useEffect (clientToDivPx, consistent coords)
+      if (uiDrag.type === "moveLegend") return;
+      if (uiDrag.type === "moveManifest") return;
+      if (uiDrag.type === "moveNorthArrow") return;
+      if (uiDrag.type === "moveInsert") return;
 
       const curPx = latLngToPx(cur2);
       if (!curPx) return;
 
-      if (uiDrag.type === "moveManifest") {
-        const { manifestId, startPx, startPos } = uiDrag;
-        const dx = curPx.x - startPx.x;
-        const dy = curPx.y - startPx.y;
-
-        const startPosPx = latLngToPx(startPos);
-        if (!startPosPx) return;
-
-        const nextPos = pxToLatLng({ x: startPosPx.x + dx, y: startPosPx.y + dy });
-        if (!nextPos) return;
-
-        setManifestBoxes((prev) =>
-          prev.map((mb) => (mb.id === manifestId ? { ...mb, pos: nextPos } : mb))
-        );
-        return;
-      }
-
-      if (uiDrag.type === "moveLegend") {
-        const { legendId, startPx, startPos } = uiDrag;
-        const dx = curPx.x - startPx.x;
-        const dy = curPx.y - startPx.y;
-
-        const startPosPx = latLngToPx(startPos);
-        if (!startPosPx) return;
-
-        const nextPos = pxToLatLng({ x: startPosPx.x + dx, y: startPosPx.y + dy });
-        if (!nextPos) return;
-
-        setLegendBoxes((prev) =>
-          prev.map((lb) => (lb.id === legendId ? { ...lb, pos: nextPos } : lb))
-        );
-        return;
-      }
-
-      if (uiDrag.type === "moveNorthArrow") {
-        const { arrowId, startPx, startPos } = uiDrag;
-        const dx = curPx.x - startPx.x;
-        const dy = curPx.y - startPx.y;
-
-        const startPosPx = latLngToPx(startPos);
-        if (!startPosPx) return;
-
-        const nextPos = pxToLatLng({ x: startPosPx.x + dx, y: startPosPx.y + dy });
-        if (!nextPos) return;
-
-        setNorthArrows((prev) =>
-          prev.map((na) => (na.id === arrowId ? { ...na, pos: nextPos } : na))
-        );
-        return;
-      }
-
-
-            // ================= Insert objects: move =================
-      if (uiDrag.type === "moveInsert") {
-        const { insertId, startPx, startPos } = uiDrag;
-        const dx = curPx.x - startPx.x;
-        const dy = curPx.y - startPx.y;
-
-        const startPosPx = latLngToPx(startPos);
-        if (!startPosPx) return;
-
-        const nextPos = pxToLatLng({
-          x: startPosPx.x + dx,
-          y: startPosPx.y + dy,
-        });
-        if (!nextPos) return;
-
-        setInsertObjects((prev) =>
-          prev.map((o) => {
-            if (o.id !== insertId) return o;
-
-            // keep your existing shape, but support both keys safely
-            if ("pos" in o) return { ...o, pos: nextPos };
-            if ("position" in o) return { ...o, position: nextPos };
-            return { ...o, pos: nextPos };
-          })
-        );
-        return;
-      }
+      // moveLegend / moveManifest / moveNorthArrow / moveInsert are now handled
+      // by the dedicated window-level useEffect (clientToDivPx coords).
 
 
      
@@ -4909,6 +4841,41 @@ useEffect(() => {
   window.addEventListener("keydown", onKeyDown);
   return () => window.removeEventListener("keydown", onKeyDown);
 }, [doUndo, doRedo, doDelete]);
+
+// Ctrl+V paste (always active)
+useEffect(() => {
+  const onKey = (e) => {
+    const el = e.target;
+    const tag = el?.tagName?.toLowerCase();
+    if (tag === "input" || tag === "textarea" || el?.isContentEditable) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+      e.preventDefault();
+      handleContextPaste(clipboard);
+    }
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [clipboard]); // re-bind when clipboard changes so closure has fresh data
+
+// Track cursor position globally so paste lands at cursor
+useEffect(() => {
+  const onMove = (e) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
+  window.addEventListener("mousemove", onMove, { passive: true });
+  return () => window.removeEventListener("mousemove", onMove);
+}, []);
+
+// Context menu: dismiss on outside click or Escape
+useEffect(() => {
+  if (!contextMenu) return;
+  const onDown = () => closeContextMenu();
+  const onKey = (e) => { if (e.key === "Escape") closeContextMenu(); };
+  window.addEventListener("pointerdown", onDown);
+  window.addEventListener("keydown", onKey);
+  return () => {
+    window.removeEventListener("pointerdown", onDown);
+    window.removeEventListener("keydown", onKey);
+  };
+}, [contextMenu]);
 
 
   useEffect(() => {
@@ -5787,6 +5754,49 @@ if (corner === "n") h = startSize.hPx - baseDy;
     };
   }, [uiDrag]);
 
+  // ── Window-level move handler for legend / manifest / north arrow / insert ──
+  // Uses clientToDivPx (screen pixels) for BOTH start and current — same coord
+  // system as moveScale — so no projection-space mismatch and no corner-jump.
+  useEffect(() => {
+    if (!uiDrag) return;
+    const TYPES = ["moveLegend", "moveManifest", "moveNorthArrow", "moveInsert"];
+    if (!TYPES.includes(uiDrag.type)) return;
+
+    function onMove(ev) {
+      const curPx = clientToDivPx(ev.clientX, ev.clientY);
+      if (!curPx) return;
+      const { startGrabPx, startPos } = uiDrag;
+      const dx = curPx.x - startGrabPx.x;
+      const dy = curPx.y - startGrabPx.y;
+      const startPosPx = latLngToPx(startPos);
+      if (!startPosPx) return;
+      const nextPos = pxToLatLng({ x: startPosPx.x + dx, y: startPosPx.y + dy });
+      if (!nextPos) return;
+
+      if (uiDrag.type === "moveLegend") {
+        setLegendBoxes((prev) => prev.map((lb) => lb.id === uiDrag.legendId ? { ...lb, pos: nextPos } : lb));
+      } else if (uiDrag.type === "moveManifest") {
+        setManifestBoxes((prev) => prev.map((mb) => mb.id === uiDrag.manifestId ? { ...mb, pos: nextPos } : mb));
+      } else if (uiDrag.type === "moveNorthArrow") {
+        setNorthArrows((prev) => prev.map((na) => na.id === uiDrag.arrowId ? { ...na, pos: nextPos } : na));
+      } else if (uiDrag.type === "moveInsert") {
+        setInsertObjects((prev) => prev.map((o) => {
+          if (o.id !== uiDrag.insertId) return o;
+          if ("pos" in o) return { ...o, pos: nextPos };
+          if ("position" in o) return { ...o, position: nextPos };
+          return { ...o, pos: nextPos };
+        }));
+      }
+    }
+    function onUp() { setUiDrag(null); }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [uiDrag]);
+
   useEffect(() => {
     if (!uiDrag || uiDrag.type !== "resizePageFrame") return;
 
@@ -6200,14 +6210,16 @@ const mapCursor =
 
 
 
-const beginMoveNorthArrow = (arrowId, startLatLng) => {
+const beginMoveNorthArrow = (arrowId, startLatLng, grabClientPt) => {
   if (!projectionReady) return;
-  const sp = latLngToPx(startLatLng);
-  if (!sp) return;
+  const centerPx = latLngToPx(startLatLng);
+  if (!centerPx) return;
+  const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
+  if (!grabPx) return;
   setUiDrag({
     type: "moveNorthArrow",
     arrowId,
-    startPx: sp,
+    startGrabPx: grabPx,
     startPos: startLatLng,
   });
 };
@@ -6356,6 +6368,107 @@ const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
     startPos: startLatLng,  // element center as lat/lng
   });
 };
+
+// =================== CONTEXT MENU HELPERS ===================
+const openContextMenu = (e, entityType, entityId, typeId = null) => {
+  e.preventDefault();
+  e.stopPropagation();
+  setContextMenu({ x: e.clientX, y: e.clientY, entityType, entityId, typeId });
+};
+const closeContextMenu = () => setContextMenu(null);
+
+const _getEntityData = (entityType, entityId) => {
+  switch (entityType) {
+    case "sign":        return placedSigns.find(s => s.id === entityId);
+    case "cones":       return conesFeatures.find(f => f.id === entityId);
+    case "workArea":    return workAreas.find(w => w.id === entityId);
+    case "measurement": return measurements.find(m => m.id === entityId);
+    case "insert":      return insertObjects.find(o => o.id === entityId);
+    case "northArrow":  return northArrows.find(n => n.id === entityId);
+    case "scale":       return scales.find(s => s.id === entityId);
+    case "legend":      return legendBoxes.find(l => l.id === entityId);
+    case "manifest":    return manifestBoxes.find(m => m.id === entityId);
+    default:            return null;
+  }
+};
+
+const handleContextCopy = () => {
+  if (!contextMenu) return;
+  const data = _getEntityData(contextMenu.entityType, contextMenu.entityId);
+  if (data) setClipboard({ kind: contextMenu.entityType, data: { ...data } });
+  closeContextMenu();
+};
+
+const handleContextCut = () => {
+  if (!contextMenu) return;
+  const { entityType, entityId } = contextMenu;
+  const data = _getEntityData(entityType, entityId);
+  if (data) setClipboard({ kind: entityType, data: { ...data } });
+  switch (entityType) {
+    case "sign":        setPlacedSigns(prev => prev.filter(x => x.id !== entityId)); break;
+    case "cones":       setConesFeatures(prev => prev.filter(x => x.id !== entityId)); break;
+    case "workArea":    setWorkAreas(prev => prev.filter(x => x.id !== entityId)); break;
+    case "measurement": setMeasurements(prev => prev.filter(x => x.id !== entityId)); break;
+    case "insert":      setInsertObjects(prev => prev.filter(x => x.id !== entityId)); break;
+    case "northArrow":  setNorthArrows(prev => prev.filter(x => x.id !== entityId)); break;
+    case "scale":       setScales(prev => prev.filter(x => x.id !== entityId)); break;
+    case "legend":      setLegendBoxes(prev => prev.filter(x => x.id !== entityId)); break;
+    case "manifest":    setManifestBoxes(prev => prev.filter(x => x.id !== entityId)); break;
+    default: break;
+  }
+  closeContextMenu();
+};
+
+const handleContextPaste = (cb) => {
+  const { kind, data } = cb || {};
+  if (!kind || !data) return;
+  const newId = crypto.randomUUID();
+
+  // Paste at current cursor position if possible, else fall back to small offset
+  const cursorDivPx = clientToDivPx(lastMousePosRef.current.x, lastMousePosRef.current.y);
+  const cursorLatLng = cursorDivPx ? pxToLatLng(cursorDivPx) : null;
+
+  const d = 0.00005;
+  // For point elements: place center at cursor
+  const atCursor = (pos) => cursorLatLng ?? (pos ? { lat: pos.lat + d, lng: pos.lng + d } : pos);
+  // For path elements: shift centroid to cursor
+  const shiftPath = (path) => {
+    if (!Array.isArray(path)) return path;
+    if (cursorLatLng) {
+      const cLat = path.reduce((s, p) => s + p.lat, 0) / path.length;
+      const cLng = path.reduce((s, p) => s + p.lng, 0) / path.length;
+      const dLat = cursorLatLng.lat - cLat;
+      const dLng = cursorLatLng.lng - cLng;
+      return path.map(p => ({ lat: p.lat + dLat, lng: p.lng + dLng }));
+    }
+    return path.map(p => ({ lat: p.lat + d, lng: p.lng + d }));
+  };
+
+  switch (kind) {
+    case "sign":        setPlacedSigns(prev => [...prev, { ...data, id: newId, pos: atCursor(data.pos) }]); break;
+    case "cones":       setConesFeatures(prev => [...prev, { ...data, id: newId, path: shiftPath(data.path) }]); break;
+    case "workArea":    setWorkAreas(prev => [...prev, { ...data, id: newId, path: shiftPath(data.path) }]); break;
+    case "measurement": setMeasurements(prev => [...prev, { ...data, id: newId, path: shiftPath(data.path) }]); break;
+    case "insert":      setInsertObjects(prev => [...prev, { ...data, id: newId, pos: atCursor(data.pos || data.position) }]); break;
+    case "northArrow":  setNorthArrows(prev => [...prev, { ...data, id: newId, pos: atCursor(data.pos) }]); break;
+    case "scale":       setScales(prev => [...prev, { ...data, id: newId, pos: atCursor(data.pos) }]); break;
+    case "legend":      setLegendBoxes(prev => [...prev, { ...data, id: newId, pos: atCursor(data.pos) }]); break;
+    case "manifest":    setManifestBoxes(prev => [...prev, { ...data, id: newId, pos: atCursor(data.pos) }]); break;
+    default: break;
+  }
+};
+
+const handleLegendToggle = (typeId) => {
+  if (!typeId) { closeContextMenu(); return; }
+  setLegendExclusions(prev => {
+    const next = new Set(prev);
+    if (next.has(typeId)) next.delete(typeId); else next.add(typeId);
+    return next;
+  });
+  closeContextMenu();
+};
+// ============================================================
+
   const beginMoveSign = (signId, startLatLng, grabClientPt) => {
     if (!projectionReady) return;
   // Use the map anchor (OverlayViewF center) so move offset is consistent even when
@@ -6377,14 +6490,16 @@ const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
   });
   };
 
-  const beginMoveLegend = (legendId, startLatLng) => {
+  const beginMoveLegend = (legendId, startLatLng, grabClientPt) => {
     if (!projectionReady) return;
-    const sp = latLngToPx(startLatLng);
-    if (!sp) return;
+    const centerPx = latLngToPx(startLatLng);
+    if (!centerPx) return;
+    const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
+    if (!grabPx) return;
     setUiDrag({
       type: "moveLegend",
       legendId,
-      startPx: sp,
+      startGrabPx: grabPx,
       startPos: startLatLng,
     });
   };
@@ -6402,14 +6517,16 @@ const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
     });
   };
 
-  const beginMoveManifest = (manifestId, startLatLng) => {
+  const beginMoveManifest = (manifestId, startLatLng, grabClientPt) => {
     if (!projectionReady) return;
-    const sp = latLngToPx(startLatLng);
-    if (!sp) return;
+    const centerPx = latLngToPx(startLatLng);
+    if (!centerPx) return;
+    const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
+    if (!grabPx) return;
     setUiDrag({
       type: "moveManifest",
       manifestId,
-      startPx: sp,
+      startGrabPx: grabPx,
       startPos: startLatLng,
     });
   };
@@ -6453,17 +6570,17 @@ const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
 
 
 // ================= Insert object move (drag) =================
-const beginMoveInsert = (insertId, startLatLng) => {
+const beginMoveInsert = (insertId, startLatLng, grabClientPt) => {
   if (!projectionReady) return;
   if (!startLatLng) return;
-
-  const sp = latLngToPx(startLatLng);
-  if (!sp) return;
-
+  const centerPx = latLngToPx(startLatLng);
+  if (!centerPx) return;
+  const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
+  if (!grabPx) return;
   setUiDrag({
     type: "moveInsert",
     insertId,
-    startPx: sp,
+    startGrabPx: grabPx,
     startPos: startLatLng,
   });
 };
@@ -7782,14 +7899,12 @@ try {
   setMapView({ center: nextCenter, zoom: z });
 });
 
-                // Sync zoom during gesture so Tools overlays (Legend, Manifest, etc.) don't jitter
-                let zoomRaf = null;
+                // Sync zoom synchronously so CSS dimensions update BEFORE OverlayViewF draw()
+                // positions the container — prevents translate(-50%,-50%) drift at high zoom.
                 map.addListener("zoom_changed", () => {
-                  if (zoomRaf) return;
-                  zoomRaf = requestAnimationFrame(() => {
-                    zoomRaf = null;
-                    const z = map.getZoom?.();
-                    if (z == null) return;
+                  const z = map.getZoom?.();
+                  if (z == null) return;
+                  flushSync(() => {
                     setMapView((prev) => (prev?.zoom === z ? prev : { ...prev, zoom: z }));
                   });
                 });
@@ -8011,7 +8126,11 @@ onUnmount={(polygon) => {
   setWorkHover(null);
 }}
 
-    onRightClick={() => setSelectedWorkAreaId(null)}
+    onRightClick={(e) => {
+      if (e.domEvent) {
+        openContextMenu(e.domEvent, "workArea", wa.id, "workArea");
+      }
+    }}
     onDragEnd={(e) => {
       // after dragging whole polygon, update state
       // polygon path is already updated internally, so we trigger a refresh:
@@ -8367,9 +8486,10 @@ onUnmount={(polygon) => {
                 const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
                 const s = contentScalePlan(lb.wPx, zRef, 260);
                 return (
-                  <OverlayViewF key={lb.id} position={lb.pos} mapPaneName="overlayMouseTarget" getPixelPositionOffset={centerOverlayOffset}>
+                  <OverlayViewF key={lb.id} position={lb.pos} mapPaneName="overlayMouseTarget">
                     <div
                       style={{
+                        transform: "translate(-50%, -50%)",
                         transformOrigin: "center center",
                         width: scalePxPlanRounded(lb.wPx, zRef),
                         height: scalePxPlanRounded(lb.hPx, zRef),
@@ -8382,24 +8502,75 @@ onUnmount={(polygon) => {
                         userSelect: "none",
                         position: "relative",
                       }}
+                      onContextMenu={(e) => openContextMenu(e, "legend", lb.id, "legend")}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         onSelectLegend(lb.id);
-                        beginMoveLegend(lb.id, lb.pos);
+                        beginMoveLegend(lb.id, lb.pos, { x: e.clientX, y: e.clientY });
                       }}
                     >
                    <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Legend</div>
-<div
-  style={{
-    marginTop: 6 * s,
-    height: Math.max(1, 2 * s),
-    background: "#111",
-  }}
-/>
-<div style={{ marginTop: 8 * s, fontSize: 13 * s }}>
-  (legend items later)
-</div>
+        <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
+        <div style={{ marginTop: 8 * s }}>
+          {(() => {
+            const CLABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Ped. Tape", type1: "Type 1", type2: "Type 2" };
+            const iconSz = 28 * s;
+            const labelSz = 10 * s;
+            const gap = 6 * s;
+            const itemStyle = { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 * s, width: iconSz + 8 * s };
+            const labelStyle = { fontSize: labelSz, textAlign: "center", color: "#222", lineHeight: 1.2, wordBreak: "break-word", maxWidth: iconSz + 8 * s };
+
+            const rows = [];
+
+            // Signs — grouped by code, show icon + code
+            const signByCode = {};
+            for (const sg of placedSigns) {
+              const code = sg.typeId ?? sg.code ?? sg.id;
+              if (legendExclusions.has(code)) continue;
+              if (!signByCode[code]) signByCode[code] = { src: sg.src, code };
+            }
+            for (const v of Object.values(signByCode)) {
+              rows.push(
+                <div key={`sign-${v.code}`} style={itemStyle}>
+                  <img src={v.src} alt={v.code} style={{ width: iconSz, height: iconSz, objectFit: "contain" }} />
+                  <span style={labelStyle}>{v.code}</span>
+                </div>
+              );
+            }
+
+            // Cones — grouped by typeId, show MarkerVisual + name
+            const coneTypes = new Set();
+            for (const f of conesFeatures) {
+              if (!legendExclusions.has(f.typeId)) coneTypes.add(f.typeId);
+            }
+            for (const typeId of coneTypes) {
+              rows.push(
+                <div key={`cone-${typeId}`} style={itemStyle}>
+                  <div style={{ width: iconSz, height: iconSz, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <MarkerVisual typeId={typeId} strokeScale={1} scale={iconSz / 28} />
+                  </div>
+                  <span style={labelStyle}>{CLABEL[typeId] || typeId}</span>
+                </div>
+              );
+            }
+
+            // Work areas — show green swatch + label
+            if (workAreas.length > 0 && !legendExclusions.has("workArea")) {
+              rows.push(
+                <div key="workArea" style={itemStyle}>
+                  <div style={{ width: iconSz, height: iconSz, background: "rgba(0,200,83,0.18)", border: "2px solid #00c853", borderRadius: 3, boxSizing: "border-box" }} />
+                  <span style={labelStyle}>Work Area</span>
+                </div>
+              );
+            }
+
+            if (rows.length === 0) return (
+              <div style={{ fontSize: 11 * s, color: "#999", fontStyle: "italic" }}>No items</div>
+            );
+            return <div style={{ display: "flex", flexWrap: "wrap", gap }}>{rows}</div>;
+          })()}
+        </div>
 
                       {isSelected && (
                         <BoxSelectionOverlay
@@ -8427,9 +8598,10 @@ onUnmount={(polygon) => {
                 const s = contentScalePlan(mb.wPx, zRef, 240);
 
                 return (
-                  <OverlayViewF key={mb.id} position={mb.pos} mapPaneName="overlayMouseTarget" getPixelPositionOffset={centerOverlayOffset}>
+                  <OverlayViewF key={mb.id} position={mb.pos} mapPaneName="overlayMouseTarget">
                     <div
                       style={{
+                        transform: "translate(-50%, -50%)",
                         transformOrigin: "center center",
                         width: scalePxPlanRounded(mb.wPx, zRef),
                         height: scalePxPlanRounded(mb.hPx, zRef),
@@ -8442,11 +8614,12 @@ onUnmount={(polygon) => {
                         userSelect: "none",
                         position: "relative",
                       }}
+                      onContextMenu={(e) => openContextMenu(e, "manifest", mb.id, "manifest")}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         onSelectManifest(mb.id);
-                        beginMoveManifest(mb.id, mb.pos);
+                        beginMoveManifest(mb.id, mb.pos, { x: e.clientX, y: e.clientY });
                       }}
                     >
                       <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Manifest</div>
@@ -8503,6 +8676,7 @@ onUnmount={(polygon) => {
           strokeWeight: obj.strokeWidth || 3,
           clickable: true,
         }}
+        onRightClick={(e) => { if (e.domEvent) openContextMenu(e.domEvent, "insert", obj.id, "line"); }}
         onMouseDown={(e) => {
           e.domEvent?.preventDefault?.();
           e.domEvent?.stopPropagation?.();
@@ -8519,11 +8693,11 @@ onUnmount={(polygon) => {
       key={obj.id}
       position={obj.pos || obj.position}
       mapPaneName="overlayMouseTarget"
-      getPixelPositionOffset={centerOverlayOffset}
     >
       <div
       data-insert-id={obj.id}
         style={{
+          transform: "translate(-50%, -50%)",
           width: w,
           height: h,
           minWidth: obj.kind === "title_box" ? scalePxPlanRounded(360, zRef) : undefined,
@@ -8537,13 +8711,14 @@ onUnmount={(polygon) => {
           outlineOffset: 2,
         }}
         
+        onContextMenu={(e) => openContextMenu(e, "insert", obj.id, obj.kind ?? "insert")}
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setSelectedInsertId(obj.id);
-          beginMoveInsert(obj.id, obj.pos || obj.position);
+          beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
         }}
-      > 
+      >
       {obj.kind === "title_box" && <TitleBoxContent data={obj.data} scale={s} />}
         {/* ---------- TABLE ---------- */}
         {obj.kind === "table" && (() => {
@@ -9024,10 +9199,10 @@ height: pendingPictureTool.hPx * elementScale,
       key={na.id}
       position={na.pos}
       mapPaneName="overlayMouseTarget"
-      getPixelPositionOffset={centerOverlayOffset}
     >
       <div
         style={{
+          transform: "translate(-50%, -50%)",
           width: scalePxPlanRounded(na.wPx, na.zRef),
           height: scalePxPlanRounded(na.hPx, na.zRef),
           background: "transparent",
@@ -9040,11 +9215,12 @@ height: pendingPictureTool.hPx * elementScale,
           position: "relative",
           overflow: "visible", // IMPORTANT: allow rotate handle
         }}
+        onContextMenu={(e) => openContextMenu(e, "northArrow", na.id, "northArrow")}
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setSelectedEntity({ kind: "northArrow", id: na.id });
-          beginMoveNorthArrow(na.id, na.pos);
+          beginMoveNorthArrow(na.id, na.pos, { x: e.clientX, y: e.clientY });
         }}
       >
         {/* ROTATED ARROW */}
@@ -9145,9 +9321,9 @@ height: pendingPictureTool.hPx * elementScale,
     key={scale.id}
     position={scale.pos}
     mapPaneName="overlayMouseTarget"
-    getPixelPositionOffset={centerOverlayOffset}
   >
   <div
+  onContextMenu={(e) => openContextMenu(e, "scale", scale.id, "scale")}
   onMouseDown={(e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -9161,6 +9337,7 @@ height: pendingPictureTool.hPx * elementScale,
     beginMoveScale(scale.id, scale.pos, { x: e.clientX, y: e.clientY });
   }}
   style={{
+    transform: "translate(-50%, -50%)",
     transformOrigin: "center center",
     width: scaleW,
     height: scaleH,
@@ -9426,12 +9603,10 @@ height: pendingPictureTool.hPx * elementScale,
                       position={s.pos}
                       mapPaneName="overlayMouseTarget"
                       zIndex={95000}
-                      getPixelPositionOffset={() => centerOverlayOffset(signW, signH)}
                     >
                       <div
                         style={{
-                          transform:
-                            undefined,
+                          transform: "translate(-50%, -50%)",
                           position: "relative",
                           display: "inline-block",
                           // Keep selection handles fully visible.
@@ -9456,6 +9631,7 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                           onMouseEnter={() => setSignHoveredId(s.id)}
                           onMouseLeave={() => setSignHoveredId(null)}
+                          onContextMenu={(ev) => openContextMenu(ev, "sign", s.id, s.typeId ?? s.code ?? s.id)}
                           onClick={(ev) => {
                             ev.preventDefault();
                             ev.stopPropagation();
@@ -9915,6 +10091,15 @@ height: pendingPictureTool.hPx * elementScale,
             </div>
           )}
         </div>
+      {contextMenu && (
+        <ContextMenu
+          menu={contextMenu}
+          onCut={handleContextCut}
+          onCopy={handleContextCopy}
+          onToggleLegend={handleLegendToggle}
+          legendExclusions={legendExclusions}
+        />
+      )}
       </main>
     </div>
   );
@@ -10367,4 +10552,46 @@ function DropItem({ label, onClick }) {
 function Divider() {
   return <div style={{ height: 1, background: "#eee", margin: "6px 0" }} />;
 }
+}
+
+// =================== CONTEXT MENU COMPONENT ===================
+function ContextMenu({ menu, onCut, onCopy, onToggleLegend, legendExclusions }) {
+  const isIncluded = menu.typeId ? !legendExclusions.has(menu.typeId) : true;
+  const font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  const base = {
+    display: "flex", alignItems: "center", width: "100%",
+    border: "none", background: "transparent", textAlign: "left",
+    padding: "6px 12px", cursor: "pointer", fontSize: 13,
+    color: "#111", fontFamily: font, lineHeight: 1.4, borderRadius: 4,
+    boxSizing: "border-box",
+  };
+  const hl = (e) => (e.currentTarget.style.background = "#e8eaed");
+  const ul = (e) => (e.currentTarget.style.background = "transparent");
+  return (
+    <div
+      style={{
+        position: "fixed", left: menu.x, top: menu.y, zIndex: 999999,
+        background: "#fff", borderRadius: 6,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)",
+        border: "1px solid rgba(0,0,0,0.08)",
+        padding: "4px", minWidth: 172,
+        fontFamily: font,
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <button style={base} onClick={onCut} onMouseEnter={hl} onMouseLeave={ul}>Cut</button>
+      <button style={base} onClick={onCopy} onMouseEnter={hl} onMouseLeave={ul}>Copy</button>
+      <div style={{ height: 1, background: "#e0e0e0", margin: "3px 0" }} />
+      <button
+        style={{ ...base, gap: 6 }}
+        onClick={() => onToggleLegend(menu.typeId)}
+        onMouseEnter={hl} onMouseLeave={ul}
+      >
+        <span style={{ width: 13, fontSize: 12, color: "#1a73e8", fontWeight: 700, flexShrink: 0 }}>
+          {isIncluded ? "✓" : ""}
+        </span>
+        Include in Legend
+      </button>
+    </div>
+  );
 }

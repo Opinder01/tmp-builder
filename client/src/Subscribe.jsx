@@ -29,17 +29,44 @@ function contactFormDefaultsFromUser(u) {
   };
 }
 
+// ---------- plans ----------
+const PLANS = [
+  { id: "monthly", title: "Monthly", price: 69.99,  period: "month" },
+  { id: "yearly",  title: "Yearly",  price: 699.99, period: "year", badge: "Save 20.2%" },
+];
+
 // ---------- component ----------
 export default function Subscribe() {
-  const nav = useNavigate();
-  const user = getAuthUser();
-  const [contactOpen, setContactOpen] = useState(false);
-  const [contactStatus, setContactStatus] = useState({ type: "", msg: "" }); // "success" | "error"
+  const navigate = useNavigate();
+
+  // Read user once on mount — never re-read so guards stay stable across re-renders
+  const [user] = useState(() => getAuthUser());
+
+  // ── ALL hooks must come before any conditional return ──────────────────────
+
+  // Redirect already-subscribed users — empty deps = runs once on mount only,
+  // never re-fires on state updates (avoids the "navigate during render" warning
+  // and the spurious re-fire that happened with [user, navigate] as deps).
+  useEffect(() => {
+    if (user?.plan) {
+      const isActive = user.subscriptionStatus === "active";
+      const isTrial  =
+        user.subscriptionStatus === "trial" &&
+        user.trialEndsAt &&
+        new Date() < new Date(user.trialEndsAt);
+      if (isActive || isTrial) {
+        navigate("/dashboard", { replace: true });
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [contactOpen,    setContactOpen]    = useState(false);
+  const [contactStatus,  setContactStatus]  = useState({ type: "", msg: "" });
   const [contactLoading, setContactLoading] = useState(false);
   const [contactTouched, setContactTouched] = useState(false);
-  const [contactForm, setContactForm] = useState(() =>
-    contactFormDefaultsFromUser(getAuthUser())
-  );
+  const [contactForm,    setContactForm]    = useState(() => contactFormDefaultsFromUser(getAuthUser()));
+  const [checkoutLoading, setCheckoutLoading] = useState(null); // "monthly" | "yearly" | null
+  const [checkoutError,   setCheckoutError]   = useState("");
 
   const contactErrors = useMemo(() => {
     const trim = (v) => String(v ?? "").trim();
@@ -56,24 +83,14 @@ export default function Subscribe() {
 
   useEffect(() => {
     if (!contactOpen) return;
-    const onKey = (ev) => {
-      if (ev.key === "Escape") setContactOpen(false);
-    };
+    const onKey = (ev) => { if (ev.key === "Escape") setContactOpen(false); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [contactOpen]);
 
-  // 🔒 If already subscribed or on trial → go to dashboard
-  if (
-    user?.plan &&
-    (user.subscriptionStatus === "trial" ||
-      user.subscriptionStatus === "active")
-  ) {
-    nav("/dashboard", { replace: true });
-    return null;
-  }
+  // ── End of hooks ───────────────────────────────────────────────────────────
 
-  // 🔒 If not logged in (safety)
+  // Guard: not logged in
   if (!user) {
     return (
       <div style={{ padding: 24 }}>
@@ -83,38 +100,64 @@ export default function Subscribe() {
     );
   }
 
-  // ---------- plans ----------
-  const PLANS = [
-    {
-      id: "monthly",
-      title: "Monthly",
-      price: 69.99,
-      period: "month",
-    },
-    {
-      id: "yearly",
-      title: "Yearly",
-      price: 699.99,
-      period: "year",
-      badge: "Save 20.2%",
-    },
-  ];
+  // Guard: already subscribed with a valid (non-expired) subscription —
+  // render nothing while the useEffect above performs the redirect.
+  // Must use the same expiry check as ProtectedRoute to avoid a redirect loop.
+  if (user?.plan) {
+    const isActive = user.subscriptionStatus === "active";
+    const isTrial  =
+      user.subscriptionStatus === "trial" &&
+      user.trialEndsAt &&
+      new Date() < new Date(user.trialEndsAt);
+    if (isActive || isTrial) return null;
+  }
 
-  const startTrial = (plan) => {
-    const trialEndsAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    ).toISOString();
+  const startTrial = async (plan) => {
+    setCheckoutError("");
+    setCheckoutLoading(plan.id);
+    console.log("[Stripe] Button clicked – plan:", plan.id);
 
-    const updatedUser = {
-      ...user,
-      plan: plan.id,
-      planPrice: plan.price,
-      subscriptionStatus: "trial",
-      trialEndsAt,
-    };
+    try {
+      console.log("[Stripe] Sending POST /api/stripe/create-checkout-session …");
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: plan.id }),
+      });
 
-    setAuthUser(updatedUser);
-    nav("/dashboard");
+      console.log("[Stripe] Response status:", res.status, res.ok ? "OK" : "ERROR");
+
+      // Try to parse JSON; if it fails the server probably returned HTML (wrong route / no API server)
+      let data;
+      const rawText = await res.text();
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        console.error("[Stripe] Response is not JSON. Raw body:\n", rawText.slice(0, 400));
+        throw new Error(
+          "API route not found. Make sure you're running `vercel dev` (not `npm run dev`) " +
+          "so the /api/ functions are served."
+        );
+      }
+
+      console.log("[Stripe] Response data:", data);
+
+      if (!res.ok) {
+        throw new Error(data?.error || `Server error ${res.status}`);
+      }
+
+      if (!data.url) {
+        throw new Error("No checkout URL in response: " + JSON.stringify(data));
+      }
+
+      console.log("[Stripe] Redirecting to:", data.url);
+      window.location.href = data.url;
+
+    } catch (err) {
+      console.error("[Stripe] Checkout error:", err);
+      setCheckoutError(err?.message || "Something went wrong. Please try again.");
+      setCheckoutLoading(null);
+    }
   };
 
   async function submitContact(e) {
@@ -335,12 +378,18 @@ export default function Subscribe() {
                 <button
                   className="cta"
                   onClick={() => startTrial(plan)}
+                  disabled={checkoutLoading !== null}
                 >
-                  Start free trial
+                  {checkoutLoading === plan.id ? "Redirecting…" : "Start free trial"}
                 </button>
               </div>
             ))}
           </div>
+          {checkoutError && (
+            <p style={{ color: "#c0392b", textAlign: "center", marginTop: 12, fontSize: 14 }}>
+              {checkoutError}
+            </p>
+          )}
 
           <div className="section">
             <h3>Need help?</h3>

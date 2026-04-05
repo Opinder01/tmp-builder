@@ -1,4 +1,5 @@
 import Subscribe from "./Subscribe";
+import Success from "./Success";
 import CookieBanner from "./CookieBanner";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
@@ -16,6 +17,7 @@ export default function App() {
     <Routes>
         <Route path="/" element={<Navigate to="/login" />} />
         <Route path="/subscribe" element={<Subscribe />} />
+        <Route path="/success" element={<Success />} />
 
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />

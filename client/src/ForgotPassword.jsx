@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AuthLayout from "./AuthLayout";
 
@@ -15,6 +15,15 @@ export default function ForgotPassword() {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [redirectToLogin, setRedirectToLogin] = useState(false);
+
+  // Navigate to /login 1.2 s after a successful reset — inside useEffect so
+  // navigate() is never called during a render or an async gap between renders.
+  useEffect(() => {
+    if (!redirectToLogin) return;
+    const timer = setTimeout(() => navigate("/login"), 1200);
+    return () => clearTimeout(timer);
+  }, [redirectToLogin, navigate]);
 
   function handleSendOtp(e) {
     e.preventDefault();
@@ -94,7 +103,7 @@ export default function ForgotPassword() {
     localStorage.setItem("users", JSON.stringify(updatedUsers));
 
     setSuccess("Password reset ✅ You can sign in now.");
-    setTimeout(() => navigate("/login"), 1200);
+    setRedirectToLogin(true);
   }
 
   return (
