@@ -31,14 +31,13 @@ async function saveSubscription(email, record) {
     return;
   }
 
+  // Only include columns that exist in the subscriptions table:
+  // id, email, stripe_customer_id, stripe_subscription_id, plan
   const row = {
     email:                   email.toLowerCase(),
-    stripe_customer_id:      record.customerId        ?? undefined,
-    stripe_subscription_id:  record.subscriptionId    ?? undefined,
-    plan:                    record.plan               ?? undefined,
-    status:                  record.subscriptionStatus ?? undefined,
-    trial_ends_at:           record.trialEndsAt        ?? undefined,
-    updated_at:              new Date().toISOString(),
+    stripe_customer_id:      record.customerId       ?? undefined,
+    stripe_subscription_id:  record.subscriptionId   ?? undefined,
+    plan:                    record.plan              ?? undefined,
   };
 
   // Remove undefined keys so we don't overwrite existing good data with null
@@ -127,34 +126,39 @@ export default async function handler(req, res) {
   switch (event.type) {
 
     case "checkout.session.completed": {
-      const session = event.data.object;
-
-      let sub = session.subscription;
-      if (typeof sub === "string") {
-        try { sub = await stripe.subscriptions.retrieve(sub); }
-        catch (err) { console.warn("[webhook] Could not expand subscription:", err.message); }
+      // Re-fetch session with line_items expanded so we have full price info
+      let session = event.data.object;
+      try {
+        session = await stripe.checkout.sessions.retrieve(session.id, {
+          expand: ["line_items", "subscription"],
+        });
+      } catch (err) {
+        console.warn("[webhook] Could not re-fetch session:", err.message);
       }
 
-      const email        = session.customer_email ?? sub?.items?.data?.[0]?.metadata?.email ?? "";
-      const customerId   = typeof session.customer === "string" ? session.customer : session.customer?.id ?? "";
-      const subscriptionId = typeof sub === "object" ? sub?.id : sub ?? "";
-      const priceId      = sub?.items?.data?.[0]?.price?.id ?? null;
-      const plan         = priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
-      const trialEnd     = sub?.trial_end
-        ? new Date(sub.trial_end * 1000).toISOString()
-        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const sub = typeof session.subscription === "object" ? session.subscription : null;
+
+      // Prefer customer_details.email (set when customer completes checkout)
+      const email =
+        session.customer_details?.email ??
+        session.customer_email ??
+        sub?.items?.data?.[0]?.metadata?.email ??
+        "";
+
+      const customerId     = typeof session.customer === "string" ? session.customer : session.customer?.id ?? "";
+      const subscriptionId = sub?.id ?? (typeof session.subscription === "string" ? session.subscription : "");
+
+      // Determine plan from line_items price id
+      const priceId = session.line_items?.data?.[0]?.price?.id ?? sub?.items?.data?.[0]?.price?.id ?? null;
+      const plan    = priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
 
       console.log(
         `[webhook] checkout.session.completed — email=${email}` +
         ` customerId=${customerId} subscriptionId=${subscriptionId}` +
-        ` plan=${plan} trialEndsAt=${trialEnd}`
+        ` priceId=${priceId} plan=${plan}`
       );
 
-      await saveSubscription(email, {
-        customerId, subscriptionId, plan,
-        subscriptionStatus: "trial",
-        trialEndsAt: trialEnd,
-      });
+      await saveSubscription(email, { customerId, subscriptionId, plan });
       break;
     }
 
@@ -169,7 +173,6 @@ export default async function handler(req, res) {
       await saveSubscription(email, {
         subscriptionId: sub.id,
         customerId: sub.customer,
-        subscriptionStatus: (status === "active" || status === "trialing") ? status : "inactive",
       });
       break;
     }
@@ -184,7 +187,6 @@ export default async function handler(req, res) {
       await saveSubscription(email, {
         subscriptionId: sub.id,
         customerId: sub.customer,
-        subscriptionStatus: "inactive",
       });
       break;
     }
@@ -202,7 +204,7 @@ export default async function handler(req, res) {
       if (inv.billing_reason === "subscription_cycle" || inv.billing_reason === "subscription_update") {
         let email = "";
         try { const c = await stripe.customers.retrieve(inv.customer); email = c.email ?? ""; } catch {}
-        if (email) await saveSubscription(email, { subscriptionStatus: "active" });
+        if (email) await saveSubscription(email, {});
       }
       break;
     }
