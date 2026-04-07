@@ -44,19 +44,10 @@ export default function Subscribe() {
 
   // ── ALL hooks must come before any conditional return ──────────────────────
 
-  // Redirect already-subscribed users — empty deps = runs once on mount only,
-  // never re-fires on state updates (avoids the "navigate during render" warning
-  // and the spurious re-fire that happened with [user, navigate] as deps).
+  // Redirect already-subscribed users — empty deps = runs once on mount only.
   useEffect(() => {
-    if (user?.plan) {
-      const isActive = user.subscriptionStatus === "active";
-      const isTrial  =
-        user.subscriptionStatus === "trial" &&
-        user.trialEndsAt &&
-        new Date() < new Date(user.trialEndsAt);
-      if (isActive || isTrial) {
-        navigate("/dashboard", { replace: true });
-      }
+    if (user?.subscribed === true) {
+      navigate("/dashboard", { replace: true });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,17 +91,8 @@ export default function Subscribe() {
     );
   }
 
-  // Guard: already subscribed with a valid (non-expired) subscription —
-  // render nothing while the useEffect above performs the redirect.
-  // Must use the same expiry check as ProtectedRoute to avoid a redirect loop.
-  if (user?.plan) {
-    const isActive = user.subscriptionStatus === "active";
-    const isTrial  =
-      user.subscriptionStatus === "trial" &&
-      user.trialEndsAt &&
-      new Date() < new Date(user.trialEndsAt);
-    if (isActive || isTrial) return null;
-  }
+  // Guard: render nothing while the useEffect above performs the redirect.
+  if (user?.subscribed === true) return null;
 
   const startTrial = async (plan) => {
     setCheckoutError("");

@@ -49,17 +49,20 @@ export default function ProtectedRoute({ children }) {
         }
 
         if (data !== null) {
-          // API succeeded — persist fresh data and use it as the source of truth
+          // API succeeded — only upgrade subscribed, never downgrade.
+          // If the API says false but localStorage says true, the Supabase webhook
+          // is just delayed — trust the local value the user earned at checkout.
+          const resolvedSubscribed = data.subscribed === true ? true : (user.subscribed === true);
           const updated = {
             ...user,
-            subscribed:           data.subscribed ?? false,
+            subscribed:           resolvedSubscribed,
             plan:                 data.plan                 ?? user.plan,
             stripeCustomerId:     data.stripeCustomerId     ?? user.stripeCustomerId,
             stripeSubscriptionId: data.stripeSubscriptionId ?? user.stripeSubscriptionId,
           };
           localStorage.setItem("loggedInUser", JSON.stringify(updated));
-          console.log("[ProtectedRoute] API says subscribed:", data.subscribed, "→ setting authState");
-          nextState = data.subscribed === true ? "allowed" : "denied";
+          console.log("[ProtectedRoute] API subscribed:", data.subscribed, "| local subscribed:", user.subscribed, "| resolved:", resolvedSubscribed);
+          nextState = resolvedSubscribed ? "allowed" : "denied";
         } else {
           // API failed / timed out — fall back to localStorage
           nextState = user?.subscribed === true ? "allowed" : "denied";
