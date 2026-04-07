@@ -60,6 +60,8 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [settingsTab, setSettingsTab] = useState("company"); // company | account
   const [projects, setProjects] = useState([]);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError,   setPortalError]   = useState("");
 useEffect(() => {
   const sp = new URLSearchParams(loc.search);
   const tab = (sp.get("tab") || "").toLowerCase();
@@ -104,9 +106,6 @@ useEffect(() => {
     localStorage.setItem("currentProjectSnapshot", JSON.stringify(project.snapshot || {}));
     nav("/editor");
   };
-
-  const [portalLoading, setPortalLoading] = useState(false);
-  const [portalError,   setPortalError]   = useState("");
 
   const manageSubscription = async () => {
     setPortalLoading(true);
