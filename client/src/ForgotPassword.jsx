@@ -55,8 +55,10 @@ export default function ForgotPassword() {
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ email, otp: code }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to send OTP.");
+      // Parse JSON safely — endpoint may return HTML if route isn't deployed yet
+      let data;
+      try { data = await res.json(); } catch { /* non-JSON response */ }
+      if (!res.ok) throw new Error(data?.error || `Server error (${res.status}). Please try again.`);
       setGeneratedOtp(code);
       setOtpSent(true);
       setSuccess("A 6-digit code has been sent to your email address.");
