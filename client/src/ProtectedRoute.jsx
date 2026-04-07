@@ -39,34 +39,22 @@ export default function ProtectedRoute({ children }) {
         // Persist the fresh subscription data back into localStorage
         const updated = {
           ...user,
-          subscriptionStatus: data.status,
-          plan:               data.plan             ?? user.plan,
-          trialEndsAt:        data.trialEndsAt       ?? user.trialEndsAt,
-          stripeCustomerId:   data.stripeCustomerId  ?? user.stripeCustomerId,
+          subscribed:           data.subscribed ?? false,
+          plan:                 data.plan                 ?? user.plan,
+          stripeCustomerId:     data.stripeCustomerId     ?? user.stripeCustomerId,
           stripeSubscriptionId: data.stripeSubscriptionId ?? user.stripeSubscriptionId,
         };
         localStorage.setItem("loggedInUser", JSON.stringify(updated));
 
-        const isActive = data.status === "active";
-        const isTrial  =
-          data.status === "trial" &&
-          data.trialEndsAt &&
-          new Date() < new Date(data.trialEndsAt);
-
-        setAuthState(isActive || isTrial ? "allowed" : "denied");
+        // A row in the subscriptions table means the user has paid / is on trial
+        setAuthState(data.subscribed === true ? "allowed" : "denied");
 
       } catch (err) {
         // API unreachable — fall back to whatever is in localStorage
         console.warn("[ProtectedRoute] Supabase check failed, using localStorage:", err.message);
         if (cancelled) return;
 
-        const isActive = user.subscriptionStatus === "active";
-        const isTrial  =
-          user.subscriptionStatus === "trial" &&
-          user.trialEndsAt &&
-          new Date() < new Date(user.trialEndsAt);
-
-        setAuthState(isActive || isTrial ? "allowed" : "denied");
+        setAuthState(user.subscribed === true ? "allowed" : "denied");
       }
     }
 
