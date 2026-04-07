@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     return json(res, 500, { error: `Price ID for plan "${plan}" not configured.` });
   }
 
-  const appUrl = (process.env.APP_URL || "https://tmp-builder.vercel.app").replace(/\/$/, "");
+  const appUrl = (process.env.APP_URL || "https://tmpbuilder.ca").replace(/\/$/, "");
 
   const stripe = new Stripe(secretKey, { apiVersion: "2025-04-30.basil" });
 

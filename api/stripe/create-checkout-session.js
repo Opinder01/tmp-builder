@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const appUrl = (process.env.APP_URL || "https://tmp-builder.vercel.app").replace(/\/$/, "");
+  const appUrl = (process.env.APP_URL || "https://tmpbuilder.ca").replace(/\/$/, "");
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
