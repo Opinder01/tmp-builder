@@ -2,6 +2,11 @@
   "buildCommand": "cd client && npm install && npm run build",
   "devCommand": "cd client && npm run dev -- --port $PORT",
   "outputDirectory": "client/dist",
+  "functions": {
+    "api/**": {
+      "maxDuration": 15
+    }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
