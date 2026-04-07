@@ -20,6 +20,10 @@ export default function ProtectedRoute({ children }) {
     async function verify() {
       let nextState = "denied"; // safe default — always overwritten below
 
+      // AbortController gives the API 8 seconds before we fall back to localStorage
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
         const raw = localStorage.getItem("loggedInUser");
         const user = raw ? JSON.parse(raw) : null;
@@ -29,28 +33,42 @@ export default function ProtectedRoute({ children }) {
           return; // finally still runs
         }
 
-        const res = await fetch(
-          `/api/subscription-status?email=${encodeURIComponent(user.email)}`
-        );
+        let data = null;
+        try {
+          const res = await fetch(
+            `/api/subscription-status?email=${encodeURIComponent(user.email)}`,
+            { signal: controller.signal }
+          );
+          if (res.ok) {
+            data = await res.json();
+          } else {
+            console.warn("[ProtectedRoute] API returned", res.status, "— using localStorage fallback");
+          }
+        } catch (fetchErr) {
+          console.warn("[ProtectedRoute] fetch failed or timed out:", fetchErr.message, "— using localStorage fallback");
+        }
 
-        if (!res.ok) throw new Error(`API ${res.status}`);
-        const data = await res.json();
-
-        // Persist fresh data back to localStorage
-        const updated = {
-          ...user,
-          subscribed:           data.subscribed ?? false,
-          plan:                 data.plan                 ?? user.plan,
-          stripeCustomerId:     data.stripeCustomerId     ?? user.stripeCustomerId,
-          stripeSubscriptionId: data.stripeSubscriptionId ?? user.stripeSubscriptionId,
-        };
-        localStorage.setItem("loggedInUser", JSON.stringify(updated));
-
-        nextState = data.subscribed === true ? "allowed" : "denied";
+        if (data !== null) {
+          // API succeeded — persist fresh data and use it as the source of truth
+          const updated = {
+            ...user,
+            subscribed:           data.subscribed ?? false,
+            plan:                 data.plan                 ?? user.plan,
+            stripeCustomerId:     data.stripeCustomerId     ?? user.stripeCustomerId,
+            stripeSubscriptionId: data.stripeSubscriptionId ?? user.stripeSubscriptionId,
+          };
+          localStorage.setItem("loggedInUser", JSON.stringify(updated));
+          console.log("[ProtectedRoute] API says subscribed:", data.subscribed, "→ setting authState");
+          nextState = data.subscribed === true ? "allowed" : "denied";
+        } else {
+          // API failed / timed out — fall back to localStorage
+          nextState = user?.subscribed === true ? "allowed" : "denied";
+          console.log("[ProtectedRoute] localStorage fallback → subscribed:", user?.subscribed, "→", nextState);
+        }
 
       } catch (err) {
-        // API unreachable or JSON parse failed — fall back to localStorage
-        console.warn("[ProtectedRoute] check failed, using localStorage fallback:", err.message);
+        // JSON.parse or other unexpected error
+        console.warn("[ProtectedRoute] unexpected error:", err.message);
         try {
           const raw = localStorage.getItem("loggedInUser");
           const user = raw ? JSON.parse(raw) : null;
@@ -59,6 +77,7 @@ export default function ProtectedRoute({ children }) {
           nextState = "denied";
         }
       } finally {
+        clearTimeout(timeoutId);
         // Always clears the "checking" state — no infinite loading possible
         if (!cancelled) setAuthState(nextState);
       }

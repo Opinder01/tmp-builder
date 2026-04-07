@@ -39,11 +39,9 @@ export default function Success() {
 
           const updated = {
             ...user,
-            // These three fields are what ProtectedRoute checks:
+            // subscribed: true is what ProtectedRoute checks
+            subscribed: true,
             plan: stripeData?.plan ?? "monthly",
-            subscriptionStatus: "trial",
-            trialEndsAt,
-            // Extra Stripe identifiers — useful for future webhook reconciliation
             stripeSessionId:       sessionId                    ?? undefined,
             stripeCustomerId:      stripeData?.customerId       ?? undefined,
             stripeSubscriptionId:  stripeData?.subscriptionId   ?? undefined,
