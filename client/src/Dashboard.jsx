@@ -105,6 +105,27 @@ useEffect(() => {
     nav("/editor");
   };
 
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError,   setPortalError]   = useState("");
+
+  const manageSubscription = async () => {
+    setPortalLoading(true);
+    setPortalError("");
+    try {
+      const res = await fetch("/api/stripe/billing-portal", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email: user?.email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not open billing portal.");
+      window.location.href = data.url;
+    } catch (err) {
+      setPortalError(err.message || "Something went wrong.");
+      setPortalLoading(false);
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem("loggedInUser");
     nav("/login", { replace: true });
@@ -426,9 +447,27 @@ useEffect(() => {
                   <div style={{ color: "#475569", lineHeight: 1.9 }}>
                     <div><b>User:</b> {user?.fullName || "—"}</div>
                     <div><b>Email:</b> {user?.email || "—"}</div>
+                    <div><b>Plan:</b> {user?.plan || "—"}</div>
                   </div>
 
-                  <div style={{ marginTop: 14 }}>
+                  <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button
+                      onClick={manageSubscription}
+                      disabled={portalLoading}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: 10,
+                        border: "1px solid #2563eb",
+                        background: "#2563eb",
+                        color: "#fff",
+                        fontWeight: 900,
+                        cursor: portalLoading ? "default" : "pointer",
+                        opacity: portalLoading ? 0.7 : 1,
+                      }}
+                    >
+                      {portalLoading ? "Opening…" : "Manage Subscription"}
+                    </button>
+
                     <button
                       onClick={logout}
                       style={{
@@ -443,6 +482,12 @@ useEffect(() => {
                       Logout
                     </button>
                   </div>
+
+                  {portalError && (
+                    <p style={{ color: "crimson", marginTop: 10, fontSize: 14 }}>
+                      {portalError}
+                    </p>
+                  )}
                 </div>
               )}
             </div>

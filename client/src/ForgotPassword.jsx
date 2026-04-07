@@ -25,7 +25,7 @@ export default function ForgotPassword() {
     return () => clearTimeout(timer);
   }, [redirectToLogin, navigate]);
 
-  function handleSendOtp(e) {
+  async function handleSendOtp(e) {
     e.preventDefault();
 
     setError("");
@@ -46,13 +46,23 @@ export default function ForgotPassword() {
       return;
     }
 
-    // Generate OTP (demo only)
+    // Generate OTP and send via backend email service
     const code = String(Math.floor(100000 + Math.random() * 900000));
-    setGeneratedOtp(code);
-    setOtpSent(true);
 
-    // Demo: show OTP on screen (later this will be sent by email)
-    setSuccess(`OTP sent ✅ (Demo OTP: ${code})`);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email, otp: code }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to send OTP.");
+      setGeneratedOtp(code);
+      setOtpSent(true);
+      setSuccess("A 6-digit code has been sent to your email address.");
+    } catch (err) {
+      setError(err.message || "Could not send OTP. Please try again.");
+    }
   }
 
   function handleResetPassword(e) {
