@@ -18,15 +18,17 @@ export default function ProtectedRoute({ children }) {
     let cancelled = false;
 
     async function verify() {
-      const raw = localStorage.getItem("loggedInUser");
-      const user = raw ? JSON.parse(raw) : null;
-
-      if (!user?.email) {
-        if (!cancelled) setAuthState("no-user");
-        return;
-      }
+      let nextState = "denied"; // safe default — always overwritten below
 
       try {
+        const raw = localStorage.getItem("loggedInUser");
+        const user = raw ? JSON.parse(raw) : null;
+
+        if (!user?.email) {
+          nextState = "no-user";
+          return; // finally still runs
+        }
+
         const res = await fetch(
           `/api/subscription-status?email=${encodeURIComponent(user.email)}`
         );
@@ -34,9 +36,7 @@ export default function ProtectedRoute({ children }) {
         if (!res.ok) throw new Error(`API ${res.status}`);
         const data = await res.json();
 
-        if (cancelled) return;
-
-        // Persist the fresh subscription data back into localStorage
+        // Persist fresh data back to localStorage
         const updated = {
           ...user,
           subscribed:           data.subscribed ?? false,
@@ -46,15 +46,21 @@ export default function ProtectedRoute({ children }) {
         };
         localStorage.setItem("loggedInUser", JSON.stringify(updated));
 
-        // A row in the subscriptions table means the user has paid / is on trial
-        setAuthState(data.subscribed === true ? "allowed" : "denied");
+        nextState = data.subscribed === true ? "allowed" : "denied";
 
       } catch (err) {
-        // API unreachable — fall back to whatever is in localStorage
-        console.warn("[ProtectedRoute] Supabase check failed, using localStorage:", err.message);
-        if (cancelled) return;
-
-        setAuthState(user.subscribed === true ? "allowed" : "denied");
+        // API unreachable or JSON parse failed — fall back to localStorage
+        console.warn("[ProtectedRoute] check failed, using localStorage fallback:", err.message);
+        try {
+          const raw = localStorage.getItem("loggedInUser");
+          const user = raw ? JSON.parse(raw) : null;
+          nextState = user?.subscribed === true ? "allowed" : "denied";
+        } catch {
+          nextState = "denied";
+        }
+      } finally {
+        // Always clears the "checking" state — no infinite loading possible
+        if (!cancelled) setAuthState(nextState);
       }
     }
 
