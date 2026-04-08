@@ -3,16 +3,16 @@ import { useNavigate } from "react-router-dom";
 import AuthLayout from "./AuthLayout";
 
 export default function Login() {
-  const [email, setEmail] = useState("");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError]       = useState("");
+  const [loading, setLoading]   = useState(false);
 
   const navigate = useNavigate();
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
 
-    // Basic validation
     if (!email || !password) {
       setError("Please enter email and password.");
       return;
@@ -38,12 +38,30 @@ export default function Login() {
       return;
     }
 
-    // Success login
     setError("");
+    setLoading(true);
 
-    // Save logged-in user (simple auth state)
-    localStorage.setItem("loggedInUser", JSON.stringify(user));
+    // Hydrate subscription status from the API so ProtectedRoute
+    // never bounces a subscribed user to /subscribe on first load.
+    let hydratedUser = { ...user };
+    try {
+      const res = await fetch(
+        `/api/subscription-status?email=${encodeURIComponent(user.email)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.subscribed === true) {
+          hydratedUser.subscribed           = true;
+          hydratedUser.plan                 = data.plan                 ?? user.plan;
+          hydratedUser.stripeCustomerId     = data.stripeCustomerId     ?? user.stripeCustomerId;
+          hydratedUser.stripeSubscriptionId = data.stripeSubscriptionId ?? user.stripeSubscriptionId;
+        }
+      }
+    } catch {
+      // Network error — ProtectedRoute will retry and fall back to localStorage
+    }
 
+    localStorage.setItem("loggedInUser", JSON.stringify(hydratedUser));
     navigate("/dashboard");
   }
 
@@ -55,6 +73,7 @@ export default function Login() {
           placeholder="Email Address"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          disabled={loading}
         />
         <br /><br />
 
@@ -63,6 +82,7 @@ export default function Login() {
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          disabled={loading}
         />
         <br /><br />
 
@@ -70,7 +90,9 @@ export default function Login() {
           <p style={{ color: "crimson", marginTop: 0 }}>{error}</p>
         )}
 
-        <button type="submit">Sign In</button>
+        <button type="submit" disabled={loading}>
+          {loading ? "Signing in…" : "Sign In"}
+        </button>
 
         <p style={{ marginTop: 16 }}>
           <a href="/forgot-password">Forgot Password?</a>
