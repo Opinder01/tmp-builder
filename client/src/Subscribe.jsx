@@ -44,11 +44,67 @@ export default function Subscribe() {
 
   // ── ALL hooks must come before any conditional return ──────────────────────
 
-  // Redirect already-subscribed users — empty deps = runs once on mount only.
+  // Redirect already-subscribed users.
+  // Checks localStorage first (instant), then calls the API to catch users
+  // whose localStorage doesn't have subscribed:true yet (e.g. after a fix
+  // deployed while they were already logged in).
   useEffect(() => {
+    // If localStorage already says subscribed, redirect immediately
     if (user?.subscribed === true) {
       navigate("/dashboard", { replace: true });
+      return;
     }
+
+    // Otherwise, ask the API — catches existing subscribers whose localStorage
+    // is stale (webhook was broken, just fixed, etc.)
+    if (!user?.email) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    fetch(`/api/subscription-status?email=${encodeURIComponent(user.email)}`, {
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.subscribed === true) {
+          // Update localStorage so ProtectedRoute passes on next navigation
+          const updated = {
+            ...user,
+            subscribed:           true,
+            plan:                 data.plan                 ?? user.plan,
+            stripeCustomerId:     data.stripeCustomerId     ?? user.stripeCustomerId,
+            stripeSubscriptionId: data.stripeSubscriptionId ?? user.stripeSubscriptionId,
+          };
+          localStorage.setItem("loggedInUser", JSON.stringify(updated));
+
+          // Also update users[] array so future logins work offline
+          try {
+            const allUsers = JSON.parse(localStorage.getItem("users") || "[]");
+            localStorage.setItem(
+              "users",
+              JSON.stringify(
+                allUsers.map((u) =>
+                  u.email?.toLowerCase() === user.email?.toLowerCase()
+                    ? { ...u, subscribed: true, plan: updated.plan }
+                    : u
+                )
+              )
+            );
+          } catch { /* non-critical */ }
+
+          navigate("/dashboard", { replace: true });
+        }
+      })
+      .catch(() => { /* ignore — user stays on subscribe page */ })
+      .finally(() => clearTimeout(timeoutId));
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [contactOpen,    setContactOpen]    = useState(false);
@@ -91,7 +147,7 @@ export default function Subscribe() {
     );
   }
 
-  // Guard: render nothing while the useEffect above performs the redirect.
+  // Guard: render nothing while a redirect is in flight.
   if (user?.subscribed === true) return null;
 
   const startTrial = async (plan) => {
