@@ -10059,8 +10059,28 @@ height: pendingPictureTool.hPx * elementScale,
                           borderRadius: 2,
                           boxSizing: "border-box",
                           background: "transparent",
+                          zIndex: 2,
+                          pointerEvents: "none",
                         }}
                       />
+                      {/* Aerial preview fills the blue box exactly */}
+                      {exportPreviewUrl && (
+                        <img
+                          src={exportPreviewUrl}
+                          alt="Aerial preview"
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            borderRadius: 2,
+                            zIndex: 1,
+                            pointerEvents: "none",
+                            display: "block",
+                          }}
+                        />
+                      )}
                       {handles.map((hnd) => (
                         <div
                           key={hnd.key}
@@ -10105,159 +10125,130 @@ height: pendingPictureTool.hPx * elementScale,
                     fontFamily: "system-ui, sans-serif", minWidth: 210,
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 2 }}>
-                    Resize the blue box, then choose:
-                  </div>
-
-                  {/* Option 1 — Map PDF (screenshot, as-is) */}
-                  <button
-                    onClick={() => {
-                      const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
-                      const rect = isD
-                        ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
-                        : boundsToRectPx(printAreaBounds);
-                      if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
-                      runExportToPdf(rect);
-                    }}
-                    style={{
-                      padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
-                      background: "#1e3a8a", color: "#fff", border: "none",
-                      borderRadius: 7, cursor: "pointer", lineHeight: 1.3,
-                    }}
-                  >
-                    🗺 Map PDF
-                    <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.8, marginTop: 3 }}>
-                      Export map exactly as shown on screen
-                    </div>
-                  </button>
-
-                  {/* Option 2 — Aerial PDF (Google satellite, with preview) */}
-                  <button
-                    disabled={exportPreviewLoading}
-                    onClick={loadExportPreview}
-                    style={{
-                      padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
-                      background: exportPreviewLoading ? "#9ca3af" : "#15803d", color: "#fff",
-                      border: "none", borderRadius: 7,
-                      cursor: exportPreviewLoading ? "not-allowed" : "pointer", lineHeight: 1.3,
-                    }}
-                  >
-                    {exportPreviewLoading ? (
-                      <>⏳ Loading aerial…</>
-                    ) : (
-                      <>
-                        🛰 Aerial PDF
-                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
-                          High-res Google Earth view · preview first
-                        </div>
-                      </>
-                    )}
-                  </button>
-
-                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                    <button
-                      onClick={resetExportAreaToViewport}
-                      style={{
-                        flex: 1, padding: "6px 8px", fontSize: 11,
-                        background: "#f3f4f6", color: "#374151",
-                        border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
-                      }}
-                    >Reset</button>
-                    <button
-                      onClick={cancelExportToPdf}
-                      style={{
-                        flex: 1, padding: "6px 8px", fontSize: 11,
-                        background: "#fff", color: "#6b7280",
-                        border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
-                      }}
-                    >Cancel</button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Aerial Preview Modal ── */}
-              {exportPreviewUrl && !exportCaptureInProgress && (() => {
-                const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
-                const rect = isD
-                  ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
-                  : boundsToRectPx(printAreaBounds ?? exportBoundsForPdfRef.current);
-                return (
-                  <div
-                    style={{
-                      position: "absolute", inset: 0, zIndex: 200000,
-                      background: "rgba(0,0,0,0.82)",
-                      display: "flex", flexDirection: "column",
-                      alignItems: "center", justifyContent: "center",
-                      fontFamily: "system-ui, sans-serif",
-                      padding: 24,
-                    }}
-                  >
-                    {/* Header */}
-                    <div style={{
-                      color: "#fff", fontSize: 18, fontWeight: 700,
-                      marginBottom: 6, display: "flex", alignItems: "center", gap: 8,
-                    }}>
-                      🛰 Aerial Preview
-                    </div>
-                    <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 16 }}>
-                      This is the Google Earth aerial view of your selected area
-                    </div>
-
-                    {/* Preview image */}
-                    <div style={{
-                      position: "relative",
-                      maxWidth: "80vw", maxHeight: "60vh",
-                      border: "3px solid #3b82f6",
-                      borderRadius: 8,
-                      overflow: "hidden",
-                      boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
-                    }}>
-                      <img
-                        src={exportPreviewUrl}
-                        alt="Aerial preview"
-                        style={{
-                          display: "block",
-                          maxWidth: "80vw", maxHeight: "60vh",
-                          objectFit: "contain",
-                        }}
-                      />
-                    </div>
-
-                    {/* Action buttons */}
-                    <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+                  {exportPreviewUrl ? (
+                    /* ── Aerial preview loaded: show generate / back ── */
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#15803d", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                        🛰 Aerial Preview Ready
+                      </div>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, lineHeight: 1.4 }}>
+                        Google Earth view is shown inside the blue box. Resize to adjust, then generate.
+                      </div>
                       <button
                         onClick={() => {
+                          const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
+                          const rect = isD
+                            ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
+                            : boundsToRectPx(printAreaBounds);
+                          if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
                           setExportPreviewUrl(null);
-                          if (!rect || rect.w < 10 || rect.h < 10) {
-                            alert("Export area is too small.");
-                            return;
-                          }
                           exportSelectionToPdf(null, rect);
                         }}
                         style={{
-                          padding: "11px 28px", fontSize: 14, fontWeight: 700,
-                          background: "#15803d", color: "#fff",
-                          border: "none", borderRadius: 8, cursor: "pointer",
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                          padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
+                          background: "#15803d", color: "#fff", border: "none",
+                          borderRadius: 7, cursor: "pointer", lineHeight: 1.3,
                         }}
                       >
                         ✅ Generate Aerial PDF
+                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
+                          Export high-res Google Earth PDF
+                        </div>
                       </button>
                       <button
                         onClick={() => setExportPreviewUrl(null)}
                         style={{
-                          padding: "11px 22px", fontSize: 14, fontWeight: 600,
-                          background: "rgba(255,255,255,0.12)", color: "#fff",
-                          border: "1px solid rgba(255,255,255,0.25)",
-                          borderRadius: 8, cursor: "pointer",
+                          padding: "8px 14px", fontSize: 12, fontWeight: 600, textAlign: "left",
+                          background: "#f3f4f6", color: "#374151",
+                          border: "1px solid #d1d5db", borderRadius: 7, cursor: "pointer",
                         }}
                       >
-                        ← Back
+                        ← Back to options
                       </button>
-                    </div>
-                  </div>
-                );
-              })()}
+                      <button
+                        onClick={cancelExportToPdf}
+                        style={{
+                          padding: "6px 8px", fontSize: 11,
+                          background: "#fff", color: "#6b7280",
+                          border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                        }}
+                      >Cancel</button>
+                    </>
+                  ) : (
+                    /* ── Default: two export options ── */
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 2 }}>
+                        Resize the blue box, then choose:
+                      </div>
+
+                      {/* Option 1 — Map PDF (screenshot, as-is) */}
+                      <button
+                        onClick={() => {
+                          const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
+                          const rect = isD
+                            ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
+                            : boundsToRectPx(printAreaBounds);
+                          if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
+                          runExportToPdf(rect);
+                        }}
+                        style={{
+                          padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
+                          background: "#1e3a8a", color: "#fff", border: "none",
+                          borderRadius: 7, cursor: "pointer", lineHeight: 1.3,
+                        }}
+                      >
+                        🗺 Map PDF
+                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.8, marginTop: 3 }}>
+                          Export map exactly as shown on screen
+                        </div>
+                      </button>
+
+                      {/* Option 2 — Aerial PDF (Google satellite, preview inside blue box) */}
+                      <button
+                        disabled={exportPreviewLoading}
+                        onClick={loadExportPreview}
+                        style={{
+                          padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
+                          background: exportPreviewLoading ? "#9ca3af" : "#15803d", color: "#fff",
+                          border: "none", borderRadius: 7,
+                          cursor: exportPreviewLoading ? "not-allowed" : "pointer", lineHeight: 1.3,
+                        }}
+                      >
+                        {exportPreviewLoading ? (
+                          <>⏳ Loading aerial view…</>
+                        ) : (
+                          <>
+                            🛰 Aerial PDF
+                            <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
+                              Preview Google Earth inside the blue box
+                            </div>
+                          </>
+                        )}
+                      </button>
+
+                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                        <button
+                          onClick={resetExportAreaToViewport}
+                          style={{
+                            flex: 1, padding: "6px 8px", fontSize: 11,
+                            background: "#f3f4f6", color: "#374151",
+                            border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                          }}
+                        >Reset</button>
+                        <button
+                          onClick={cancelExportToPdf}
+                          style={{
+                            flex: 1, padding: "6px 8px", fontSize: 11,
+                            background: "#fff", color: "#6b7280",
+                            border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                          }}
+                        >Cancel</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
           
         
             </div>
