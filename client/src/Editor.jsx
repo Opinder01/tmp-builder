@@ -2220,6 +2220,8 @@ const [exportIncludeNorthArrow, setExportIncludeNorthArrow] = useState(true);
 const [exportIncludeScaleBar, setExportIncludeScaleBar] = useState(true);
 const exportOverlayRef = useRef(null); // map wrapper ref
 const [exportCaptureInProgress, setExportCaptureInProgress] = useState(false);
+const [exportPreviewUrl, setExportPreviewUrl]       = useState(null);  // satellite preview data URL
+const [exportPreviewLoading, setExportPreviewLoading] = useState(false); // true while fetching preview
 const exportResizeRef = useRef(null);  // single source of truth during export resize: { handle, startClientX, startClientY, originalRect }
 // Synchronous ref for Generate PDF: always holds the final export bounds (avoids stale React state)
 const exportBoundsForPdfRef = useRef(null);
@@ -2672,6 +2674,8 @@ function cancelExportToPdf() {
   setExportLiveRect(null);
   setUiDrag(null);
   setExportCaptureInProgress(false);
+  setExportPreviewUrl(null);
+  setExportPreviewLoading(false);
 }
 
 async function exportViaScreenshot(selectedRectPx) {
@@ -2703,6 +2707,68 @@ async function exportViaScreenshot(selectedRectPx) {
     return null;
   } finally {
     setExportCaptureInProgress(false);
+  }
+}
+
+/** Fetch a single Static Maps image for the current export bounds and store it as the preview. */
+async function loadExportPreview() {
+  const bounds = exportBoundsForPdfRef.current ?? printAreaBounds;
+  if (!bounds) return;
+
+  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!key) { alert("Missing Google Maps API key."); return; }
+
+  setExportPreviewLoading(true);
+  setExportPreviewUrl(null);
+
+  try {
+    const nwLat = Math.max(bounds.nw.lat, bounds.se.lat);
+    const seLat = Math.min(bounds.nw.lat, bounds.se.lat);
+    const nwLng = Math.min(bounds.nw.lng, bounds.se.lng);
+
+    const wSz  = (z) => 256 * Math.pow(2, z);
+    const ll2wp = (lat, lng, z) => {
+      const s   = wSz(z);
+      const x   = ((lng + 180) / 360) * s;
+      const sin = Math.sin((lat * Math.PI) / 180);
+      const y   = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
+      return { x, y };
+    };
+    const wp2lat = (wy, z) => {
+      const t   = wy / wSz(z);
+      const k   = Math.exp((0.5 - t) * 4 * Math.PI);
+      const sin = (k - 1) / (k + 1);
+      return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
+    };
+
+    // Highest zoom where both dimensions fit in 640 px
+    let zoom = 21;
+    for (let z = 21; z >= 1; z--) {
+      const nw = ll2wp(nwLat, nwLng, z);
+      const se = ll2wp(seLat, bounds.se.lng, z);
+      if (Math.abs(se.x - nw.x) <= 640 && Math.abs(se.y - nw.y) <= 640) { zoom = z; break; }
+    }
+
+    const nwW = ll2wp(nwLat, nwLng, zoom);
+    const seW = ll2wp(seLat, bounds.se.lng, zoom);
+    const centerLat = wp2lat((nwW.y + seW.y) / 2, zoom);
+    const centerLng = (((nwW.x + seW.x) / 2) / wSz(zoom)) * 360 - 180;
+
+    const mt = (mapLayer === "hybrid_clean" ? "hybrid" : mapLayer) || "satellite";
+    const maptype = ["satellite","hybrid","roadmap","terrain"].includes(mt) ? mt : "satellite";
+
+    const url =
+      "https://maps.googleapis.com/maps/api/staticmap" +
+      `?maptype=${maptype}&format=png&scale=2&size=640x640` +
+      `&center=${centerLat.toFixed(7)},${centerLng.toFixed(7)}` +
+      `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
+
+    const dataUrl = await fetchStaticMapAsDataUrl(url);
+    setExportPreviewUrl(dataUrl);
+  } catch (e) {
+    alert("Could not load satellite preview:\n" + (e instanceof Error ? e.message : String(e)));
+  } finally {
+    setExportPreviewLoading(false);
   }
 }
 
@@ -9985,11 +10051,48 @@ height: pendingPictureTool.hPx * elementScale,
                         }
                       }}
                     >
+                      {/* Satellite preview image fills the box */}
+                      {exportPreviewUrl && (
+                        <img
+                          src={exportPreviewUrl}
+                          alt="Satellite preview"
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            objectPosition: "center",
+                            pointerEvents: "none",
+                            borderRadius: 2,
+                          }}
+                        />
+                      )}
+
+                      {/* Loading spinner while fetching preview */}
+                      {exportPreviewLoading && (
+                        <div style={{
+                          position: "absolute", inset: 0,
+                          display: "flex", flexDirection: "column",
+                          alignItems: "center", justifyContent: "center",
+                          background: "rgba(0,0,0,0.55)",
+                          color: "#fff", fontSize: 14, fontWeight: 600,
+                          gap: 10, borderRadius: 2, pointerEvents: "none",
+                        }}>
+                          <div style={{
+                            width: 32, height: 32, border: "3px solid rgba(255,255,255,0.3)",
+                            borderTop: "3px solid #fff", borderRadius: "50%",
+                            animation: "spin 0.8s linear infinite",
+                          }} />
+                          Loading satellite view…
+                        </div>
+                      )}
+
                       <div
                         style={{
                           position: "absolute",
                           inset: 0,
-                          border: "2px solid #2563EB",
+                          border: `2px solid ${exportPreviewUrl ? "#10b981" : "#2563EB"}`,
                           borderRadius: 2,
                           boxSizing: "border-box",
                           background: "transparent",
@@ -10036,71 +10139,152 @@ height: pendingPictureTool.hPx * elementScale,
                     top: 16,
                     zIndex: 100000,
                     display: "flex",
-                    gap: 8,
+                    flexDirection: "column",
+                    gap: 10,
                     background: "#fff",
-                    borderRadius: 8,
-                    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                    borderRadius: 10,
+                    boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
                     border: "1px solid #e5e7eb",
-                    padding: 12,
+                    padding: 14,
                     fontFamily: "system-ui, sans-serif",
+                    minWidth: 220,
                   }}
                 >
-                  <button
-                    disabled={!printAreaBounds}
-                    onClick={() => {
-                      // selectedRectPx = exact area the user selected (primary source of truth)
-                      const isExportDragging = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
-                      const selectedRectPx = isExportDragging
-                        ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
-                        : boundsToRectPx(printAreaBounds);
-                      if (!selectedRectPx || selectedRectPx.w < 10 || selectedRectPx.h < 10) {
-                        alert("Export area is too small. Please resize the blue box.");
-                        return;
-                      }
-                      // Try screenshot capture first (WYSIWYG); fallback to Static Map + overlay drawing
-                      runExportToPdf(selectedRectPx);
-                    }}
-                    style={{
-                      padding: "8px 16px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      background: printAreaBounds ? "#2563EB" : "#9CA3AF",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: printAreaBounds ? "pointer" : "not-allowed",
-                    }}
-                  >
-                    Generate PDF
-                  </button>
-                  <button
-                    onClick={resetExportAreaToViewport}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: 12,
-                      background: "#f3f4f6",
-                      color: "#374151",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Reset Area
-                  </button>
-                  <button
-                    onClick={cancelExportToPdf}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: 12,
-                      background: "#fff",
-                      color: "#6b7280",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
+                  {/* ── Step 1: no preview yet ── */}
+                  {!exportPreviewUrl && !exportPreviewLoading && (
+                    <>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 2 }}>
+                        📍 Adjust the blue box, then preview
+                      </div>
+                      <button
+                        disabled={!printAreaBounds}
+                        onClick={loadExportPreview}
+                        style={{
+                          padding: "9px 16px", fontSize: 13, fontWeight: 700,
+                          background: "#2563EB", color: "#fff",
+                          border: "none", borderRadius: 7, cursor: "pointer",
+                        }}
+                      >
+                        🛰 Preview Satellite View
+                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          onClick={resetExportAreaToViewport}
+                          style={{
+                            flex: 1, padding: "7px 10px", fontSize: 12,
+                            background: "#f3f4f6", color: "#374151",
+                            border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                          }}
+                        >
+                          Reset Area
+                        </button>
+                        <button
+                          onClick={cancelExportToPdf}
+                          style={{
+                            flex: 1, padding: "7px 10px", fontSize: 12,
+                            background: "#fff", color: "#6b7280",
+                            border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Loading ── */}
+                  {exportPreviewLoading && (
+                    <div style={{ fontSize: 13, color: "#6b7280", textAlign: "center", padding: "8px 0" }}>
+                      Fetching satellite image…
+                    </div>
+                  )}
+
+                  {/* ── Step 2: preview loaded — choose export type ── */}
+                  {exportPreviewUrl && !exportPreviewLoading && (
+                    <>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 2 }}>
+                        ✅ Satellite preview loaded
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, lineHeight: 1.4 }}>
+                        Choose how to export:
+                      </div>
+
+                      {/* Option A — high-res satellite PDF */}
+                      <button
+                        onClick={() => {
+                          const isExportDragging = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
+                          const selectedRectPx = isExportDragging
+                            ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
+                            : boundsToRectPx(printAreaBounds);
+                          if (!selectedRectPx || selectedRectPx.w < 10 || selectedRectPx.h < 10) {
+                            alert("Export area is too small.");
+                            return;
+                          }
+                          exportSelectionToPdf(null, selectedRectPx);
+                        }}
+                        style={{
+                          padding: "9px 14px", fontSize: 12, fontWeight: 700,
+                          background: "#2563EB", color: "#fff",
+                          border: "none", borderRadius: 7, cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        🛰 Export Satellite PDF
+                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 2 }}>
+                          High-res Google aerial · selected area only
+                        </div>
+                      </button>
+
+                      {/* Option B — full screen screenshot PDF */}
+                      <button
+                        onClick={() => {
+                          const isExportDragging = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
+                          const selectedRectPx = isExportDragging
+                            ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
+                            : boundsToRectPx(printAreaBounds);
+                          if (!selectedRectPx || selectedRectPx.w < 10 || selectedRectPx.h < 10) {
+                            alert("Export area is too small.");
+                            return;
+                          }
+                          runExportToPdf(selectedRectPx);
+                        }}
+                        style={{
+                          padding: "9px 14px", fontSize: 12, fontWeight: 600,
+                          background: "#f0fdf4", color: "#166534",
+                          border: "1px solid #86efac", borderRadius: 7, cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        🗺 Export Full Map PDF
+                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.8, marginTop: 2 }}>
+                          Entire map as currently shown on screen
+                        </div>
+                      </button>
+
+                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                        <button
+                          onClick={() => { setExportPreviewUrl(null); setExportPreviewLoading(false); }}
+                          style={{
+                            flex: 1, padding: "7px 10px", fontSize: 12,
+                            background: "#f3f4f6", color: "#374151",
+                            border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                          }}
+                        >
+                          ← Retake
+                        </button>
+                        <button
+                          onClick={cancelExportToPdf}
+                          style={{
+                            flex: 1, padding: "7px 10px", fontSize: 12,
+                            background: "#fff", color: "#6b7280",
+                            border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
           
