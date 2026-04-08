@@ -31,14 +31,14 @@ async function saveSubscription(email, record) {
     return;
   }
 
+  // Only write the 4 columns that exist in the subscriptions table.
+  // Do NOT include status / trial_ends_at / updated_at — those columns
+  // don't exist and will cause the upsert to fail silently.
   const row = {
-    email:                   email.toLowerCase(),
-    stripe_customer_id:      record.customerId        ?? undefined,
-    stripe_subscription_id:  record.subscriptionId    ?? undefined,
-    plan:                    record.plan               ?? undefined,
-    status:                  record.subscriptionStatus ?? undefined,
-    trial_ends_at:           record.trialEndsAt        ?? undefined,
-    updated_at:              new Date().toISOString(),
+    email:                  email.toLowerCase(),
+    stripe_customer_id:     record.customerId     ?? undefined,
+    stripe_subscription_id: record.subscriptionId ?? undefined,
+    plan:                   record.plan            ?? undefined,
   };
 
   // Remove undefined keys so we don't overwrite existing good data with null
@@ -135,7 +135,7 @@ export default async function handler(req, res) {
         catch (err) { console.warn("[webhook] Could not expand subscription:", err.message); }
       }
 
-      const email        = session.customer_email ?? sub?.items?.data?.[0]?.metadata?.email ?? "";
+      const email        = session.customer_details?.email ?? session.customer_email ?? "";
       const customerId   = typeof session.customer === "string" ? session.customer : session.customer?.id ?? "";
       const subscriptionId = typeof sub === "object" ? sub?.id : sub ?? "";
       const priceId      = sub?.items?.data?.[0]?.price?.id ?? null;
