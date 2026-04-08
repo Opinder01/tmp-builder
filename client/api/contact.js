@@ -63,16 +63,25 @@ export default async function handler(req, res) {
     `Message:\n${msg}\n`;
 
   try {
-    await resend.emails.send({
+    const result = await resend.emails.send({
       from: fromEmail,
-      to: toEmail,
-      replyTo: em,
-      subject: emailSubject,
-      text: bodyText,
+      to:   [toEmail],
+      reply_to: em,
+      subject:  emailSubject,
+      text:     bodyText,
     });
+
+    // Resend v2+ returns { data, error } instead of throwing
+    if (result.error) {
+      console.error("[contact] Resend API error:", JSON.stringify(result.error));
+      return json(res, 500, { error: "Failed to send email: " + (result.error.message || JSON.stringify(result.error)) });
+    }
+
+    console.log("[contact] ✅ email sent, id:", result.data?.id);
     return json(res, 200, { ok: true });
   } catch (e) {
-    return json(res, 500, { error: "Failed to send email." });
+    console.error("[contact] unexpected error:", e.message);
+    return json(res, 500, { error: "Failed to send email: " + e.message });
   }
 }
 
