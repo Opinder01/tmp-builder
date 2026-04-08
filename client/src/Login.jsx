@@ -55,6 +55,20 @@ export default function Login() {
           hydratedUser.plan                 = data.plan                 ?? user.plan;
           hydratedUser.stripeCustomerId     = data.stripeCustomerId     ?? user.stripeCustomerId;
           hydratedUser.stripeSubscriptionId = data.stripeSubscriptionId ?? user.stripeSubscriptionId;
+
+          // Persist into users array so future logins start with subscribed: true
+          // even if the API is temporarily unavailable.
+          try {
+            const allUsers = JSON.parse(localStorage.getItem("users") || "[]");
+            const updatedUsers = allUsers.map((u) =>
+              u.email?.toLowerCase() === hydratedUser.email?.toLowerCase()
+                ? { ...u, subscribed: true, plan: hydratedUser.plan }
+                : u
+            );
+            localStorage.setItem("users", JSON.stringify(updatedUsers));
+          } catch {
+            // non-critical
+          }
         }
       }
     } catch {

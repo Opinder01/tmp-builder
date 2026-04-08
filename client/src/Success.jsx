@@ -49,6 +49,21 @@ export default function Success() {
           };
 
           localStorage.setItem("loggedInUser", JSON.stringify(updated));
+
+          // Also persist subscribed: true into the users array so the
+          // subscription survives logout → login without needing the API.
+          try {
+            const allUsers = JSON.parse(localStorage.getItem("users") || "[]");
+            const updatedUsers = allUsers.map((u) =>
+              u.email?.toLowerCase() === user.email?.toLowerCase()
+                ? { ...u, subscribed: true, plan: updated.plan }
+                : u
+            );
+            localStorage.setItem("users", JSON.stringify(updatedUsers));
+          } catch {
+            // non-critical — ProtectedRoute will fall back to the API
+          }
+
           console.log(
             "[Success] User activated – plan:", updated.plan,
             "| trial ends:", updated.trialEndsAt
