@@ -2,13 +2,6 @@
   "buildCommand": "cd client && npm install && npm run build",
   "devCommand": "cd client && npm run dev -- --port $PORT",
   "outputDirectory": "client/dist",
-  "functions": {
-    "api/send-otp.js":                       { "maxDuration": 15 },
-    "api/subscription-status.js":            { "maxDuration": 15 },
-    "api/stripe/webhook.js":                 { "maxDuration": 15 },
-    "api/stripe/create-checkout-session.js": { "maxDuration": 15 },
-    "api/stripe/billing-portal.js":          { "maxDuration": 15 }
-  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
