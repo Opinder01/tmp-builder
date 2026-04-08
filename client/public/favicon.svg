@@ -1,41 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e3a8a"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
-    <linearGradient id="road" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#f1f5f9"/>
-      <stop offset="100%" stop-color="#cbd5e1"/>
+      <stop offset="0%" stop-color="#cc0000"/>
+      <stop offset="100%" stop-color="#990000"/>
     </linearGradient>
   </defs>
 
-  <!-- Background rounded square -->
-  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- Canadian red rounded square background -->
+  <rect width="64" height="64" rx="13" fill="url(#bg)"/>
 
-  <!-- Horizontal road -->
-  <rect x="5" y="21" width="54" height="14" rx="3.5" fill="url(#road)"/>
+  <!-- White maple leaf + stem -->
+  <path
+    fill="white"
+    d="
+      M32,9
+      L30,18 L22,15 L25.5,22.5
+      L13,25 L19.5,30.5
+      L9,41 L21,38.5
+      L19.5,49 L32,44
+      L44.5,49 L43,38.5
+      L55,41 L44.5,30.5
+      L51,25 L38.5,22.5
+      L42,15 L34,18
+      Z
+      M30,44 L30,57 L34,57 L34,44 Z
+    "
+  />
 
-  <!-- Vertical road going down (T-shape) -->
-  <rect x="25" y="21" width="14" height="36" rx="3.5" fill="url(#road)"/>
+  <!-- Dark road strip across the bottom of the leaf area -->
+  <rect x="8" y="50" width="48" height="7" rx="3.5" fill="#1e293b"/>
 
-  <!-- Yellow dashes on horizontal road (left side) -->
-  <rect x="8"  y="27" width="7" height="2" rx="1" fill="#fbbf24"/>
-  <rect x="18" y="27" width="3" height="2" rx="1" fill="#fbbf24"/>
-
-  <!-- Yellow dashes on horizontal road (right side) -->
-  <rect x="43" y="27" width="3" height="2" rx="1" fill="#fbbf24"/>
-  <rect x="49" y="27" width="7" height="2" rx="1" fill="#fbbf24"/>
-
-  <!-- Yellow dashes on vertical road -->
-  <rect x="31" y="40" width="2" height="5" rx="1" fill="#fbbf24"/>
-  <rect x="31" y="49" width="2" height="5" rx="1" fill="#fbbf24"/>
-
-  <!-- Orange glowing marker dot at intersection -->
-  <circle cx="32" cy="28" r="6" fill="#f97316" opacity="0.25"/>
-  <circle cx="32" cy="28" r="4" fill="#f97316"/>
-  <circle cx="32" cy="28" r="2" fill="#fff7ed"/>
-
-  <!-- Small white highlight top-left for depth -->
-  <rect x="8" y="6" width="18" height="3" rx="1.5" fill="white" opacity="0.07"/>
+  <!-- Yellow dashed centre line on road -->
+  <rect x="11" y="52.5" width="7"  height="2" rx="1" fill="#fbbf24"/>
+  <rect x="22" y="52.5" width="4"  height="2" rx="1" fill="#fbbf24"/>
+  <rect x="30" y="52.5" width="4"  height="2" rx="1" fill="#fbbf24"/>
+  <rect x="38" y="52.5" width="4"  height="2" rx="1" fill="#fbbf24"/>
+  <rect x="46" y="52.5" width="7"  height="2" rx="1" fill="#fbbf24"/>
 </svg>
