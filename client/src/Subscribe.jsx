@@ -160,7 +160,7 @@ export default function Subscribe() {
       const res = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: plan.id }),
+        body: JSON.stringify({ plan: plan.id, email: user?.email }),
       });
 
       console.log("[Stripe] Response status:", res.status, res.ok ? "OK" : "ERROR");

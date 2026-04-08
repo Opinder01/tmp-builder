@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const { plan } = req.body || {};
+  const { plan, email } = req.body || {};
   if (!plan || !["monthly", "yearly"].includes(plan)) {
     return json(res, 400, { error: 'Invalid plan. Must be "monthly" or "yearly".' });
   }
@@ -54,13 +54,21 @@ export default async function handler(req, res) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
   try {
-    const session = await stripe.checkout.sessions.create({
+    const sessionParams = {
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: { trial_period_days: 7 },
       success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/subscribe`,
-    });
+    };
+
+    // Pre-fill and lock the email to the logged-in account so the webhook
+    // always saves the same email that the user signed up with.
+    if (email && typeof email === "string" && email.includes("@")) {
+      sessionParams.customer_email = email.toLowerCase().trim();
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
     return json(res, 200, { url: session.url });
   } catch (err) {
