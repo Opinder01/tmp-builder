@@ -2864,40 +2864,15 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
   const STATIC_MAP_MAX = 640;
   const GOOGLE_SCALE = 2;
-  const EXPORT_SCALE = 3;
 
-  let zoom = 21;
-  let boundsPxW = 0;
-  let boundsPxH = 0;
-  for (let z = 21; z >= 1; z--) {
-    const nw = latLngToWorldPx(bounds.nw.lat, bounds.nw.lng, z);
-    const se = latLngToWorldPx(bounds.se.lat, bounds.se.lng, z);
-    const w = Math.abs(se.x - nw.x);
-    const h = Math.abs(se.y - nw.y);
-    if (w <= STATIC_MAP_MAX && h <= STATIC_MAP_MAX) {
-      zoom = z;
-      boundsPxW = w;
-      boundsPxH = h;
-      break;
-    }
-    zoom = z;
-    boundsPxW = w;
-    boundsPxH = h;
-  }
+  // ── Tiled high-resolution map fetch ──────────────────────────────────────────
+  // Instead of dropping zoom until the whole area fits in one 640px tile, we keep
+  // the HIGHEST zoom and fetch a grid of up to 3×3 tiles in parallel.
+  // Each tile: 640×640 CSS px → 1280×1280 real px (scale=2).
+  // 3×3 grid → up to 3840×3840 px canvas — far sharper than the old single tile.
+  const MAX_TILE_COLS = 3;
+  const MAX_TILE_ROWS = 3;
 
-  const nwWorld = latLngToWorldPx(bounds.nw.lat, bounds.nw.lng, zoom);
-  const seWorld = latLngToWorldPx(bounds.se.lat, bounds.se.lng, zoom);
-
-  const imgW = Math.max(1, Math.round(boundsPxW));
-  const imgH = Math.max(1, Math.round(boundsPxH));
-
-  // Over-fetch: request max size (640x640), then crop to exact selected bounds.
-  // This eliminates Google tile-alignment drift and ensures NW/SE exact mapping.
-  const reqW = Math.min(STATIC_MAP_MAX, Math.max(imgW, 256));
-  const reqH = Math.min(STATIC_MAP_MAX, Math.max(imgH, 256));
-
-  const centerWorldX = (nwWorld.x + seWorld.x) / 2;
-  const centerWorldY = (nwWorld.y + seWorld.y) / 2;
   const worldYToLat = (worldY, z) => {
     const s = worldSize(z);
     const t = worldY / s;
@@ -2905,10 +2880,38 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const sin = (k - 1) / (k + 1);
     return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
   };
-  const selCenter = {
-    lat: worldYToLat(centerWorldY, zoom),
-    lng: (centerWorldX / worldSize(zoom)) * 360 - 180,
-  };
+
+  // Start from the current map zoom for maximum satellite detail.
+  const mapCurrentZoom = Math.min(21, map.getZoom?.() ?? 21);
+  let zoom = mapCurrentZoom;
+  let nwWorld, seWorld, boundsPxW, boundsPxH;
+
+  for (let z = mapCurrentZoom; z >= 1; z--) {
+    const nw = latLngToWorldPx(bounds.nw.lat, bounds.nw.lng, z);
+    const se = latLngToWorldPx(bounds.se.lat, bounds.se.lng, z);
+    const w = Math.abs(se.x - nw.x);
+    const h = Math.abs(se.y - nw.y);
+    if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_TILE_COLS &&
+        Math.ceil(h / STATIC_MAP_MAX) <= MAX_TILE_ROWS) {
+      zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
+      break;
+    }
+    zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
+  }
+
+  const imgW = Math.max(1, Math.round(boundsPxW));
+  const imgH = Math.max(1, Math.round(boundsPxH));
+
+  const numCols = Math.min(MAX_TILE_COLS, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
+  const numRows = Math.min(MAX_TILE_ROWS, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
+
+  // World-pixel dimensions of each tile slot
+  const tileWorldW = boundsPxW / numCols;
+  const tileWorldH = boundsPxH / numRows;
+
+  // CSS-px request size per tile (slight over-fetch so center-crop eliminates edge drift)
+  const tileReqW = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldW) + 4);
+  const tileReqH = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldH) + 4);
 
   const toPlainLL = (p) => {
     if (!p) return null;
@@ -2932,27 +2935,63 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
   const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
   const maptype = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw) ? maptypeRaw : "roadmap";
-  // Use only center+zoom+size. The visible param can override and cause wrong area/shifted crop.
-  const staticUrl =
-    "https://maps.googleapis.com/maps/api/staticmap" +
-    `?maptype=${maptype}` +
-    `&format=png` +
-    `&scale=${GOOGLE_SCALE}` +
-    `&size=${reqW}x${reqH}` +
-    `&center=${selCenter.lat},${selCenter.lng}` +
-    `&zoom=${zoom}` +
-    `&key=${encodeURIComponent(key)}`;
 
-  let baseImg;
+  // Build one URL per tile, centred on its geographic midpoint
+  const tileFetches = [];
+  for (let row = 0; row < numRows; row++) {
+    for (let col = 0; col < numCols; col++) {
+      const cx = nwWorld.x + (col + 0.5) * tileWorldW;
+      const cy = nwWorld.y + (row + 0.5) * tileWorldH;
+      const lat = worldYToLat(cy, zoom);
+      const lng = (cx / worldSize(zoom)) * 360 - 180;
+      const url =
+        "https://maps.googleapis.com/maps/api/staticmap" +
+        `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
+        `&size=${tileReqW}x${tileReqH}` +
+        `&center=${lat.toFixed(7)},${lng.toFixed(7)}` +
+        `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
+      tileFetches.push({ row, col, url });
+    }
+  }
+
+  // Output canvas: imgW × imgH world-px, each rendered at GOOGLE_SCALE real px
+  const outW = Math.max(1, Math.round(imgW * GOOGLE_SCALE));
+  const outH = Math.max(1, Math.round(imgH * GOOGLE_SCALE));
+
+  const canvas = document.createElement("canvas");
+  canvas.width  = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled  = true;
+  ctx.imageSmoothingQuality  = "high";
+
+  // Fetch all tiles in parallel then stitch them onto the canvas
   try {
-    const baseDataUrl = await fetchStaticMapAsDataUrl(staticUrl);
-    baseImg = await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("Failed to load map image."));
-      img.src = baseDataUrl;
-    });
+    const tileResults = await Promise.all(
+      tileFetches.map(({ row, col, url }) =>
+        fetchStaticMapAsDataUrl(url).then(
+          (dataUrl) =>
+            new Promise((resolve, reject) => {
+              const img = new Image();
+              img.crossOrigin = "anonymous";
+              img.onload  = () => resolve({ row, col, img });
+              img.onerror = () => reject(new Error(`Map tile (${col},${row}) failed to load`));
+              img.src = dataUrl;
+            })
+        )
+      )
+    );
+
+    for (const { row, col, img } of tileResults) {
+      // Center-crop: the over-fetched pixels on each side = (tileReqW - tileWorldW) / 2
+      const srcX = Math.round(((tileReqW  - tileWorldW) / 2) * GOOGLE_SCALE);
+      const srcY = Math.round(((tileReqH  - tileWorldH) / 2) * GOOGLE_SCALE);
+      const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
+      const srcH = Math.round(tileWorldH * GOOGLE_SCALE);
+      const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
+      const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     alert("Export failed — could not load map image:\n\n" + msg + "\n\nFix the issue and try again. Do not export without a proper map.");
@@ -2960,34 +2999,12 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     return;
   }
 
-  const fetchedW = baseImg.naturalWidth;
-  const fetchedH = baseImg.naturalHeight;
-  let cropSrcX = Math.round(((reqW - imgW) / 2) * (fetchedW / reqW));
-  let cropSrcY = Math.round(((reqH - imgH) / 2) * (fetchedH / reqH));
-  let cropSrcW = Math.round(imgW * (fetchedW / reqW));
-  let cropSrcH = Math.round(imgH * (fetchedH / reqH));
-  cropSrcX = Math.max(0, Math.min(fetchedW - 1, cropSrcX));
-  cropSrcY = Math.max(0, Math.min(fetchedH - 1, cropSrcY));
-  cropSrcW = Math.max(1, Math.min(fetchedW - cropSrcX, cropSrcW));
-  cropSrcH = Math.max(1, Math.min(fetchedH - cropSrcY, cropSrcH));
-
-  const outW = Math.max(1, cropSrcW * EXPORT_SCALE);
-  const outH = Math.max(1, cropSrcH * EXPORT_SCALE);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = outW;
-  canvas.height = outH;
-  const ctx = canvas.getContext("2d");
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(baseImg, cropSrcX, cropSrcY, cropSrcW, cropSrcH, 0, 0, outW, outH);
-
-  // subtle white wash so overlays read cleanly over aerial
+  // Subtle white wash so overlays read cleanly over the aerial imagery
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(0, 0, outW, outH);
 
-  const scaleToCanvas = (fetchedW / reqW) * EXPORT_SCALE;
+  // scaleToCanvas maps project() world-px coords → canvas px coords
+  const scaleToCanvas = outW / imgW; // = GOOGLE_SCALE = 2
   const scaleFactor = 1;
   // Use map's current zoom for overlay sizing so exported elements match what user sees
   const editorZoom = map.getZoom?.() ?? zoom;
