@@ -2711,7 +2711,18 @@ async function exportViaScreenshot(selectedRectPx) {
   }
 }
 
-/** Fetch a single Static Maps image for the current export bounds and store it as the preview. */
+/**
+ * Fetch a satellite preview image whose geographic coverage matches the selected
+ * blue-box bounds exactly.
+ *
+ * KEY FIX: the Static Maps API renders an image whose physical extent is
+ *   width  = imgCssW  CSS pixels   (= worldW world-px at the chosen zoom)
+ *   height = imgCssH  CSS pixels   (= worldH world-px at the chosen zoom)
+ * centred on the bounds centre.  When imgCssW/H equal the world-pixel
+ * dimensions of the bounds, the image left/right/top/bottom edges land
+ * precisely on the NW/SE corners of the selection — no extra padding,
+ * no cropping, correct aspect ratio.
+ */
 async function loadExportPreview() {
   const bounds = exportBoundsForPdfRef.current ?? printAreaBounds;
   if (!bounds) return;
@@ -2723,46 +2734,61 @@ async function loadExportPreview() {
   setExportPreviewUrl(null);
 
   try {
-    const nwLat = Math.max(bounds.nw.lat, bounds.se.lat);
-    const seLat = Math.min(bounds.nw.lat, bounds.se.lat);
-    const nwLng = Math.min(bounds.nw.lng, bounds.se.lng);
+    // Normalise: nLat >= sLat, wLng <= eLng
+    const nLat = Math.max(bounds.nw.lat, bounds.se.lat);
+    const sLat = Math.min(bounds.nw.lat, bounds.se.lat);
+    const wLng = Math.min(bounds.nw.lng, bounds.se.lng);
+    const eLng = Math.max(bounds.nw.lng, bounds.se.lng);
 
-    const wSz  = (z) => 256 * Math.pow(2, z);
-    const ll2wp = (lat, lng, z) => {
-      const s   = wSz(z);
+    // Geographic centre of the selection
+    const centerLat = (nLat + sLat) / 2;
+    const centerLng = (wLng + eLng) / 2;
+
+    // Web-Mercator helpers (same maths used throughout the rest of the export pipeline)
+    const worldSize     = (z) => 256 * Math.pow(2, z);
+    const latLngToWorld = (lat, lng, z) => {
+      const s   = worldSize(z);
       const x   = ((lng + 180) / 360) * s;
       const sin = Math.sin((lat * Math.PI) / 180);
       const y   = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
       return { x, y };
     };
-    const wp2lat = (wy, z) => {
-      const t   = wy / wSz(z);
-      const k   = Math.exp((0.5 - t) * 4 * Math.PI);
-      const sin = (k - 1) / (k + 1);
-      return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
-    };
 
-    // Highest zoom where both dimensions fit in 640 px
-    let zoom = 21;
+    // Find the highest zoom where both dimensions fit within 640 CSS px
+    // (Static Maps hard limit is 640×640 with scale=2 → 1 280×1 280 real px)
+    let zoom = 21, worldW = 1, worldH = 1;
     for (let z = 21; z >= 1; z--) {
-      const nw = ll2wp(nwLat, nwLng, z);
-      const se = ll2wp(seLat, bounds.se.lng, z);
-      if (Math.abs(se.x - nw.x) <= 640 && Math.abs(se.y - nw.y) <= 640) { zoom = z; break; }
+      const nwW = latLngToWorld(nLat, wLng, z);
+      const seW = latLngToWorld(sLat, eLng, z);
+      const w   = seW.x - nwW.x;
+      const h   = seW.y - nwW.y;
+      if (w > 0 && h > 0 && w <= 640 && h <= 640) {
+        zoom = z; worldW = w; worldH = h;
+        break;
+      }
     }
 
-    const nwW = ll2wp(nwLat, nwLng, zoom);
-    const seW = ll2wp(seLat, bounds.se.lng, zoom);
-    const centerLat = wp2lat((nwW.y + seW.y) / 2, zoom);
-    const centerLng = (((nwW.x + seW.x) / 2) / wSz(zoom)) * 360 - 180;
+    // Request an image whose CSS-pixel dimensions equal the world-pixel dimensions
+    // of the selected area.  This guarantees the image covers EXACTLY the blue box.
+    const imgCssW = Math.max(1, Math.round(worldW));
+    const imgCssH = Math.max(1, Math.round(worldH));
 
-    const mt = (mapLayer === "hybrid_clean" ? "hybrid" : mapLayer) || "satellite";
-    const maptype = ["satellite","hybrid","roadmap","terrain"].includes(mt) ? mt : "satellite";
-
+    // Always satellite for the aerial view
     const url =
       "https://maps.googleapis.com/maps/api/staticmap" +
-      `?maptype=${maptype}&format=png&scale=2&size=640x640` +
+      `?maptype=satellite&format=png&scale=2` +
+      `&size=${imgCssW}x${imgCssH}` +
       `&center=${centerLat.toFixed(7)},${centerLng.toFixed(7)}` +
       `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
+
+    // ── Debug: open browser console to verify alignment ──────────────────────
+    console.log("[Aerial Preview] NE:", nLat.toFixed(7), eLng.toFixed(7),
+                "  SW:", sLat.toFixed(7), wLng.toFixed(7));
+    console.log("[Aerial Preview] center:", centerLat.toFixed(7), centerLng.toFixed(7));
+    console.log("[Aerial Preview] zoom:", zoom,
+                "  image:", imgCssW, "×", imgCssH, "CSS px  (", imgCssW*2, "×", imgCssH*2, "real px)");
+    console.log("[Aerial Preview] URL:", url);
+    // ─────────────────────────────────────────────────────────────────────────
 
     const dataUrl = await fetchStaticMapAsDataUrl(url);
     setExportPreviewUrl(dataUrl);
@@ -10064,7 +10090,11 @@ height: pendingPictureTool.hPx * elementScale,
                           pointerEvents: "none",
                         }}
                       />
-                      {/* Aerial preview fills the blue box exactly */}
+                      {/* Aerial preview fills the blue box exactly.
+                          objectFit "fill" stretches the image to match the box dimensions.
+                          The image was fetched with the same aspect ratio as the blue box
+                          (worldW × worldH), so there is no visible distortion — the image
+                          simply fills the box pixel-perfectly without any cropping. */}
                       {exportPreviewUrl && (
                         <img
                           src={exportPreviewUrl}
@@ -10074,7 +10104,7 @@ height: pendingPictureTool.hPx * elementScale,
                             inset: 0,
                             width: "100%",
                             height: "100%",
-                            objectFit: "cover",
+                            objectFit: "fill",
                             borderRadius: 2,
                             zIndex: 1,
                             pointerEvents: "none",
@@ -10137,13 +10167,17 @@ height: pendingPictureTool.hPx * elementScale,
                       </div>
                       <button
                         onClick={() => {
+                          // Size check only (use pixel rect for validation)
                           const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
                           const rect = isD
                             ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
                             : boundsToRectPx(printAreaBounds);
                           if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
                           setExportPreviewUrl(null);
-                          exportSelectionToPdf(null, rect);
+                          // Pass (null, null) so exportSelectionToPdf uses exportBoundsForPdfRef
+                          // (accurate lat/lng stored by the selection system) instead of deriving
+                          // bounds from the pixel rect via linear lat interpolation (Mercator-incorrect).
+                          exportSelectionToPdf(null, null);
                         }}
                         style={{
                           padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
