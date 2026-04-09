@@ -2768,7 +2768,12 @@ async function loadExportPreview() {
     const MAX_TILE_ROWS  = 3;
 
     // ── Find highest zoom that fits in a 3×3 tile grid (same as PDF export) ─
-    const mapCurrentZoom = Math.min(21, map.getZoom?.() ?? 21);
+    // IMPORTANT: Static Maps API only accepts integer zoom. map.getZoom() can
+    // return fractional values (e.g. 18.7) during animated zoom transitions.
+    // If we pass a fractional zoom to the API it rounds internally (to 18 or 19),
+    // while our world-pixel math used the raw fraction → the tile coverage shifts
+    // vs what the blue box shows.  Math.round() keeps our math and the API in sync.
+    const mapCurrentZoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
     let zoom = 1, nwWorld, seWorld, boundsPxW, boundsPxH;
 
     for (let z = mapCurrentZoom; z >= 1; z--) {
@@ -3035,7 +3040,10 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   };
 
   // Start from the current map zoom for maximum satellite detail.
-  const mapCurrentZoom = Math.min(21, map.getZoom?.() ?? 21);
+  // Round to integer: Static Maps API only accepts integer zoom; fractional
+  // values from map.getZoom() during animated transitions would cause the API
+  // to round the zoom differently from our world-pixel math → tile misalignment.
+  const mapCurrentZoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
   let zoom = mapCurrentZoom;
   let nwWorld, seWorld, boundsPxW, boundsPxH;
 
