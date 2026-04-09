@@ -10217,26 +10217,26 @@ height: pendingPictureTool.hPx * elementScale,
                   }}
                 >
                   {exportPreviewUrl ? (
-                    /* ── Aerial preview loaded: show generate / back ── */
+                    /* ── Aerial preview loaded: confirm or go back ── */
                     <>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#15803d", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
                         🛰 Aerial Preview Ready
                       </div>
-                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, lineHeight: 1.4 }}>
-                        Google Earth view is shown inside the blue box. Resize to adjust, then generate.
+                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, lineHeight: 1.5 }}>
+                        High-resolution imagery has been stitched for the selected region.
+                        Resize the blue box to adjust, then generate.
                       </div>
                       <button
                         onClick={() => {
-                          // Size check only (use pixel rect for validation)
+                          // Size check only (pixel rect used for validation, not projection)
                           const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
                           const rect = isD
                             ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
                             : boundsToRectPx(printAreaBounds);
                           if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
                           setExportPreviewUrl(null);
-                          // Pass (null, null) so exportSelectionToPdf uses exportBoundsForPdfRef
-                          // (accurate lat/lng stored by the selection system) instead of deriving
-                          // bounds from the pixel rect via linear lat interpolation (Mercator-incorrect).
+                          // Use exportBoundsForPdfRef (accurate lat/lng) — avoids linear lat
+                          // interpolation error that occurs when deriving bounds from screen pixels.
                           exportSelectionToPdf(null, null);
                         }}
                         style={{
@@ -10247,7 +10247,7 @@ height: pendingPictureTool.hPx * elementScale,
                       >
                         ✅ Generate Aerial PDF
                         <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
-                          Export high-res Google Earth PDF
+                          Export high-resolution aerial imagery PDF
                         </div>
                       </button>
                       <button
@@ -10272,11 +10272,13 @@ height: pendingPictureTool.hPx * elementScale,
                   ) : (
                     /* ── Default: two export options ── */
                     <>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 2 }}>
-                        Resize the blue box, then choose:
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 6 }}>
+                        Resize the blue box, then choose export type:
                       </div>
 
-                      {/* Option 1 — Map PDF (screenshot, as-is) */}
+                      {/* ── Option 1: Standard PDF ──────────────────────────────────────────
+                          Captures the map exactly as displayed on screen (screenshot-based).
+                          Keeps all visible overlays, current zoom, and active map layer.     */}
                       <button
                         onClick={() => {
                           const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
@@ -10292,13 +10294,19 @@ height: pendingPictureTool.hPx * elementScale,
                           borderRadius: 7, cursor: "pointer", lineHeight: 1.3,
                         }}
                       >
-                        🗺 Map PDF
+                        🗺 Standard PDF
                         <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.8, marginTop: 3 }}>
-                          Export map exactly as shown on screen
+                          Keeps current map appearance and on-screen layout
                         </div>
                       </button>
 
-                      {/* Option 2 — Aerial PDF (Google satellite, preview inside blue box) */}
+                      {/* ── Option 2: Aerial PDF ────────────────────────────────────────────
+                          Implementation: tile stitching (Method 1).
+                          Downloads multiple imagery tiles covering the selected region,
+                          then stitches them into a single high-resolution image aligned to
+                          the exact lat/lng bounds of the blue box.  This avoids the blur and
+                          misalignment that single-tile or screenshot-based approaches produce.
+                          The stitched canvas is previewed inside the blue box before export.  */}
                       <button
                         disabled={exportPreviewLoading}
                         onClick={loadExportPreview}
@@ -10310,18 +10318,18 @@ height: pendingPictureTool.hPx * elementScale,
                         }}
                       >
                         {exportPreviewLoading ? (
-                          <>⏳ Loading aerial view…</>
+                          <>⏳ Building aerial imagery…</>
                         ) : (
                           <>
                             🛰 Aerial PDF
                             <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
-                              Preview Google Earth inside the blue box
+                              Rebuilds selected region using high-resolution aerial imagery
                             </div>
                           </>
                         )}
                       </button>
 
-                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                         <button
                           onClick={resetExportAreaToViewport}
                           style={{
