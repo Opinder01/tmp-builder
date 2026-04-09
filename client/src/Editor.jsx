@@ -2770,37 +2770,33 @@ async function loadExportPreview() {
     const GOOGLE_SCALE   = 2;
 
     let zoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
-    let nwWorld, reqW, reqH;
+    let nwWorld, seWorld, reqW, reqH;
 
     for (let z = zoom; z >= 1; z--) {
       const nw = latLngToWorld(nLat, wLng, z);
       const se = latLngToWorld(sLat, eLng, z);
-      const w  = Math.round(se.x - nw.x);
-      const h  = Math.round(se.y - nw.y);
-      if (w >= 1 && h >= 1 && w <= STATIC_MAP_MAX && h <= STATIC_MAP_MAX) {
-        zoom = z; nwWorld = nw; reqW = w; reqH = h;
-        break;
-      }
-      // keep going down; always store last so we have a valid fallback
-      zoom = z;
-      nwWorld = nw;
-      reqW = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(se.x - nw.x)));
-      reqH = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(se.y - nw.y)));
+      const w  = se.x - nw.x;
+      const h  = se.y - nw.y;
+      // Store on every iteration — ensures nwWorld/seWorld are always set
+      zoom = z; nwWorld = nw; seWorld = se;
+      reqW = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(w)));
+      reqH = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(h)));
+      if (w >= 1 && h >= 1 && w <= STATIC_MAP_MAX && h <= STATIC_MAP_MAX) break;
     }
 
-    // ── Geographic centre of the bounds in Web-Mercator space ─────────────
-    // Use the world-pixel midpoint, then convert back to lat/lng.
-    // This is more accurate than a simple (nLat+sLat)/2 average for lat
-    // because Mercator spacing is non-linear.
-    const cx  = nwWorld.x + reqW / 2;
-    const cy  = nwWorld.y + reqH / 2;
+    // ── Geographic centre: exact Mercator midpoint of the NW and SE corners ──
+    // IMPORTANT: use the true world-pixel midpoint (nwWorld + seWorld) / 2, NOT
+    // nwWorld + reqW/2.  reqW is already rounded, so nwWorld + reqW/2 introduces
+    // a small but non-zero offset that shifts the returned image away from the
+    // correct geographic area.  The true midpoint eliminates this error entirely.
+    const cx  = (nwWorld.x + seWorld.x) / 2;
+    const cy  = (nwWorld.y + seWorld.y) / 2;
     const mercLat = worldYToLat(cy, zoom);
     const mercLng = (cx / worldSize(zoom)) * 360 - 180;
 
     // ── Build the single Static Maps URL ──────────────────────────────────
-    // size=reqW×reqH tells the API to return exactly reqW×reqH CSS pixels
-    // centred on (mercLat, mercLng) at integer zoom.  With scale=2 we get
-    // reqW*2 × reqH*2 real pixels — no over-fetch, no cropping needed.
+    // size=reqW×reqH → API returns exactly reqW×reqH CSS pixels (×2 real px
+    // with scale=2) centred on (mercLat, mercLng).  No over-fetch or crop.
     const url =
       "https://maps.googleapis.com/maps/api/staticmap" +
       `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
@@ -5173,9 +5169,13 @@ useEffect(() => {
         }
         exportResizeRef.current = null;
         setExportLiveRect(null);
+        // Clear stale preview — box was resized, old preview no longer matches
+        setExportPreviewUrl(null);
       }
       if (uiDrag.type === "moveExportArea") {
         setExportLiveRect(null);
+        // Clear stale preview — box was moved, old preview no longer matches
+        setExportPreviewUrl(null);
       }
       setUiDrag(null);
     }
@@ -10125,6 +10125,7 @@ height: pendingPictureTool.hPx * elementScale,
                         <img
                           src={exportPreviewUrl}
                           alt="Aerial preview"
+                          draggable={false}
                           style={{
                             position: "absolute",
                             inset: 0,
@@ -10134,6 +10135,7 @@ height: pendingPictureTool.hPx * elementScale,
                             borderRadius: 2,
                             zIndex: 1,
                             pointerEvents: "none",
+                            userSelect: "none",
                             display: "block",
                           }}
                         />
