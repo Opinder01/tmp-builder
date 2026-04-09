@@ -2712,20 +2712,21 @@ async function exportViaScreenshot(selectedRectPx) {
 }
 
 /**
- * Fetch a satellite preview image whose geographic coverage matches the selected
- * blue-box bounds exactly.
+ * Build the aerial preview canvas using the EXACT same tiled pipeline as
+ * exportSelectionToPdf.  This guarantees:
+ *   • Same geographic area (no mismatch between preview and PDF)
+ *   • Same zoom / same tile grid → no blur from over-scaling a single small tile
+ *   • Same map layer as currently selected (roadmap / satellite / hybrid / terrain)
  *
- * KEY FIX: the Static Maps API renders an image whose physical extent is
- *   width  = imgCssW  CSS pixels   (= worldW world-px at the chosen zoom)
- *   height = imgCssH  CSS pixels   (= worldH world-px at the chosen zoom)
- * centred on the bounds centre.  When imgCssW/H equal the world-pixel
- * dimensions of the bounds, the image left/right/top/bottom edges land
- * precisely on the NW/SE corners of the selection — no extra padding,
- * no cropping, correct aspect ratio.
+ * The resulting full-resolution canvas is stored as a JPEG data-URL in
+ * exportPreviewUrl and painted directly inside the blue box.
  */
 async function loadExportPreview() {
   const bounds = exportBoundsForPdfRef.current ?? printAreaBounds;
   if (!bounds) return;
+
+  const map = mapRef.current;
+  if (!map) return;
 
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   if (!key) { alert("Missing Google Maps API key."); return; }
@@ -2734,17 +2735,13 @@ async function loadExportPreview() {
   setExportPreviewUrl(null);
 
   try {
-    // Normalise: nLat >= sLat, wLng <= eLng
+    // ── Normalise bounds ────────────────────────────────────────────────────
     const nLat = Math.max(bounds.nw.lat, bounds.se.lat);
     const sLat = Math.min(bounds.nw.lat, bounds.se.lat);
     const wLng = Math.min(bounds.nw.lng, bounds.se.lng);
     const eLng = Math.max(bounds.nw.lng, bounds.se.lng);
 
-    // Geographic centre of the selection
-    const centerLat = (nLat + sLat) / 2;
-    const centerLng = (wLng + eLng) / 2;
-
-    // Web-Mercator helpers (same maths used throughout the rest of the export pipeline)
+    // ── Web-Mercator helpers (identical to exportSelectionToPdf) ────────────
     const worldSize     = (z) => 256 * Math.pow(2, z);
     const latLngToWorld = (lat, lng, z) => {
       const s   = worldSize(z);
@@ -2753,47 +2750,110 @@ async function loadExportPreview() {
       const y   = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
       return { x, y };
     };
+    const worldYToLat = (wy, z) => {
+      const t   = wy / worldSize(z);
+      const k   = Math.exp((0.5 - t) * 4 * Math.PI);
+      const sin = (k - 1) / (k + 1);
+      return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
+    };
 
-    // Find the highest zoom where both dimensions fit within 640 CSS px
-    // (Static Maps hard limit is 640×640 with scale=2 → 1 280×1 280 real px)
-    let zoom = 21, worldW = 1, worldH = 1;
-    for (let z = 21; z >= 1; z--) {
-      const nwW = latLngToWorld(nLat, wLng, z);
-      const seW = latLngToWorld(sLat, eLng, z);
-      const w   = seW.x - nwW.x;
-      const h   = seW.y - nwW.y;
-      if (w > 0 && h > 0 && w <= 640 && h <= 640) {
-        zoom = z; worldW = w; worldH = h;
-        break;
+    // ── Map layer: follow the currently selected layer ──────────────────────
+    const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
+    const maptype    = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw)
+                       ? maptypeRaw : "satellite";
+
+    const STATIC_MAP_MAX = 640;
+    const GOOGLE_SCALE   = 2;
+    const MAX_TILE_COLS  = 3;
+    const MAX_TILE_ROWS  = 3;
+
+    // ── Find highest zoom that fits in a 3×3 tile grid (same as PDF export) ─
+    const mapCurrentZoom = Math.min(21, map.getZoom?.() ?? 21);
+    let zoom = 1, nwWorld, seWorld, boundsPxW, boundsPxH;
+
+    for (let z = mapCurrentZoom; z >= 1; z--) {
+      const nw = latLngToWorld(nLat, wLng, z);
+      const se = latLngToWorld(sLat, eLng, z);
+      const w  = se.x - nw.x;
+      const h  = se.y - nw.y;
+      // store on every iteration so the last assignment is always valid
+      zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
+      if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_TILE_COLS &&
+          Math.ceil(h / STATIC_MAP_MAX) <= MAX_TILE_ROWS) break;
+    }
+
+    const imgW    = Math.max(1, Math.round(boundsPxW));
+    const imgH    = Math.max(1, Math.round(boundsPxH));
+    const numCols = Math.min(MAX_TILE_COLS, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
+    const numRows = Math.min(MAX_TILE_ROWS, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
+    const tileWorldW = boundsPxW / numCols;
+    const tileWorldH = boundsPxH / numRows;
+    const tileReqW   = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldW) + 4);
+    const tileReqH   = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldH) + 4);
+
+    // ── Build tile URL list ─────────────────────────────────────────────────
+    const tileFetches = [];
+    for (let row = 0; row < numRows; row++) {
+      for (let col = 0; col < numCols; col++) {
+        const cx  = nwWorld.x + (col + 0.5) * tileWorldW;
+        const cy  = nwWorld.y + (row + 0.5) * tileWorldH;
+        const lat = worldYToLat(cy, zoom);
+        const lng = (cx / worldSize(zoom)) * 360 - 180;
+        const url =
+          "https://maps.googleapis.com/maps/api/staticmap" +
+          `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
+          `&size=${tileReqW}x${tileReqH}` +
+          `&center=${lat.toFixed(7)},${lng.toFixed(7)}` +
+          `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
+        tileFetches.push({ row, col, url });
       }
     }
 
-    // Request an image whose CSS-pixel dimensions equal the world-pixel dimensions
-    // of the selected area.  This guarantees the image covers EXACTLY the blue box.
-    const imgCssW = Math.max(1, Math.round(worldW));
-    const imgCssH = Math.max(1, Math.round(worldH));
+    // ── Create output canvas at full tile resolution ────────────────────────
+    const outW = Math.max(1, Math.round(imgW * GOOGLE_SCALE));
+    const outH = Math.max(1, Math.round(imgH * GOOGLE_SCALE));
+    const canvas = document.createElement("canvas");
+    canvas.width  = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
 
-    // Always satellite for the aerial view
-    const url =
-      "https://maps.googleapis.com/maps/api/staticmap" +
-      `?maptype=satellite&format=png&scale=2` +
-      `&size=${imgCssW}x${imgCssH}` +
-      `&center=${centerLat.toFixed(7)},${centerLng.toFixed(7)}` +
-      `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
+    // ── Fetch all tiles in parallel then stitch ─────────────────────────────
+    const tileResults = await Promise.all(
+      tileFetches.map(({ row, col, url }) =>
+        fetchStaticMapAsDataUrl(url).then(
+          (dataUrl) => new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload  = () => resolve({ row, col, img });
+            img.onerror = () => reject(new Error(`Tile (${col},${row}) failed to load`));
+            img.src = dataUrl;
+          })
+        )
+      )
+    );
 
-    // ── Debug: open browser console to verify alignment ──────────────────────
-    console.log("[Aerial Preview] NE:", nLat.toFixed(7), eLng.toFixed(7),
-                "  SW:", sLat.toFixed(7), wLng.toFixed(7));
-    console.log("[Aerial Preview] center:", centerLat.toFixed(7), centerLng.toFixed(7));
-    console.log("[Aerial Preview] zoom:", zoom,
-                "  image:", imgCssW, "×", imgCssH, "CSS px  (", imgCssW*2, "×", imgCssH*2, "real px)");
-    console.log("[Aerial Preview] URL:", url);
-    // ─────────────────────────────────────────────────────────────────────────
+    for (const { row, col, img } of tileResults) {
+      const srcX = Math.round(((tileReqW  - tileWorldW) / 2) * GOOGLE_SCALE);
+      const srcY = Math.round(((tileReqH  - tileWorldH) / 2) * GOOGLE_SCALE);
+      const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
+      const srcH = Math.round(tileWorldH * GOOGLE_SCALE);
+      const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
+      const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
+    }
 
-    const dataUrl = await fetchStaticMapAsDataUrl(url);
-    setExportPreviewUrl(dataUrl);
+    // ── Debug ───────────────────────────────────────────────────────────────
+    console.log("[Aerial Preview] NE:", nLat.toFixed(6), eLng.toFixed(6),
+                "  SW:", sLat.toFixed(6), wLng.toFixed(6));
+    console.log("[Aerial Preview] zoom:", zoom, "  tiles:", numCols, "×", numRows,
+                "  canvas:", outW, "×", outH, "px  maptype:", maptype);
+
+    // JPEG at high quality — smaller than PNG, loads faster in the blue-box preview
+    setExportPreviewUrl(canvas.toDataURL("image/jpeg", 0.92));
   } catch (e) {
-    alert("Could not load satellite preview:\n" + (e instanceof Error ? e.message : String(e)));
+    alert("Could not load aerial preview:\n" + (e instanceof Error ? e.message : String(e)));
   } finally {
     setExportPreviewLoading(false);
   }
