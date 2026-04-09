@@ -1640,9 +1640,10 @@ const elementScaleRaw = zoomScale(ELEMENT_BASE_ZOOM);
 // Cones: scale with map, cap growth at 1.2x when zoomed in, floor 0.35 when zoomed far out
 const elementScale = Math.max(0.35, Math.min(1.2, elementScaleRaw));
 
-// Plan elements (legend, manifest, title, inserts, north arrow): scale WITH the map so they stick to the ground
-// Principal size = size at zRef; when zoom out they shrink, when zoom in they grow (capped at 1.2x)
-const planElementZoomScale = (zRef) => Math.min(zoomScalePlan(zRef), 1.2);
+// Plan elements (legend, manifest, title, inserts, north arrow): scale WITH the map exactly like signs/buildings.
+// Principal size = pixel size at zRef zoom. Uses fractional zoomNow for smooth continuous animation.
+// Floor 0.05 prevents zero-px CSS layout when zoomed very far out. No growth cap → "paint on the wall".
+const planElementZoomScale = (zRef) => Math.max(0.05, zoomScale(zRef ?? ELEMENT_BASE_ZOOM));
 const scalePxPlan = (px, zRef) => (px ?? 0) * planElementZoomScale(zRef ?? ELEMENT_BASE_ZOOM);
 // Rounded pixel dimensions for overlay tools to eliminate subpixel jitter during zoom
 const scalePxPlanRounded = (px, zRef) => Math.round(scalePxPlan(px, zRef));
