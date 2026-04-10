@@ -3993,26 +3993,33 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     ctx.fillText(ATTRIB_TEXT, outW - 10, outH - BAR_H / 2);
   }
 
-  // --- STEP 5: Final output (page layout + map frame + vector overlay) ---
-  // Auto-select orientation so the map fills the page with minimal blank space:
-  // if the export canvas is wider than tall → landscape, otherwise → portrait.
-  // This overrides the user's exportOrientation setting only when the aspect
-  // ratios would cause severe letterboxing.
-  const autoOrient = imgW >= imgH ? "l" : "p";
-  const orient = autoOrient;
-  const format = ["letter","legal","tabloid","a4","a3"].includes(exportPaperSize) ? exportPaperSize : "letter";
-  const pdf = new jsPDF({ orientation: orient, unit: "mm", format });
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const frameRect = getMapFrameRect(pageW, pageH);
-  const scaleX = frameRect.w / imgW;
-  const scaleY = frameRect.h / imgH;
-  const scale = Math.min(scaleX, scaleY);
-  const drawW = imgW * scale;
-  const drawH = imgH * scale;
-  const offsetX = frameRect.x + (frameRect.w - drawW) / 2;
-  const offsetY = frameRect.y + (frameRect.h - drawH) / 2;
-  const drawRect = { x: offsetX, y: offsetY, w: drawW, h: drawH };
+  // --- STEP 5: Final output — custom page size matches export box exactly ---
+  // Use a custom PDF page whose aspect ratio exactly matches imgW:imgH so the
+  // map fills the page edge-to-edge with no letterboxing at all.
+  // Max printable short-side: 297mm (A3). Scale down proportionally if larger.
+  const MARGIN_H = 2;   // mm — left/right
+  const MAX_SHORT  = 297; // mm — A3 short side cap
+  const mapAspect  = imgW / imgH;           // e.g. 2.5 for a wide export
+  // Available map area height after the header ribbon and margins
+  // We'll compute page dims so the map area fills the remaining space exactly.
+  // pageW and pageH chosen so: map width = pageW - 2*MARGIN_H,
+  //                              map height = (pageW - 2*MARGIN_H) / mapAspect
+  //                              page height = PDF_HEADER_H + map height + 1mm bottom
+  let mapAreaW_mm = MAX_SHORT; // start at max width
+  let mapAreaH_mm = mapAreaW_mm / mapAspect;
+  // If height exceeds max, constrain by height instead
+  const pageHCandidate = PDF_HEADER_H + mapAreaH_mm + 1;
+  if (pageHCandidate > MAX_SHORT * 1.5) {
+    mapAreaH_mm = MAX_SHORT * 1.5 - PDF_HEADER_H - 1;
+    mapAreaW_mm = mapAreaH_mm * mapAspect;
+  }
+  const pageW = mapAreaW_mm + MARGIN_H * 2;
+  const pageH = PDF_HEADER_H + mapAreaH_mm + 1;
+
+  const pdf = new jsPDF({ orientation: pageW >= pageH ? "l" : "p", unit: "mm", format: [pageW, pageH] });
+
+  // Map sits right below the header ribbon, full width between side margins
+  const drawRect = { x: MARGIN_H, y: PDF_HEADER_H, w: mapAreaW_mm, h: mapAreaH_mm };
   const basePng = canvas.toDataURL("image/png");
 
   // Layer 1: page background (white)
