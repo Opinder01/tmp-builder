@@ -3642,15 +3642,42 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     }
   }
 
+  // Height (mm) reserved at the top of every exported PDF for the branding header.
+  const PDF_HEADER_H = 14; // fits title + subtitle with breathing room
+
   function getMapFrameRect(pageW, pageH) {
-    const marginH = 4; // mm left/right
-    const marginV = 2; // mm top/bottom (smaller to reduce upper/lower white space)
+    const marginH = 4;  // mm left/right
+    const marginV = 2;  // mm bottom (and right — top uses PDF_HEADER_H instead)
     return {
       x: marginH,
-      y: marginV,
+      y: PDF_HEADER_H,               // map starts below the header ribbon
       w: pageW - marginH * 2,
-      h: pageH - marginV * 2,
+      h: pageH - PDF_HEADER_H - marginV,
     };
+  }
+
+  /** Draw the TMPBUILDER.CA branding header in the white ribbon above the map. */
+  function drawPdfBrandingHeader(pdfDoc, pageW) {
+    // Title — bold, large
+    pdfDoc.setFont("helvetica", "bold");
+    pdfDoc.setFontSize(13);
+    pdfDoc.setTextColor(30, 30, 30);
+    pdfDoc.text("TMPBUILDER.CA", pageW / 2, 7, { align: "center" });
+
+    // Subtitle — lighter, smaller
+    pdfDoc.setFont("helvetica", "normal");
+    pdfDoc.setFontSize(7.5);
+    pdfDoc.setTextColor(90, 90, 90);
+    pdfDoc.text("Traffic Management Plan", pageW / 2, 11.5, { align: "center" });
+
+    // Thin separator line between header and map
+    pdfDoc.setDrawColor(180, 180, 180);
+    pdfDoc.setLineWidth(0.3);
+    pdfDoc.line(4, PDF_HEADER_H - 0.5, pageW - 4, PDF_HEADER_H - 0.5);
+
+    // Reset colours so subsequent drawing isn't affected
+    pdfDoc.setTextColor(0, 0, 0);
+    pdfDoc.setDrawColor(0, 0, 0);
   }
 
   function projectLatLngToExportPx(p) {
@@ -3986,10 +4013,13 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   // Layer 1: page background (white)
   drawPdfPageBackground(pdf, pageW, pageH);
 
-  // Layer 2: black border around drawing area
+  // Layer 2: branding header — "TMPBUILDER.CA / Traffic Management Plan"
+  drawPdfBrandingHeader(pdf, pageW);
+
+  // Layer 3: black border around drawing area
   drawPdfMapFrame(pdf, drawRect);
 
-  // Layer 3: map + TMP overlays (composited on canvas)
+  // Layer 4: map + TMP overlays (composited on canvas)
   drawPdfAerialBase(pdf, basePng, drawRect);
 
   // Try to open PDF in new tab; if popup blocked, fall back to download
