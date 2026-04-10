@@ -2711,10 +2711,16 @@ async function exportViaScreenshot(selectedRectPx) {
 /**
  * loadExportPreview — tiled aerial preview anchored to the blue export box.
  *
- * Uses the EXACT same lat/lng → world-pixel math as exportSelectionToPdf so
- * the preview shows precisely the same geographic area that will be printed.
- * The blue-box bounds (exportBoundsForPdfRef / printAreaBounds) are the sole
- * source of truth — screen pixels and map.getCenter() are never consulted.
+ * Source of truth: exportBoundsForPdfRef (lat/lng).  Screen pixels and
+ * map.getCenter() are never used.
+ *
+ * Strategy: find the HIGHEST integer zoom where the bounds fit in a 5×5 tile
+ * grid (each tile ≤ 640 CSS px).  Fewer zoom drops = imagery that matches
+ * what the user sees on the interactive map.
+ *
+ * Each tile is requested at the EXACT world-pixel size (no over-fetch, no
+ * crop) and the full image is scaled into its destination rect by drawImage.
+ * This eliminates the rounding errors introduced by the previous +4/crop.
  */
 async function loadExportPreview() {
   const rawBounds = exportBoundsForPdfRef.current ?? printAreaBounds;
@@ -2730,20 +2736,18 @@ async function loadExportPreview() {
   setExportPreviewUrl(null);
 
   try {
-    // ── Normalize bounds (same as exportSelectionToPdf) ──────────────────
+    // ── Normalize bounds ──────────────────────────────────────────────────
     const nwLat = Math.max(rawBounds.nw.lat, rawBounds.se.lat);
     const seLat = Math.min(rawBounds.nw.lat, rawBounds.se.lat);
     const nwLng = Math.min(rawBounds.nw.lng, rawBounds.se.lng);
     const seLng = Math.max(rawBounds.nw.lng, rawBounds.se.lng);
-    const bounds = { nw: { lat: nwLat, lng: nwLng }, se: { lat: seLat, lng: seLng } };
 
-    const STATIC_MAP_MAX = 640;
-    const GOOGLE_SCALE   = 2;
-    const MAX_COLS       = 3;
-    const MAX_ROWS       = 3;
+    const STATIC_MAP_MAX = 640; // Static Maps API max size (CSS px)
+    const GOOGLE_SCALE   = 2;   // scale=2 doubles device pixels, not world pixels
+    const MAX_TILES      = 5;   // max tiles per dimension (5×5 = 25 requests max)
 
-    // ── Web Mercator helpers (identical to exportSelectionToPdf) ──────────
-    const worldSize      = (z) => 256 * Math.pow(2, z);
+    // ── Web Mercator helpers ──────────────────────────────────────────────
+    const worldSize       = (z) => 256 * Math.pow(2, z);
     const latLngToWorldPx = (lat, lng, z) => {
       const s   = worldSize(z);
       const x   = ((lng + 180) / 360) * s;
@@ -2759,36 +2763,39 @@ async function loadExportPreview() {
       return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
     };
 
-    // ── Find the highest zoom where bounds fit in a 3×3 tile grid ────────
-    // Start from current map zoom for maximum satellite detail.
-    const mapCurrentZoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
+    // ── Find highest zoom where bounds fit inside MAX_TILES×MAX_TILES ─────
+    // Using MAX_TILES=5 instead of 3 means we stay closer to the map's
+    // visual zoom level (fewer zoom drops → imagery matches the map better).
+    const mapFracZoom    = map.getZoom?.() ?? 18;
+    const mapCurrentZoom = Math.min(21, Math.round(mapFracZoom));
     let zoom = mapCurrentZoom;
     let nwWorld, seWorld, boundsPxW, boundsPxH;
 
     for (let z = mapCurrentZoom; z >= 1; z--) {
-      const nw = latLngToWorldPx(bounds.nw.lat, bounds.nw.lng, z);
-      const se = latLngToWorldPx(bounds.se.lat, bounds.se.lng, z);
-      const w  = Math.abs(se.x - nw.x);
-      const h  = Math.abs(se.y - nw.y);
+      const nw = latLngToWorldPx(nwLat, nwLng, z);
+      const se = latLngToWorldPx(seLat, seLng, z);
+      const w  = se.x - nw.x;   // always positive: east > west
+      const h  = se.y - nw.y;   // always positive: south y > north y in Mercator
       zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
-      if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_COLS &&
-          Math.ceil(h / STATIC_MAP_MAX) <= MAX_ROWS) break;
+      if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_TILES &&
+          Math.ceil(h / STATIC_MAP_MAX) <= MAX_TILES) break;
     }
 
-    const numCols   = Math.min(MAX_COLS, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
-    const numRows   = Math.min(MAX_ROWS, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
-    const tileWorldW = boundsPxW / numCols;
+    const numCols    = Math.min(MAX_TILES, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
+    const numRows    = Math.min(MAX_TILES, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
+    const tileWorldW = boundsPxW / numCols;  // exact world-px per tile (may be non-integer)
     const tileWorldH = boundsPxH / numRows;
-    // Slight over-fetch (+4) so center-crop eliminates edge drift (same as exportSelectionToPdf)
-    const tileReqW  = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldW) + 4);
-    const tileReqH  = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldH) + 4);
+    // Request exactly tileWorldW CSS pixels per tile (no over-fetch).
+    // drawImage will scale to fill the destination rect, absorbing any ±1px rounding.
+    const tileReqW   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldW)));
+    const tileReqH   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldH)));
 
     // ── Map layer ─────────────────────────────────────────────────────────
     const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
     const maptype    = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw)
                        ? maptypeRaw : "satellite";
 
-    // ── Build tile URLs from world-pixel tile centres (same as exportSelectionToPdf) ──
+    // ── Build tile URLs from world-pixel centres ──────────────────────────
     const tileFetches = [];
     for (let row = 0; row < numRows; row++) {
       for (let col = 0; col < numCols; col++) {
@@ -2802,15 +2809,28 @@ async function loadExportPreview() {
           `&size=${tileReqW}x${tileReqH}` +
           `&center=${lat.toFixed(7)},${lng.toFixed(7)}` +
           `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
-        tileFetches.push({ row, col, url });
+        tileFetches.push({ row, col, url, tileLat: lat, tileLng: lng });
       }
     }
 
-    // ── Output canvas ─────────────────────────────────────────────────────
-    const imgW  = Math.max(1, Math.round(boundsPxW));
-    const imgH  = Math.max(1, Math.round(boundsPxH));
-    const outW  = Math.max(1, Math.round(imgW * GOOGLE_SCALE));
-    const outH  = Math.max(1, Math.round(imgH * GOOGLE_SCALE));
+    // ── Diagnostic logging (check browser console to verify alignment) ────
+    console.group("[Aerial Preview] diagnostics");
+    console.log("bounds NW :", nwLat.toFixed(7), nwLng.toFixed(7));
+    console.log("bounds SE :", seLat.toFixed(7), seLng.toFixed(7));
+    console.log("map zoom  :", mapFracZoom.toFixed(3), "→ tile zoom:", zoom,
+                "(dropped", mapCurrentZoom - zoom, "levels)");
+    console.log("grid      :", numCols + "×" + numRows,
+                "  tileWorldPx:", tileWorldW.toFixed(1) + "×" + tileWorldH.toFixed(1),
+                "  tileReq:", tileReqW + "×" + tileReqH);
+    console.log("layer     :", maptype);
+    tileFetches.forEach(({ row, col, tileLat, tileLng }) =>
+      console.log(`  tile[${col},${row}] center: ${tileLat.toFixed(7)}, ${tileLng.toFixed(7)}`)
+    );
+    console.groupEnd();
+
+    // ── Output canvas (world-px × GOOGLE_SCALE device-px) ────────────────
+    const outW  = Math.max(1, Math.round(boundsPxW * GOOGLE_SCALE));
+    const outH  = Math.max(1, Math.round(boundsPxH * GOOGLE_SCALE));
     const canvas = document.createElement("canvas");
     canvas.width  = outW;
     canvas.height = outH;
@@ -2833,22 +2853,15 @@ async function loadExportPreview() {
       )
     );
 
+    // Scale each full tile image into its exact destination rect.
+    // drawImage handles the ±1px rounding between tileReqW and tileWorldW.
     for (const { row, col, img } of tileResults) {
-      // Center-crop: strip over-fetched pixels on each side
-      const srcX = Math.round(((tileReqW - tileWorldW) / 2) * GOOGLE_SCALE);
-      const srcY = Math.round(((tileReqH - tileWorldH) / 2) * GOOGLE_SCALE);
-      const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
-      const srcH = Math.round(tileWorldH * GOOGLE_SCALE);
       const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
       const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
-      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
+      const dstW = Math.round((col + 1) * tileWorldW * GOOGLE_SCALE) - dstX;
+      const dstH = Math.round((row + 1) * tileWorldH * GOOGLE_SCALE) - dstY;
+      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dstX, dstY, dstW, dstH);
     }
-
-    console.log("[Aerial Preview] zoom:", zoom, " tiles:", numCols+"×"+numRows,
-                " tileReq:", tileReqW+"×"+tileReqH,
-                " bounds nw:", bounds.nw.lat.toFixed(6)+","+bounds.nw.lng.toFixed(6),
-                " se:", bounds.se.lat.toFixed(6)+","+bounds.se.lng.toFixed(6),
-                " layer:", maptype);
 
     setExportPreviewUrl(canvas.toDataURL("image/jpeg", 0.92));
   } catch (e) {
