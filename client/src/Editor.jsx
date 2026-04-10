@@ -2712,15 +2712,18 @@ async function exportViaScreenshot(selectedRectPx) {
 }
 
 /**
- * loadExportPreview — single-tile aerial preview for the blue export box.
+ * loadExportPreview — tiled aerial preview anchored to the blue export box.
  *
- * Strategy: request ONE Static Maps image sized to exactly match the
- * world-pixel dimensions of the blue box at the highest integer zoom that
- * fits within the 640 CSS-px Static Maps limit.  No tile stitching, no
- * over-fetch, no centre-crop arithmetic — the API returns exactly the
- * geographic rectangle we need, so the preview fills the blue box with
- * zero geographic drift.  (The PDF export uses tile stitching for
- * higher resolution; for a preview single-tile is sufficient and far safer.)
+ * Strategy: divide the blue box's SCREEN PIXEL rect into up to 3×3 tiles.
+ * For each tile, convert its center from screen pixels → lat/lng using the
+ * Google Maps projection (pxToLatLng).  This is the authoritative coordinate
+ * system — exactly the same one the interactive map uses — so every tile
+ * lands on the correct geographic position with zero drift.
+ *
+ * Tile SIZE is derived from the screen-pixel dimensions scaled by the
+ * fractional→integer zoom ratio, so the preview always appears at the same
+ * visual zoom level as the interactive map (no zoomed-out "different area"
+ * effect).  The PDF export uses identical tile math for consistency.
  */
 async function loadExportPreview() {
   const bounds = exportBoundsForPdfRef.current ?? printAreaBounds;
@@ -2736,81 +2739,112 @@ async function loadExportPreview() {
   setExportPreviewUrl(null);
 
   try {
-    // ── Normalise bounds ───────────────────────────────────────────────────
-    const nLat = Math.max(bounds.nw.lat, bounds.se.lat);
-    const sLat = Math.min(bounds.nw.lat, bounds.se.lat);
-    const wLng = Math.min(bounds.nw.lng, bounds.se.lng);
-    const eLng = Math.max(bounds.nw.lng, bounds.se.lng);
+    // ── Blue box screen rect — the exact visual footprint of the export area ──
+    const r = boundsToRectPx(bounds);
+    if (!r || r.w < 2 || r.h < 2) throw new Error("Export box not ready. Please wait a moment.");
 
-    // ── Web-Mercator helpers ───────────────────────────────────────────────
-    const worldSize = (z) => 256 * Math.pow(2, z);
-    const latLngToWorld = (lat, lng, z) => {
-      const s   = worldSize(z);
-      const x   = ((lng + 180) / 360) * s;
-      const sin = Math.sin((lat * Math.PI) / 180);
-      const y   = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
-      return { x, y };
-    };
-    const worldYToLat = (wy, z) => {
-      const t   = wy / worldSize(z);
-      const k   = Math.exp((0.5 - t) * 4 * Math.PI);
-      const sin = (k - 1) / (k + 1);
-      return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
-    };
+    const STATIC_MAP_MAX = 640;
+    const GOOGLE_SCALE   = 2;
+    const MAX_COLS       = 3;
+    const MAX_ROWS       = 3;
+
+    // ── Integer zoom for the Static Maps API ──────────────────────────────
+    // map.getZoom() may be fractional during animated transitions.
+    // Math.round keeps our pixel-size math consistent with the API's zoom.
+    const fracZoom = map.getZoom?.() ?? 18;
+    const intZoom  = Math.min(21, Math.round(fracZoom));
+
+    // ── Scale factor: how many Static-Maps world-px equal one screen px ───
+    // At intZoom > fracZoom tiles are zoomed in (scaleFactor > 1).
+    // At intZoom < fracZoom tiles are zoomed out (scaleFactor < 1).
+    const scaleFactor = Math.pow(2, intZoom - fracZoom);
+
+    // How many screen-px does one 640-px tile cover?
+    const tileCapScreenPx = STATIC_MAP_MAX / scaleFactor;
+
+    // Tile grid: how many tiles needed to cover the blue box at this zoom?
+    const numCols = Math.min(MAX_COLS, Math.max(1, Math.ceil(r.w / tileCapScreenPx)));
+    const numRows = Math.min(MAX_ROWS, Math.max(1, Math.ceil(r.h / tileCapScreenPx)));
+
+    // ── Per-tile dimensions ───────────────────────────────────────────────
+    const tilePxW   = r.w / numCols;          // screen pixels per tile
+    const tilePxH   = r.h / numRows;
+    const tileWorldW = tilePxW   * scaleFactor; // world pixels requested from API
+    const tileWorldH = tilePxH   * scaleFactor;
+    const tileReqW   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldW)));
+    const tileReqH   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldH)));
 
     // ── Map layer ─────────────────────────────────────────────────────────
     const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
     const maptype    = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw)
                        ? maptypeRaw : "satellite";
 
-    // ── Find highest integer zoom where the whole area fits in ≤640 px ────
-    // Static Maps API only accepts integer zoom; Math.round keeps our
-    // world-pixel math in sync with the API's own integer rounding.
-    const STATIC_MAP_MAX = 640;
-    const GOOGLE_SCALE   = 2;
+    // ── Build tile URLs using Google Maps projection for tile centres ─────
+    // pxToLatLng converts screen-pixel positions to lat/lng via the same
+    // projection the interactive map uses → guaranteed geographic alignment.
+    const tileFetches = [];
+    for (let row = 0; row < numRows; row++) {
+      for (let col = 0; col < numCols; col++) {
+        const tileCenterLL = pxToLatLng({
+          x: r.x + (col + 0.5) * tilePxW,
+          y: r.y + (row + 0.5) * tilePxH,
+        });
+        if (!tileCenterLL) throw new Error("Map projection not ready. Try again in a moment.");
 
-    let zoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
-    let nwWorld, seWorld, reqW, reqH;
+        const url =
+          "https://maps.googleapis.com/maps/api/staticmap" +
+          `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
+          `&size=${tileReqW}x${tileReqH}` +
+          `&center=${tileCenterLL.lat.toFixed(7)},${tileCenterLL.lng.toFixed(7)}` +
+          `&zoom=${intZoom}&key=${encodeURIComponent(key)}`;
 
-    for (let z = zoom; z >= 1; z--) {
-      const nw = latLngToWorld(nLat, wLng, z);
-      const se = latLngToWorld(sLat, eLng, z);
-      const w  = se.x - nw.x;
-      const h  = se.y - nw.y;
-      // Store on every iteration — ensures nwWorld/seWorld are always set
-      zoom = z; nwWorld = nw; seWorld = se;
-      reqW = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(w)));
-      reqH = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(h)));
-      if (w >= 1 && h >= 1 && w <= STATIC_MAP_MAX && h <= STATIC_MAP_MAX) break;
+        tileFetches.push({ row, col, url });
+      }
     }
 
-    // ── Geographic centre: exact Mercator midpoint of the NW and SE corners ──
-    // IMPORTANT: use the true world-pixel midpoint (nwWorld + seWorld) / 2, NOT
-    // nwWorld + reqW/2.  reqW is already rounded, so nwWorld + reqW/2 introduces
-    // a small but non-zero offset that shifts the returned image away from the
-    // correct geographic area.  The true midpoint eliminates this error entirely.
-    const cx  = (nwWorld.x + seWorld.x) / 2;
-    const cy  = (nwWorld.y + seWorld.y) / 2;
-    const mercLat = worldYToLat(cy, zoom);
-    const mercLng = (cx / worldSize(zoom)) * 360 - 180;
+    // ── Output canvas ─────────────────────────────────────────────────────
+    const outW = Math.max(1, Math.round(numCols * tileWorldW * GOOGLE_SCALE));
+    const outH = Math.max(1, Math.round(numRows * tileWorldH * GOOGLE_SCALE));
+    const canvas = document.createElement("canvas");
+    canvas.width  = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
 
-    // ── Build the single Static Maps URL ──────────────────────────────────
-    // size=reqW×reqH → API returns exactly reqW×reqH CSS pixels (×2 real px
-    // with scale=2) centred on (mercLat, mercLng).  No over-fetch or crop.
-    const url =
-      "https://maps.googleapis.com/maps/api/staticmap" +
-      `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
-      `&size=${reqW}x${reqH}` +
-      `&center=${mercLat.toFixed(7)},${mercLng.toFixed(7)}` +
-      `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
+    // ── Fetch tiles in parallel then stitch ───────────────────────────────
+    const tileResults = await Promise.all(
+      tileFetches.map(({ row, col, url }) =>
+        fetchStaticMapAsDataUrl(url).then(dataUrl =>
+          new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload  = () => resolve({ row, col, img });
+            img.onerror = () => reject(new Error(`Preview tile (${col},${row}) failed to load.`));
+            img.src = dataUrl;
+          })
+        )
+      )
+    );
 
-    console.log("[Aerial Preview] bounds NE:", nLat.toFixed(6), eLng.toFixed(6),
-                " SW:", sLat.toFixed(6), wLng.toFixed(6));
-    console.log("[Aerial Preview] zoom:", zoom, " size:", reqW, "×", reqH,
-                " center:", mercLat.toFixed(6), mercLng.toFixed(6), " layer:", maptype);
+    for (const { row, col, img } of tileResults) {
+      // tileReqW ≈ tileWorldW (Math.round), so the centre-crop is at most 1px
+      const srcX = Math.round(((tileReqW  - tileWorldW) / 2) * GOOGLE_SCALE);
+      const srcY = Math.round(((tileReqH  - tileWorldH) / 2) * GOOGLE_SCALE);
+      const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
+      const srcH = Math.round(tileWorldH * GOOGLE_SCALE);
+      const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
+      const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
+    }
 
-    const dataUrl = await fetchStaticMapAsDataUrl(url);
-    setExportPreviewUrl(dataUrl);
+    console.log("[Aerial Preview] r:", Math.round(r.x), Math.round(r.y), r.w+"×"+r.h,
+                " fracZoom:", fracZoom.toFixed(2), "→ intZoom:", intZoom,
+                " scaleFactor:", scaleFactor.toFixed(3),
+                " tiles:", numCols+"×"+numRows, " tileReq:", tileReqW+"×"+tileReqH,
+                " layer:", maptype);
+
+    setExportPreviewUrl(canvas.toDataURL("image/jpeg", 0.92));
   } catch (e) {
     alert("Could not load aerial preview:\n" + (e instanceof Error ? e.message : String(e)));
   } finally {
@@ -10085,7 +10119,9 @@ height: pendingPictureTool.hPx * elementScale,
                       </defs>
                       <rect x="0" y="0" width="100%" height="100%" fill="rgba(0,0,0,0.4)" mask={`url(#export-area-mask-${r.x}-${r.y})`} />
                     </svg>
-                    {/* Blue export box with move + resize handles */}
+                    {/* Blue export box with move + resize handles.
+                        When the aerial preview is visible the box is locked
+                        (no drag/move) so the user cannot accidentally shift it. */}
                     <div
                       style={{
                         position: "absolute",
@@ -10094,9 +10130,13 @@ height: pendingPictureTool.hPx * elementScale,
                         width: r.w,
                         height: r.h,
                         pointerEvents: "auto",
-                        cursor: (uiDrag?.type === "moveExportArea" || uiDrag?.type === "resizeExportArea") ? "grabbing" : "move",
+                        cursor: exportPreviewUrl
+                          ? "default"
+                          : (uiDrag?.type === "moveExportArea" || uiDrag?.type === "resizeExportArea") ? "grabbing" : "move",
                       }}
                       onMouseDown={(e) => {
+                        // Locked while preview is showing — prevent accidental moves
+                        if (exportPreviewUrl) return;
                         if (!e.target.closest?.("[data-export-handle]")) {
                           e.preventDefault();
                           e.stopPropagation();
@@ -10140,7 +10180,8 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                         />
                       )}
-                      {handles.map((hnd) => (
+                      {/* Hide resize handles while the aerial preview is showing */}
+                      {!exportPreviewUrl && handles.map((hnd) => (
                         <div
                           key={hnd.key}
                           style={{
