@@ -2857,15 +2857,30 @@ async function loadExportPreview() {
       )
     );
 
-    // Scale each full tile image into its exact destination rect.
-    // drawImage handles the ±1px rounding between tileReqW and tileWorldW.
+    // Scale each tile into its destination rect, cropping Google's per-tile
+    // attribution bar (bottom ~22 CSS px = 44 natural px at scale=2) so it
+    // doesn't appear as repeated patches across the stitched image.
+    // The imagery is stretched by <3% vertically — imperceptible in aerials.
+    const ATTRIB_CROP_NAT = 44; // natural pixels to crop from bottom of each tile
     for (const { row, col, img } of tileResults) {
       const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
       const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
       const dstW = Math.round((col + 1) * tileWorldW * GOOGLE_SCALE) - dstX;
       const dstH = Math.round((row + 1) * tileWorldH * GOOGLE_SCALE) - dstY;
-      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dstX, dstY, dstW, dstH);
+      const srcH = Math.max(1, img.naturalHeight - ATTRIB_CROP_NAT);
+      ctx.drawImage(img, 0, 0, img.naturalWidth, srcH, dstX, dstY, dstW, dstH);
     }
+
+    // Draw a single consolidated attribution bar at the bottom of the composite.
+    const ATTRIB_TEXT = "Map data \u00A92026 Imagery \u00A92026 Airbus, Maxar Technologies \u00B7 Google";
+    const BAR_H = 22;
+    ctx.fillStyle = "rgba(255,255,255,0.80)";
+    ctx.fillRect(0, outH - BAR_H, outW, BAR_H);
+    ctx.fillStyle = "#444444";
+    ctx.font = "13px Arial, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ATTRIB_TEXT, outW - 10, outH - BAR_H / 2);
 
     setExportPreviewUrl(canvas.toDataURL("image/jpeg", 0.92));
   } catch (e) {
