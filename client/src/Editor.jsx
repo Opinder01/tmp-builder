@@ -3169,15 +3169,19 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       )
     );
 
+    const ATTRIB_CROP_NAT = 44; // crop Google attribution bar (~22 CSS px × scale 2) from each tile
     for (const { row, col, img } of tileResults) {
-      // Center-crop: the over-fetched pixels on each side = (tileReqW - tileWorldW) / 2
+      // Center-crop the over-fetched border pixels, then also crop the attribution
+      // bar from the bottom so it doesn't appear as repeated patches in the PDF.
       const srcX = Math.round(((tileReqW  - tileWorldW) / 2) * GOOGLE_SCALE);
       const srcY = Math.round(((tileReqH  - tileWorldH) / 2) * GOOGLE_SCALE);
       const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
-      const srcH = Math.round(tileWorldH * GOOGLE_SCALE);
+      const srcH = Math.max(1, Math.round(tileWorldH * GOOGLE_SCALE) - ATTRIB_CROP_NAT);
       const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
       const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
-      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
+      const dstW = Math.round(tileWorldW * GOOGLE_SCALE);
+      const dstH = Math.round(tileWorldH * GOOGLE_SCALE); // stretch content to fill row height
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -3946,6 +3950,20 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         pdfDoc.text(String(text).slice(0, 40), c.x - bw / 2 + 4, c.y);
       }
     }
+  }
+
+  // Draw a single consolidated attribution bar at the very bottom of the canvas
+  // (replaces the per-tile attribution patches that were cropped above).
+  {
+    const ATTRIB_TEXT = "Map data \u00A92026 Imagery \u00A92026 Airbus, Maxar Technologies \u00B7 Google";
+    const BAR_H = 22;
+    ctx.fillStyle = "rgba(255,255,255,0.80)";
+    ctx.fillRect(0, outH - BAR_H, outW, BAR_H);
+    ctx.fillStyle = "#444444";
+    ctx.font = "13px Arial, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ATTRIB_TEXT, outW - 10, outH - BAR_H / 2);
   }
 
   // --- STEP 5: Final output (page layout + map frame + vector overlay) ---
