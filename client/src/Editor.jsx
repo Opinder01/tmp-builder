@@ -2649,10 +2649,7 @@ function promptEditInsertText(obj) {
   function beginExportToPdf() {
   if (!mapRef.current) return;
   setOpenFileMenu(false);
-  setActiveTab("File");
   setExportMode(true);
-  setSelectedEntity(null);
-  setSelectedInsertId(null);
   setUiDrag(null);
   setPrintAreaBounds(null);
   setExportLiveRect(null);
@@ -2714,20 +2711,14 @@ async function exportViaScreenshot(selectedRectPx) {
 /**
  * loadExportPreview — tiled aerial preview anchored to the blue export box.
  *
- * Strategy: divide the blue box's SCREEN PIXEL rect into up to 3×3 tiles.
- * For each tile, convert its center from screen pixels → lat/lng using the
- * Google Maps projection (pxToLatLng).  This is the authoritative coordinate
- * system — exactly the same one the interactive map uses — so every tile
- * lands on the correct geographic position with zero drift.
- *
- * Tile SIZE is derived from the screen-pixel dimensions scaled by the
- * fractional→integer zoom ratio, so the preview always appears at the same
- * visual zoom level as the interactive map (no zoomed-out "different area"
- * effect).  The PDF export uses identical tile math for consistency.
+ * Uses the EXACT same lat/lng → world-pixel math as exportSelectionToPdf so
+ * the preview shows precisely the same geographic area that will be printed.
+ * The blue-box bounds (exportBoundsForPdfRef / printAreaBounds) are the sole
+ * source of truth — screen pixels and map.getCenter() are never consulted.
  */
 async function loadExportPreview() {
-  const bounds = exportBoundsForPdfRef.current ?? printAreaBounds;
-  if (!bounds) return;
+  const rawBounds = exportBoundsForPdfRef.current ?? printAreaBounds;
+  if (!rawBounds) return;
 
   const map = mapRef.current;
   if (!map) return;
@@ -2739,72 +2730,87 @@ async function loadExportPreview() {
   setExportPreviewUrl(null);
 
   try {
-    // ── Blue box screen rect — the exact visual footprint of the export area ──
-    const r = boundsToRectPx(bounds);
-    if (!r || r.w < 2 || r.h < 2) throw new Error("Export box not ready. Please wait a moment.");
+    // ── Normalize bounds (same as exportSelectionToPdf) ──────────────────
+    const nwLat = Math.max(rawBounds.nw.lat, rawBounds.se.lat);
+    const seLat = Math.min(rawBounds.nw.lat, rawBounds.se.lat);
+    const nwLng = Math.min(rawBounds.nw.lng, rawBounds.se.lng);
+    const seLng = Math.max(rawBounds.nw.lng, rawBounds.se.lng);
+    const bounds = { nw: { lat: nwLat, lng: nwLng }, se: { lat: seLat, lng: seLng } };
 
     const STATIC_MAP_MAX = 640;
     const GOOGLE_SCALE   = 2;
     const MAX_COLS       = 3;
     const MAX_ROWS       = 3;
 
-    // ── Integer zoom for the Static Maps API ──────────────────────────────
-    // map.getZoom() may be fractional during animated transitions.
-    // Math.round keeps our pixel-size math consistent with the API's zoom.
-    const fracZoom = map.getZoom?.() ?? 18;
-    const intZoom  = Math.min(21, Math.round(fracZoom));
+    // ── Web Mercator helpers (identical to exportSelectionToPdf) ──────────
+    const worldSize      = (z) => 256 * Math.pow(2, z);
+    const latLngToWorldPx = (lat, lng, z) => {
+      const s   = worldSize(z);
+      const x   = ((lng + 180) / 360) * s;
+      const sin = Math.sin((lat * Math.PI) / 180);
+      const y   = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
+      return { x, y };
+    };
+    const worldYToLat = (worldY, z) => {
+      const s   = worldSize(z);
+      const t   = worldY / s;
+      const k   = Math.exp((0.5 - t) * 4 * Math.PI);
+      const sin = (k - 1) / (k + 1);
+      return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
+    };
 
-    // ── Scale factor: how many Static-Maps world-px equal one screen px ───
-    // At intZoom > fracZoom tiles are zoomed in (scaleFactor > 1).
-    // At intZoom < fracZoom tiles are zoomed out (scaleFactor < 1).
-    const scaleFactor = Math.pow(2, intZoom - fracZoom);
+    // ── Find the highest zoom where bounds fit in a 3×3 tile grid ────────
+    // Start from current map zoom for maximum satellite detail.
+    const mapCurrentZoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
+    let zoom = mapCurrentZoom;
+    let nwWorld, seWorld, boundsPxW, boundsPxH;
 
-    // How many screen-px does one 640-px tile cover?
-    const tileCapScreenPx = STATIC_MAP_MAX / scaleFactor;
+    for (let z = mapCurrentZoom; z >= 1; z--) {
+      const nw = latLngToWorldPx(bounds.nw.lat, bounds.nw.lng, z);
+      const se = latLngToWorldPx(bounds.se.lat, bounds.se.lng, z);
+      const w  = Math.abs(se.x - nw.x);
+      const h  = Math.abs(se.y - nw.y);
+      zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
+      if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_COLS &&
+          Math.ceil(h / STATIC_MAP_MAX) <= MAX_ROWS) break;
+    }
 
-    // Tile grid: how many tiles needed to cover the blue box at this zoom?
-    const numCols = Math.min(MAX_COLS, Math.max(1, Math.ceil(r.w / tileCapScreenPx)));
-    const numRows = Math.min(MAX_ROWS, Math.max(1, Math.ceil(r.h / tileCapScreenPx)));
-
-    // ── Per-tile dimensions ───────────────────────────────────────────────
-    const tilePxW   = r.w / numCols;          // screen pixels per tile
-    const tilePxH   = r.h / numRows;
-    const tileWorldW = tilePxW   * scaleFactor; // world pixels requested from API
-    const tileWorldH = tilePxH   * scaleFactor;
-    const tileReqW   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldW)));
-    const tileReqH   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldH)));
+    const numCols   = Math.min(MAX_COLS, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
+    const numRows   = Math.min(MAX_ROWS, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
+    const tileWorldW = boundsPxW / numCols;
+    const tileWorldH = boundsPxH / numRows;
+    // Slight over-fetch (+4) so center-crop eliminates edge drift (same as exportSelectionToPdf)
+    const tileReqW  = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldW) + 4);
+    const tileReqH  = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldH) + 4);
 
     // ── Map layer ─────────────────────────────────────────────────────────
     const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
     const maptype    = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw)
                        ? maptypeRaw : "satellite";
 
-    // ── Build tile URLs using Google Maps projection for tile centres ─────
-    // pxToLatLng converts screen-pixel positions to lat/lng via the same
-    // projection the interactive map uses → guaranteed geographic alignment.
+    // ── Build tile URLs from world-pixel tile centres (same as exportSelectionToPdf) ──
     const tileFetches = [];
     for (let row = 0; row < numRows; row++) {
       for (let col = 0; col < numCols; col++) {
-        const tileCenterLL = pxToLatLng({
-          x: r.x + (col + 0.5) * tilePxW,
-          y: r.y + (row + 0.5) * tilePxH,
-        });
-        if (!tileCenterLL) throw new Error("Map projection not ready. Try again in a moment.");
-
+        const cx  = nwWorld.x + (col + 0.5) * tileWorldW;
+        const cy  = nwWorld.y + (row + 0.5) * tileWorldH;
+        const lat = worldYToLat(cy, zoom);
+        const lng = (cx / worldSize(zoom)) * 360 - 180;
         const url =
           "https://maps.googleapis.com/maps/api/staticmap" +
           `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
           `&size=${tileReqW}x${tileReqH}` +
-          `&center=${tileCenterLL.lat.toFixed(7)},${tileCenterLL.lng.toFixed(7)}` +
-          `&zoom=${intZoom}&key=${encodeURIComponent(key)}`;
-
+          `&center=${lat.toFixed(7)},${lng.toFixed(7)}` +
+          `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
         tileFetches.push({ row, col, url });
       }
     }
 
     // ── Output canvas ─────────────────────────────────────────────────────
-    const outW = Math.max(1, Math.round(numCols * tileWorldW * GOOGLE_SCALE));
-    const outH = Math.max(1, Math.round(numRows * tileWorldH * GOOGLE_SCALE));
+    const imgW  = Math.max(1, Math.round(boundsPxW));
+    const imgH  = Math.max(1, Math.round(boundsPxH));
+    const outW  = Math.max(1, Math.round(imgW * GOOGLE_SCALE));
+    const outH  = Math.max(1, Math.round(imgH * GOOGLE_SCALE));
     const canvas = document.createElement("canvas");
     canvas.width  = outW;
     canvas.height = outH;
@@ -2828,9 +2834,9 @@ async function loadExportPreview() {
     );
 
     for (const { row, col, img } of tileResults) {
-      // tileReqW ≈ tileWorldW (Math.round), so the centre-crop is at most 1px
-      const srcX = Math.round(((tileReqW  - tileWorldW) / 2) * GOOGLE_SCALE);
-      const srcY = Math.round(((tileReqH  - tileWorldH) / 2) * GOOGLE_SCALE);
+      // Center-crop: strip over-fetched pixels on each side
+      const srcX = Math.round(((tileReqW - tileWorldW) / 2) * GOOGLE_SCALE);
+      const srcY = Math.round(((tileReqH - tileWorldH) / 2) * GOOGLE_SCALE);
       const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
       const srcH = Math.round(tileWorldH * GOOGLE_SCALE);
       const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
@@ -2838,10 +2844,10 @@ async function loadExportPreview() {
       ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
     }
 
-    console.log("[Aerial Preview] r:", Math.round(r.x), Math.round(r.y), r.w+"×"+r.h,
-                " fracZoom:", fracZoom.toFixed(2), "→ intZoom:", intZoom,
-                " scaleFactor:", scaleFactor.toFixed(3),
-                " tiles:", numCols+"×"+numRows, " tileReq:", tileReqW+"×"+tileReqH,
+    console.log("[Aerial Preview] zoom:", zoom, " tiles:", numCols+"×"+numRows,
+                " tileReq:", tileReqW+"×"+tileReqH,
+                " bounds nw:", bounds.nw.lat.toFixed(6)+","+bounds.nw.lng.toFixed(6),
+                " se:", bounds.se.lat.toFixed(6)+","+bounds.se.lng.toFixed(6),
                 " layer:", maptype);
 
     setExportPreviewUrl(canvas.toDataURL("image/jpeg", 0.92));
@@ -10119,9 +10125,9 @@ height: pendingPictureTool.hPx * elementScale,
                       </defs>
                       <rect x="0" y="0" width="100%" height="100%" fill="rgba(0,0,0,0.4)" mask={`url(#export-area-mask-${r.x}-${r.y})`} />
                     </svg>
-                    {/* Blue export box with move + resize handles.
-                        When the aerial preview is visible the box is locked
-                        (no drag/move) so the user cannot accidentally shift it. */}
+                    {/* Blue export box — interior is pointer-transparent so map
+                        interactions (click, pan, zoom) work through it.
+                        Move is via the 8px border strip; resize via corner/edge handles. */}
                     <div
                       style={{
                         position: "absolute",
@@ -10129,21 +10135,10 @@ height: pendingPictureTool.hPx * elementScale,
                         top: r.y,
                         width: r.w,
                         height: r.h,
-                        pointerEvents: "auto",
-                        cursor: exportPreviewUrl
-                          ? "default"
-                          : (uiDrag?.type === "moveExportArea" || uiDrag?.type === "resizeExportArea") ? "grabbing" : "move",
-                      }}
-                      onMouseDown={(e) => {
-                        // Locked while preview is showing — prevent accidental moves
-                        if (exportPreviewUrl) return;
-                        if (!e.target.closest?.("[data-export-handle]")) {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          beginMoveExportArea({ x: e.clientX, y: e.clientY });
-                        }
+                        pointerEvents: "none",
                       }}
                     >
+                      {/* Blue border (visual only) */}
                       <div
                         style={{
                           position: "absolute",
@@ -10156,11 +10151,7 @@ height: pendingPictureTool.hPx * elementScale,
                           pointerEvents: "none",
                         }}
                       />
-                      {/* Aerial preview fills the blue box exactly.
-                          objectFit "fill" stretches the image to match the box dimensions.
-                          The image was fetched with the same aspect ratio as the blue box
-                          (worldW × worldH), so there is no visible distortion — the image
-                          simply fills the box pixel-perfectly without any cropping. */}
+                      {/* Aerial preview fills the blue box exactly */}
                       {exportPreviewUrl && (
                         <img
                           src={exportPreviewUrl}
@@ -10180,7 +10171,32 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                         />
                       )}
-                      {/* Hide resize handles while the aerial preview is showing */}
+                      {/* Thin border strips for moving the box (only when no preview) */}
+                      {!exportPreviewUrl && (["top","bottom","left","right"]).map((side) => {
+                        const STRIP = 8;
+                        const style = {
+                          position: "absolute",
+                          pointerEvents: "auto",
+                          cursor: uiDrag?.type === "moveExportArea" ? "grabbing" : "move",
+                          zIndex: 3,
+                          ...(side === "top"    && { left: 0, top: 0,            width: "100%", height: STRIP }),
+                          ...(side === "bottom" && { left: 0, bottom: 0,         width: "100%", height: STRIP }),
+                          ...(side === "left"   && { left: 0, top: STRIP,        width: STRIP,  height: `calc(100% - ${STRIP*2}px)` }),
+                          ...(side === "right"  && { right: 0, top: STRIP,       width: STRIP,  height: `calc(100% - ${STRIP*2}px)` }),
+                        };
+                        return (
+                          <div
+                            key={side}
+                            style={style}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              beginMoveExportArea({ x: e.clientX, y: e.clientY });
+                            }}
+                          />
+                        );
+                      })}
+                      {/* Resize handles — hidden while aerial preview is showing */}
                       {!exportPreviewUrl && handles.map((hnd) => (
                         <div
                           key={hnd.key}
@@ -10195,6 +10211,7 @@ height: pendingPictureTool.hPx * elementScale,
                             borderRadius: 2,
                             cursor: hnd.cursor,
                             pointerEvents: "auto",
+                            zIndex: 4,
                           }}
                           data-export-handle
                           onPointerDown={(e) => {
