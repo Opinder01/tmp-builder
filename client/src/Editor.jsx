@@ -3643,14 +3643,14 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   }
 
   // Height (mm) reserved at the top of every exported PDF for the branding header.
-  const PDF_HEADER_H = 14; // fits title + subtitle with breathing room
+  const PDF_HEADER_H = 9; // compact: title + subtitle with minimal breathing room
 
   function getMapFrameRect(pageW, pageH) {
-    const marginH = 4;  // mm left/right
-    const marginV = 2;  // mm bottom (and right — top uses PDF_HEADER_H instead)
+    const marginH = 2;  // mm left/right — tight side margins
+    const marginV = 1;  // mm bottom — minimal bottom margin
     return {
       x: marginH,
-      y: PDF_HEADER_H,               // map starts below the header ribbon
+      y: PDF_HEADER_H,               // map starts immediately below the header ribbon
       w: pageW - marginH * 2,
       h: pageH - PDF_HEADER_H - marginV,
     };
@@ -3658,22 +3658,22 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
   /** Draw the TMPBUILDER.CA branding header in the white ribbon above the map. */
   function drawPdfBrandingHeader(pdfDoc, pageW) {
-    // Title — bold, large
+    // Title — bold, compact
     pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setFontSize(13);
+    pdfDoc.setFontSize(11);
     pdfDoc.setTextColor(30, 30, 30);
-    pdfDoc.text("TMPBUILDER.CA", pageW / 2, 7, { align: "center" });
+    pdfDoc.text("TMPBUILDER.CA", pageW / 2, 3.8, { align: "center" });
 
     // Subtitle — lighter, smaller
     pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.setFontSize(7.5);
+    pdfDoc.setFontSize(6.5);
     pdfDoc.setTextColor(90, 90, 90);
-    pdfDoc.text("Traffic Management Plan", pageW / 2, 11.5, { align: "center" });
+    pdfDoc.text("Traffic Management Plan", pageW / 2, 7, { align: "center" });
 
     // Thin separator line between header and map
     pdfDoc.setDrawColor(180, 180, 180);
     pdfDoc.setLineWidth(0.3);
-    pdfDoc.line(4, PDF_HEADER_H - 0.5, pageW - 4, PDF_HEADER_H - 0.5);
+    pdfDoc.line(2, PDF_HEADER_H - 0.3, pageW - 2, PDF_HEADER_H - 0.3);
 
     // Reset colours so subsequent drawing isn't affected
     pdfDoc.setTextColor(0, 0, 0);
@@ -3994,7 +3994,12 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   }
 
   // --- STEP 5: Final output (page layout + map frame + vector overlay) ---
-  const orient = exportOrientation === "landscape" ? "l" : "p";
+  // Auto-select orientation so the map fills the page with minimal blank space:
+  // if the export canvas is wider than tall → landscape, otherwise → portrait.
+  // This overrides the user's exportOrientation setting only when the aspect
+  // ratios would cause severe letterboxing.
+  const autoOrient = imgW >= imgH ? "l" : "p";
+  const orient = autoOrient;
   const format = ["letter","legal","tabloid","a4","a3"].includes(exportPaperSize) ? exportPaperSize : "letter";
   const pdf = new jsPDF({ orientation: orient, unit: "mm", format });
   const pageW = pdf.internal.pageSize.getWidth();
