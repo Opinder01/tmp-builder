@@ -1919,7 +1919,10 @@ useEffect(() => {
   function latLngToPx(ll) {
     const proj = getProjection();
     if (!proj || !window.google?.maps) return null;
-    const p = proj.fromLatLngToDivPixel(
+    // fromLatLngToContainerPixel returns pixels relative to the visible map
+    // container (0,0 = top-left of the viewport).  This stays correct after
+    // panning, unlike fromLatLngToDivPixel which uses the panning-div origin.
+    const p = proj.fromLatLngToContainerPixel(
       new window.google.maps.LatLng(ll.lat, ll.lng)
     );
     return { x: p.x, y: p.y };
@@ -1928,7 +1931,8 @@ useEffect(() => {
   function pxToLatLng(p) {
     const proj = getProjection();
     if (!proj || !window.google?.maps) return null;
-    const ll = proj.fromDivPixelToLatLng(
+    // fromContainerPixelToLatLng is the exact inverse of fromLatLngToContainerPixel.
+    const ll = proj.fromContainerPixelToLatLng(
       new window.google.maps.Point(p.x, p.y)
     );
     return { lat: ll.lat(), lng: ll.lng() };
