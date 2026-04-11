@@ -23,6 +23,12 @@ import {
   DEFAULT_SIGN_WIDTH_PX,
   DEFAULT_SIGN_HEIGHT_PX,
 } from "./signCatalog";
+import {
+  getArrowCatalog,
+  getArrowById,
+  DEFAULT_ARROW_WIDTH_PX,
+  DEFAULT_ARROW_HEIGHT_PX,
+} from "./arrowCatalog";
 
 const GMAP_LIBRARIES = ["places", "geometry"];
 
@@ -545,6 +551,11 @@ const MEAS_ITEMS = [
  * Signs: generated from central catalog (signCatalog.js)
  * ========================= */
 const SIGN_ITEMS = getSignCatalog();
+
+/** =========================
+ * Arrows: from arrowCatalog.js
+ * ========================= */
+const ARROW_ITEMS = getArrowCatalog();
 
 /** =========================
  * Cones spacing (real‑world meters)
@@ -2048,10 +2059,11 @@ async function fetchStaticMapAsDataUrl(url) {
 
 
   /* ================= Active tool ================= */
-  const [activeTool, setActiveTool] = useState(null); // "cones" | "measurements" | "signs" | "legend" | "manifest" | "title" | null
+  const [activeTool, setActiveTool] = useState(null); // "cones" | "measurements" | "signs" | "arrows" | "legend" | "manifest" | "title" | null
   const isConesToolActive = activeTool === "cones";
   const isMeasToolActive = activeTool === "measurements";
   const isSignsToolActive = activeTool === "signs";
+  const isArrowToolActive = activeTool === "arrows";
   const isTitleToolActive = activeTool === "title";
   const isNorthArrowToolActive = activeTool === "northArrow";
   const isInsertToolActive = typeof activeTool === "string" && activeTool.startsWith("insert:");
@@ -2151,6 +2163,12 @@ useEffect(() => {
   const [placedSigns, setPlacedSigns] = useState([]);
   const [signHoveredId, setSignHoveredId] = useState(null);
 
+  /* ================= Arrow tool ================= */
+  const [arrowPanelOpen, setArrowPanelOpen]       = useState(false);
+  const [selectedArrowId, setSelectedArrowId]     = useState(ARROW_ITEMS[0]?.id ?? "arrow_1");
+  const [placedArrows, setPlacedArrows]           = useState([]);
+  const [arrowHoveredId, setArrowHoveredId]       = useState(null);
+
   // ── Sync custom connector overlays whenever sign/stand data changes ─────────
   // Must be after placedSigns is declared.
   useEffect(() => {
@@ -2238,6 +2256,7 @@ useEffect(() => {
     conesFeatures,
     measurements,
     placedSigns,
+    placedArrows,
     legendBoxes,
     manifestBoxes,
     titleBoxes,
@@ -2246,7 +2265,7 @@ useEffect(() => {
     scales,
     insertObjects,
   };
-}, [workAreas, conesFeatures, measurements, placedSigns, legendBoxes, manifestBoxes, titleBoxes, titleBoxDataById, northArrows, scales, insertObjects]);
+}, [workAreas, conesFeatures, measurements, placedSigns, placedArrows, legendBoxes, manifestBoxes, titleBoxes, titleBoxDataById, northArrows, scales, insertObjects]);
 // ================= PAGE FRAME (Permanent export boundary) =================
 // ✅ page frame stored in LAT/LNG (so it sticks to the map)
 const [pageFrameBounds, setPageFrameBounds] = useState(null); 
@@ -2370,6 +2389,7 @@ const makeSnapshot = () => ({
   conesFeatures,
   measurements,
   placedSigns,
+  placedArrows,
 
   // Tools / Inserts
   legendBoxes,
@@ -2393,6 +2413,7 @@ const applySnapshot = (s) => {
     setConesFeatures(s.conesFeatures ?? []);
     setMeasurements(s.measurements ?? []);
     setPlacedSigns(s.placedSigns ?? []);
+    setPlacedArrows(s.placedArrows ?? []);
 
     setLegendBoxes(s.legendBoxes ?? []);
     setManifestBoxes(s.manifestBoxes ?? []);
@@ -2444,6 +2465,7 @@ function makeProjectSnapshot() {
     conesFeatures: plan.conesFeatures ?? [],
     measurements: plan.measurements ?? [],
     placedSigns: plan.placedSigns ?? [],
+    placedArrows: plan.placedArrows ?? [],
     legendBoxes: plan.legendBoxes ?? [],
     manifestBoxes: plan.manifestBoxes ?? [],
     titleBoxes: plan.titleBoxes ?? [],
@@ -2476,6 +2498,7 @@ function applyProjectSnapshot(snap) {
     conesFeatures: snap.conesFeatures ?? [],
     measurements: snap.measurements ?? [],
     placedSigns: snap.placedSigns ?? [],
+    placedArrows: snap.placedArrows ?? [],
     legendBoxes: snap.legendBoxes ?? [],
     manifestBoxes: snap.manifestBoxes ?? [],
     titleBoxes: snap.titleBoxes ?? [],
@@ -2505,6 +2528,7 @@ function applyProjectSnapshot(snap) {
       conesFeatures: es.conesFeatures ?? [],
       measurements: es.measurements ?? [],
       placedSigns: es.placedSigns ?? [],
+      placedArrows: es.placedArrows ?? [],
       legendBoxes: es.legendBoxes ?? [],
       manifestBoxes: es.manifestBoxes ?? [],
       titleBoxes: es.titleBoxes ?? [],
@@ -2576,6 +2600,8 @@ const doDelete = React.useCallback(() => {
     setScales((prev) => prev.filter((x) => x.id !== selectedEntity.id));
   } else if (selectedEntity.kind === "sign") {
     setPlacedSigns((prev) => prev.filter((s) => s.id !== selectedEntity.id));
+  } else if (selectedEntity.kind === "arrow") {
+    setPlacedArrows((prev) => prev.filter((a) => a.id !== selectedEntity.id));
   }
 
   setSelectedEntity(null);
@@ -2634,6 +2660,7 @@ function promptEditInsertText(obj) {
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
     setSignsPanelOpen(false);
+    setArrowPanelOpen(false);
   }
   function initExportAreaFromViewport() {
   const map = mapRef.current;
@@ -3416,6 +3443,55 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     }
   }
 
+  // Arrow boards (same drawing pattern as placed signs)
+  const placedArrows = plan.placedArrows ?? [];
+  const arrowImages = await Promise.all((placedArrows).map((a) => loadSignImage(a?.src)));
+  for (let i = 0; i < placedArrows.length; i++) {
+    const a = placedArrows[i];
+    const p = project(a?.pos);
+    if (!inBounds(p)) continue;
+    const sc = toCanvas(p);
+    const zRef = a?.zRef ?? 18;
+    const w = (a?.wPx || DEFAULT_ARROW_WIDTH_PX) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
+    const h = (a?.hPx || DEFAULT_ARROW_HEIGHT_PX) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
+    const rotDeg = a?.rotDeg ?? 0;
+    ctx.save();
+    ctx.translate(sc.x, sc.y);
+    ctx.rotate((rotDeg * Math.PI) / 180);
+    ctx.translate(-w / 2, -h / 2);
+    const img = arrowImages[i];
+    if (img) {
+      ctx.drawImage(img, 0, 0, w, h);
+    } else {
+      ctx.strokeStyle = "#2563EB";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(0, 0, w, h);
+    }
+    ctx.restore();
+    // Draw dashed line to point if present
+    if (a.point?.pos) {
+      const pp = project(a.point.pos);
+      if (pp) {
+        const cp = toCanvas(pp);
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = "#2563EB";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sc.x, sc.y);
+        ctx.lineTo(cp.x, cp.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Draw the point dot
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#2563EB";
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
   // Insert objects (text, rect, table, picture) – skip line (drawn separately)
   const loadInsertImage = (url) => {
     if (!url || typeof url !== "string") return Promise.resolve(null);
@@ -4059,6 +4135,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   setConesPanelOpen(true);
   setMeasPanelOpen(false);
   setSignsPanelOpen(false);
+  setArrowPanelOpen(false);
 }
 function openMeasTool() {
   if (conesIsDrawing) cancelConesDrawing();
@@ -4067,6 +4144,7 @@ function openMeasTool() {
   setMeasPanelOpen(true);
   setConesPanelOpen(false);
   setSignsPanelOpen(false);
+  setArrowPanelOpen(false);
 }
 
   function openWorkAreaTool() {
@@ -4078,6 +4156,7 @@ if (measIsDrawing) cancelMeasDrawing();
   setConesPanelOpen(false);
   setMeasPanelOpen(false);
   setSignsPanelOpen(false);
+  setArrowPanelOpen(false);
 setPanMode(false);
 
   // reset work area draft when starting fresh
@@ -4099,6 +4178,17 @@ setPanMode(false);
     setSignsPanelOpen(true);
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
+    setArrowPanelOpen(false);
+    if (conesIsDrawing) cancelConesDrawing();
+    if (measIsDrawing) cancelMeasDrawing();
+  }
+
+  function openArrowTool() {
+    setActiveTool("arrows");
+    setArrowPanelOpen(true);
+    setSignsPanelOpen(false);
+    setConesPanelOpen(false);
+    setMeasPanelOpen(false);
     if (conesIsDrawing) cancelConesDrawing();
     if (measIsDrawing) cancelMeasDrawing();
   }
@@ -4111,6 +4201,9 @@ setPanMode(false);
   }
   function closeSignsPanel() {
     setSignsPanelOpen(false);
+  }
+  function closeArrowPanel() {
+    setArrowPanelOpen(false);
   }
 
   /* ================= Tab click behavior ================= */
@@ -4288,6 +4381,29 @@ setPanMode(false);
     ]);
 
     setSelectedEntity({ kind: "sign", id });
+  }
+
+  /* ================= Arrow placement ================= */
+  function placeArrowAt(latlng) {
+    const item = getArrowById(selectedArrowId) || ARROW_ITEMS[0];
+    if (!item) return;
+    const id = String(Date.now() + Math.random());
+    pushHistory();
+    setPlacedArrows((prev) => [
+      ...prev,
+      {
+        id,
+        arrowId: item.id,
+        src: item.src,
+        pos: latlng,
+        wPx: DEFAULT_ARROW_WIDTH_PX,
+        hPx: DEFAULT_ARROW_HEIGHT_PX,
+        rotDeg: 0,
+        zRef: zoomNow,
+        point: null, // optional draggable anchor point { id, pos }
+      },
+    ]);
+    setSelectedEntity({ kind: "arrow", id });
   }
 
   function getSelectedSign() {
@@ -4782,6 +4898,12 @@ return;
         return;
       }
 
+      // ARROWS place repeatedly
+      if (isArrowToolActive) {
+        placeArrowAt(p);
+        return;
+      }
+
       // CONES
       if (isConesToolActive) {
         if (!conesIsDrawing) startConesDrawingAt(p);
@@ -5010,6 +5132,13 @@ if (measEdit) {
   if (isSignsToolActive) {
     setActiveTool(null);
     setSignsPanelOpen(false);
+    return;
+  }
+
+  // stop arrows tool
+  if (isArrowToolActive) {
+    setActiveTool(null);
+    setArrowPanelOpen(false);
     return;
   }
 
@@ -5273,7 +5402,11 @@ useEffect(() => {
         uiDrag.type === "rotateSign" ||
         uiDrag.type === "rotateNorthArrow" ||
         uiDrag.type === "rotateStand" ||
-        uiDrag.type === "resizeWorkArea"
+        uiDrag.type === "resizeWorkArea" ||
+        uiDrag.type === "moveArrow" ||
+        uiDrag.type === "resizeArrow" ||
+        uiDrag.type === "rotateArrow" ||
+        uiDrag.type === "moveArrowPoint"
       ) {
         pushHistory();
       }
@@ -5285,7 +5418,11 @@ useEffect(() => {
         uiDrag.type === "rotateStand" ||
         uiDrag.type === "resizeWorkArea" ||
         uiDrag.type === "resizeExportArea" ||
-        uiDrag.type === "moveExportArea"
+        uiDrag.type === "moveExportArea" ||
+        uiDrag.type === "moveArrow" ||
+        uiDrag.type === "resizeArrow" ||
+        uiDrag.type === "rotateArrow" ||
+        uiDrag.type === "moveArrowPoint"
       ) {
         lockMapInteractions(false);
       }
@@ -5335,6 +5472,9 @@ useEffect(() => {
       t !== "resizeSign" &&
       t !== "moveStand" &&
       t !== "createStand" &&
+      t !== "moveArrow" &&
+      t !== "resizeArrow" &&
+      t !== "moveArrowPoint" &&
       t !== "resizeWorkArea" &&
       t !== "resizeExportArea" &&
       t !== "moveExportArea"
@@ -5349,7 +5489,10 @@ useEffect(() => {
         uiDrag.type === "moveSign" ||
         uiDrag.type === "resizeSign" ||
         uiDrag.type === "moveStand" ||
-        uiDrag.type === "createStand";
+        uiDrag.type === "createStand" ||
+        uiDrag.type === "moveArrow" ||
+        uiDrag.type === "resizeArrow" ||
+        uiDrag.type === "moveArrowPoint";
       // Some environments support PointerEvent but don't reliably emit mousemove
       // for mouse interactions. De-dupe mousemove vs pointermove for heavy overlays —
       // but never for sign drags: skipping events there makes move/resize feel sluggish.
@@ -5595,6 +5738,42 @@ useEffect(() => {
             return { ...s, wPx: w, hPx: h };
           })
         );
+      } else if (uiDrag.type === "moveArrow") {
+        const { arrowId, offsetPx } = uiDrag;
+        const newCenterPx = { x: curPx.x - offsetPx.x, y: curPx.y - offsetPx.y };
+        const nextPos = pxToLatLng(newCenterPx);
+        if (!nextPos) return;
+        setPlacedArrows((prev) =>
+          prev.map((a) => (a.id === arrowId ? { ...a, pos: nextPos } : a))
+        );
+      } else if (uiDrag.type === "moveArrowPoint") {
+        const { arrowId, offsetPx } = uiDrag;
+        const nextPos = pxToLatLng({ x: curPx.x - offsetPx.x, y: curPx.y - offsetPx.y });
+        if (!nextPos) return;
+        setPlacedArrows((prev) =>
+          prev.map((a) =>
+            a.id !== arrowId ? a : { ...a, point: { ...a.point, pos: nextPos } }
+          )
+        );
+      } else if (uiDrag.type === "resizeArrow") {
+        const { arrowId, corner, startSize, startPointerPx } = uiDrag;
+        const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
+        const dx = curPx.x - startPointerPx.x;
+        const dy = curPx.y - startPointerPx.y;
+        const rotDeg = startSize?.rotDeg ?? 0;
+        const { dlx, dly } = signPointerDeltaToLocalDxDy(dx, dy, rotDeg);
+        const w0f = scalePx(startSize.wPx, zRef);
+        const h0f = scalePx(startSize.hPx, zRef);
+        let { wf, hf } = signApplyCornerDeltaToVisualWH(corner, w0f, h0f, dlx * 2, dly * 2);
+        const vmin = scalePx(28, zRef);
+        const vmax = scalePx(400, zRef);
+        wf = clamp(wf, vmin, vmax);
+        hf = clamp(hf, vmin, vmax);
+        const w = clamp(Math.round(unscalePx(wf, zRef)), 28, 400);
+        const h = clamp(Math.round(unscalePx(hf, zRef)), 28, 400);
+        setPlacedArrows((prev) =>
+          prev.map((a) => (a.id !== arrowId ? a : { ...a, wPx: w, hPx: h }))
+        );
       }
     }
 
@@ -5700,6 +5879,49 @@ useEffect(() => {
     };
   }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
 
+  /* ================= Arrow rotate: dedicated pointer listener ================= */
+  useEffect(() => {
+    if (!uiDrag || uiDrag.type !== "rotateArrow") return;
+    if (!projectionReady) return;
+    const drag = uiDrag;
+    const { centerPx } = drag;
+    if (!centerPx) return;
+    const live = { lastAngleDeg: 0, accumulatedDeg: 0 };
+    function handleMove(ev) {
+      const srcEv = ev?.type === "pointermove" && typeof ev.getCoalescedEvents === "function"
+        ? (ev.getCoalescedEvents().slice(-1)[0] || ev) : ev;
+      const clientX = srcEv.clientX ?? srcEv.touches?.[0]?.clientX;
+      const clientY = srcEv.clientY ?? srcEv.touches?.[0]?.clientY;
+      if (clientX == null || clientY == null) return;
+      const curPx = clientToDivPx(clientX, clientY);
+      if (!curPx) return;
+      const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
+      let delta = angleNow - live.lastAngleDeg;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      live.lastAngleDeg = angleNow;
+      live.accumulatedDeg += delta;
+      const nextDeg = (drag.startAngleDeg ?? 0) + live.accumulatedDeg;
+      setPlacedArrows((prev) =>
+        prev.map((a) => (a.id === drag.arrowId ? { ...a, rotDeg: nextDeg } : a))
+      );
+      if (ev.cancelable) ev.preventDefault();
+    }
+    function handleUp() {
+      lockMapInteractions(false);
+      pushHistory();
+      setUiDrag(null);
+    }
+    const tgt = document;
+    tgt.addEventListener("pointermove", handleMove, { passive: false, capture: true });
+    tgt.addEventListener("pointerup", handleUp, true);
+    tgt.addEventListener("pointercancel", handleUp, true);
+    return () => {
+      tgt.removeEventListener("pointermove", handleMove, true);
+      tgt.removeEventListener("pointerup", handleUp, true);
+      tgt.removeEventListener("pointercancel", handleUp, true);
+    };
+  }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
 
   /* ================= Legend resize: smooth window mousemove ================= */
   useEffect(() => {
@@ -6674,6 +6896,7 @@ const handleContextCut = () => {
   if (data) setClipboard({ kind: entityType, data: { ...data } });
   switch (entityType) {
     case "sign":        setPlacedSigns(prev => prev.filter(x => x.id !== entityId)); break;
+    case "arrow":       setPlacedArrows(prev => prev.filter(x => x.id !== entityId)); break;
     case "cones":       setConesFeatures(prev => prev.filter(x => x.id !== entityId)); break;
     case "workArea":    setWorkAreas(prev => prev.filter(x => x.id !== entityId)); break;
     case "measurement": setMeasurements(prev => prev.filter(x => x.id !== entityId)); break;
@@ -7461,6 +7684,7 @@ const tileIconStyle = {
 <RibbonTextButton label="Signs" active={isSignsToolActive} onClick={openSignsTool} variant="outline" />
 <RibbonTextButton label="Measurements" active={isMeasToolActive} onClick={openMeasTool} variant="outline" />
 <RibbonTextButton label="Work Area" active={activeTool === "work_area"} onClick={openWorkAreaTool} variant="outline" />
+<RibbonTextButton label="Arrow" active={isArrowToolActive} onClick={openArrowTool} variant="outline" />
 
 
               </RibbonGroup>
@@ -8094,6 +8318,72 @@ const tileIconStyle = {
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* ─────────────────── ARROW PANEL ─────────────────── */}
+        {arrowPanelOpen && activeTab === "Plan Elements" && (
+          <div className="no-print" style={{
+            position: "absolute",
+            top: 12,
+            bottom: 20,
+            left: 12,
+            width: 200,
+            background: "#fff",
+            border: "1px solid #e0e0e0",
+            borderRadius: 12,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
+            zIndex: 50,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{
+              display: "flex", alignItems: "center",
+              padding: "10px 12px 8px", borderBottom: "1px solid #f0f0f0", flexShrink: 0,
+            }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: "#111", flex: 1 }}>Arrow Boards</span>
+              <button type="button" onClick={closeArrowPanel} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 16, color: "#999", lineHeight: 1, padding: "0 2px",
+              }}>✕</button>
+            </div>
+
+            {/* Icon-only grid (no labels) */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 8px 12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+                {ARROW_ITEMS.map((item) => {
+                  const active = selectedArrowId === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => { openArrowTool(); setSelectedArrowId(item.id); }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 8,
+                        border: active ? "2px solid #f97316" : "1.5px solid #ebebeb",
+                        borderRadius: 10,
+                        background: active ? "#fff7ed" : "#fff",
+                        cursor: "pointer",
+                        transition: "border-color 0.15s",
+                        aspectRatio: "1.2",
+                      }}
+                    >
+                      <img
+                        src={item.src}
+                        alt={item.id}
+                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                        draggable={false}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
 
@@ -10174,6 +10464,304 @@ height: pendingPictureTool.hPx * elementScale,
                 </>
                 );
               })()}
+
+              {/* ─────────────────── PLACED ARROWS ─────────────────── */}
+              {placedArrows.map((arrow) => {
+                const isSelected = selectedEntity?.kind === "arrow" && selectedEntity.id === arrow.id;
+                const isMovingArrow = uiDrag?.type === "moveArrow" && uiDrag.arrowId === arrow.id;
+                const arrowZRef = arrow.zRef ?? ELEMENT_BASE_ZOOM;
+                const liveZoom = mapRef.current?.getZoom?.() ?? zoomNow;
+                const arrowW = Math.round((arrow.wPx ?? DEFAULT_ARROW_WIDTH_PX) * Math.pow(2, liveZoom - arrowZRef));
+                const arrowH = Math.round((arrow.hPx ?? DEFAULT_ARROW_HEIGHT_PX) * Math.pow(2, liveZoom - arrowZRef));
+
+                // Corner-pinning offset during resize (mirrors sign behavior)
+                const _isResizingThis = uiDrag?.type === "resizeArrow" && uiDrag.arrowId === arrow.id;
+                let _resizeTx = 0, _resizeTy = 0;
+                if (_isResizingThis) {
+                  const _c = uiDrag.corner ?? "se";
+                  const _dW = arrowW - (uiDrag.startSignW ?? arrowW);
+                  const _dH = arrowH - (uiDrag.startSignH ?? arrowH);
+                  const pin = signResizeCenterOffsetPx(_c, _dW, _dH, arrow.rotDeg ?? 0);
+                  _resizeTx = pin.x;
+                  _resizeTy = pin.y;
+                }
+
+                return (
+                  <React.Fragment key={arrow.id}>
+                    {/* Arrow image overlay */}
+                    <OverlayViewF
+                      position={arrow.pos}
+                      mapPaneName="overlayMouseTarget"
+                      zIndex={94000}
+                    >
+                      <div style={{
+                        transform: `translate(calc(-50% + ${_resizeTx}px), calc(-50% + ${_resizeTy}px))`,
+                        position: "relative",
+                        display: "inline-block",
+                        overflow: "visible",
+                      }}>
+                        <div
+                          data-arrow-interactive="1"
+                          data-arrow-id={arrow.id}
+                          style={{
+                            transform: `rotate(${arrow.rotDeg ?? 0}deg)`,
+                            transformOrigin: "center center",
+                            width: arrowW,
+                            height: arrowH,
+                            pointerEvents: "auto",
+                            cursor: isMovingArrow ? "grabbing" : "pointer",
+                            userSelect: "none",
+                            position: "relative",
+                          }}
+                          onMouseEnter={() => setArrowHoveredId(arrow.id)}
+                          onMouseLeave={() => setArrowHoveredId(null)}
+                          onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setSelectedEntity({ kind: "arrow", id: arrow.id }); setActiveTool(null); setArrowPanelOpen(false); }}
+                          onPointerDown={(ev) => {
+                            ev.preventDefault(); ev.stopPropagation();
+                            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+                            setSelectedEntity({ kind: "arrow", id: arrow.id });
+                            setActiveTool(null); setArrowPanelOpen(false);
+                            if (!projectionReady) return;
+                            const centerPx = latLngToPx(arrow.pos);
+                            if (!centerPx) return;
+                            const grabPx = clientToDivPx(ev.clientX, ev.clientY);
+                            if (!grabPx) return;
+                            lockMapInteractions(true);
+                            setUiDrag({
+                              type: "moveArrow",
+                              arrowId: arrow.id,
+                              offsetPx: { x: grabPx.x - centerPx.x, y: grabPx.y - centerPx.y },
+                            });
+                          }}
+                        >
+                          <img
+                            src={arrow.src}
+                            alt={arrow.arrowId}
+                            draggable={false}
+                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", display: "block", pointerEvents: "none" }}
+                          />
+
+                          {/* Selection overlay (border + handles + rotate) */}
+                          {isSelected && projectionReady && (() => {
+                            const HANDLE = 12, OFF = -6;
+                            const handles = [
+                              { key: "nw", x: 0,      y: 0,      cursor: "nwse-resize" },
+                              { key: "ne", x: arrowW,  y: 0,      cursor: "nesw-resize" },
+                              { key: "sw", x: 0,      y: arrowH,  cursor: "nesw-resize" },
+                              { key: "se", x: arrowW,  y: arrowH,  cursor: "nwse-resize" },
+                            ];
+                            const isRotatingThis = uiDrag?.type === "rotateArrow" && uiDrag.arrowId === arrow.id;
+                            return (
+                              <div
+                                data-arrow-interactive="1"
+                                style={{
+                                  position: "absolute", left: 0, top: 0,
+                                  width: arrowW, height: arrowH,
+                                  overflow: "visible", pointerEvents: "none",
+                                }}
+                              >
+                                {/* Blue border */}
+                                <div style={{
+                                  position: "absolute", left: 0, top: 0,
+                                  width: arrowW, height: arrowH,
+                                  border: "2px solid #7C3AED", borderRadius: 2,
+                                  boxSizing: "border-box", background: "transparent",
+                                  pointerEvents: "none",
+                                }} />
+
+                                {/* 4 corner resize handles */}
+                                {handles.map((hnd) => (
+                                  <div
+                                    key={hnd.key}
+                                    data-handle="1"
+                                    data-arrow-interactive="1"
+                                    style={{
+                                      position: "absolute", left: hnd.x + OFF, top: hnd.y + OFF,
+                                      width: HANDLE, height: HANDLE,
+                                      background: "#fff", border: "1px solid #111",
+                                      borderRadius: 2, cursor: hnd.cursor,
+                                      pointerEvents: "auto", zIndex: 100,
+                                    }}
+                                    onPointerDown={(e) => {
+                                      e.preventDefault(); e.stopPropagation();
+                                      e.currentTarget.setPointerCapture?.(e.pointerId);
+                                      if (!projectionReady) return;
+                                      const startPointerPx = clientToDivPx(e.clientX, e.clientY);
+                                      if (!startPointerPx) return;
+                                      lockMapInteractions(true);
+                                      setUiDrag({
+                                        type: "resizeArrow",
+                                        arrowId: arrow.id,
+                                        corner: hnd.key,
+                                        startSize: { wPx: arrow.wPx, hPx: arrow.hPx, zRef: arrowZRef, rotDeg: arrow.rotDeg ?? 0 },
+                                        startPointerPx,
+                                        startSignW: arrowW,
+                                        startSignH: arrowH,
+                                      });
+                                    }}
+                                  />
+                                ))}
+
+                                {/* Rotate handle */}
+                                <div
+                                  data-handle="1"
+                                  data-arrow-interactive="1"
+                                  style={{
+                                    position: "absolute", left: "50%", top: arrowH + ROTATE_HANDLE_GAP_PX,
+                                    transform: "translate(-50%, -50%)",
+                                    width: 36, height: 36, borderRadius: 999,
+                                    border: isRotatingThis ? "1.5px solid #2563EB" : "1px solid rgba(17,24,39,0.25)",
+                                    background: isRotatingThis ? "rgba(37,99,235,0.12)" : "rgba(255,255,255,0.92)",
+                                    display: "grid", placeItems: "center",
+                                    cursor: isRotatingThis ? "grabbing" : "grab",
+                                    pointerEvents: "auto",
+                                    boxShadow: "0 2px 10px rgba(0,0,0,0.10)",
+                                    zIndex: 100, touchAction: "none", userSelect: "none",
+                                  }}
+                                  onPointerDown={(e) => {
+                                    e.preventDefault(); e.stopPropagation();
+                                    e.currentTarget.setPointerCapture?.(e.pointerId);
+                                    if (!projectionReady) return;
+                                    const centerPx = latLngToPx(arrow.pos);
+                                    if (!centerPx) return;
+                                    lockMapInteractions(true);
+                                    setUiDrag({
+                                      type: "rotateArrow",
+                                      arrowId: arrow.id,
+                                      centerPx,
+                                      startAngleDeg: arrow.rotDeg ?? 0,
+                                    });
+                                  }}
+                                >
+                                  <RotateIcon active={isRotatingThis} />
+                                </div>
+
+                                {/* Point button (one blue control, no tripod/windmaster) */}
+                                <div
+                                  data-handle="1"
+                                  data-arrow-interactive="1"
+                                  style={{
+                                    position: "absolute",
+                                    left: arrowW + 8,
+                                    top: arrowH / 2 - 14,
+                                    display: "flex", flexDirection: "column", gap: 4,
+                                    pointerEvents: "auto",
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    title={arrow.point ? "Remove point" : "Add point"}
+                                    style={{
+                                      width: 30, height: 30, borderRadius: 6,
+                                      background: arrow.point ? "#2563EB" : "#E5E7EB",
+                                      border: "none", cursor: "pointer",
+                                      display: "flex", alignItems: "center", justifyContent: "center",
+                                      boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+                                    }}
+                                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                    onClick={(e) => {
+                                      e.preventDefault(); e.stopPropagation();
+                                      if (arrow.point) {
+                                        // Remove point
+                                        pushHistory();
+                                        setPlacedArrows((prev) =>
+                                          prev.map((a) => (a.id === arrow.id ? { ...a, point: null } : a))
+                                        );
+                                      } else {
+                                        // Add point below the arrow
+                                        if (!projectionReady) return;
+                                        const centerPx = latLngToPx(arrow.pos);
+                                        if (!centerPx) return;
+                                        const ptPx = { x: centerPx.x, y: centerPx.y + arrowH / 2 + 30 };
+                                        const ptPos = pxToLatLng(ptPx) ?? arrow.pos;
+                                        pushHistory();
+                                        setPlacedArrows((prev) =>
+                                          prev.map((a) =>
+                                            a.id === arrow.id
+                                              ? { ...a, point: { id: String(Date.now()), pos: ptPos } }
+                                              : a
+                                          )
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                      <circle cx="7" cy="7" r="5" fill={arrow.point ? "#fff" : "#6B7280"} />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </OverlayViewF>
+
+                    {/* Arrow point (draggable anchor) */}
+                    {arrow.point && projectionReady && (
+                      <OverlayViewF
+                        position={arrow.point.pos}
+                        mapPaneName="overlayMouseTarget"
+                        zIndex={94500}
+                      >
+                        <div
+                          data-arrow-interactive="1"
+                          style={{
+                            transform: "translate(-50%, -50%)",
+                            width: 16, height: 16,
+                            borderRadius: "50%",
+                            background: "#2563EB",
+                            border: "2px solid #fff",
+                            boxShadow: "0 1px 6px rgba(37,99,235,0.5)",
+                            cursor: uiDrag?.type === "moveArrowPoint" && uiDrag.arrowId === arrow.id ? "grabbing" : "grab",
+                            pointerEvents: "auto",
+                          }}
+                          onPointerDown={(e) => {
+                            e.preventDefault(); e.stopPropagation();
+                            e.currentTarget.setPointerCapture?.(e.pointerId);
+                            if (!projectionReady) return;
+                            const ptPx = latLngToPx(arrow.point.pos);
+                            if (!ptPx) return;
+                            const grabPx = clientToDivPx(e.clientX, e.clientY);
+                            if (!grabPx) return;
+                            lockMapInteractions(true);
+                            setUiDrag({
+                              type: "moveArrowPoint",
+                              arrowId: arrow.id,
+                              offsetPx: { x: grabPx.x - ptPx.x, y: grabPx.y - ptPx.y },
+                            });
+                          }}
+                        />
+                      </OverlayViewF>
+                    )}
+
+                    {/* Dashed connector line from arrow center to point */}
+                    {arrow.point && projectionReady && (() => {
+                      const arrowCenterPx = latLngToPx(arrow.pos);
+                      const pointPx = latLngToPx(arrow.point.pos);
+                      if (!arrowCenterPx || !pointPx) return null;
+                      return (
+                        <OverlayViewF
+                          position={arrow.pos}
+                          mapPaneName="overlayLayer"
+                          zIndex={93000}
+                        >
+                          <svg style={{ position: "absolute", left: 0, top: 0, width: 1, height: 1, overflow: "visible", pointerEvents: "none" }}>
+                            <line
+                              x1={0} y1={0}
+                              x2={pointPx.x - arrowCenterPx.x}
+                              y2={pointPx.y - arrowCenterPx.y}
+                              stroke="#2563EB" strokeWidth={1.5}
+                              strokeDasharray="5 5" strokeLinecap="round"
+                            />
+                          </svg>
+                        </OverlayViewF>
+                      );
+                    })()}
+                  </React.Fragment>
+                );
+              })}
+
             </GoogleMap>
 
               {/* Export area overlay: dim outside + blue resizable/movable box */}
