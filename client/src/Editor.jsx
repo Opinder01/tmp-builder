@@ -2413,7 +2413,28 @@ const applySnapshot = (s) => {
     setConesFeatures(s.conesFeatures ?? []);
     setMeasurements(s.measurements ?? []);
     setPlacedSigns(s.placedSigns ?? []);
-    setPlacedArrows(s.placedArrows ?? []);
+    // Migrate legacy arrow data: point → points[], absolute pos → relative dLat/dLng
+    setPlacedArrows((s.placedArrows ?? []).map((a) => {
+      let pts = a.points ?? null;
+      // Legacy single point field
+      if (!pts && a.point) {
+        const p = a.point;
+        if (p.dLat !== undefined) {
+          pts = [{ id: p.id ?? String(Date.now()), dLat: p.dLat, dLng: p.dLng }];
+        } else if (p.pos) {
+          pts = [{ id: p.id ?? String(Date.now()), dLat: p.pos.lat - a.pos.lat, dLng: p.pos.lng - a.pos.lng }];
+        }
+      }
+      // Migrate any points that still have absolute pos
+      if (pts) {
+        pts = pts.map((p) =>
+          p.dLat !== undefined ? p
+            : p.pos ? { id: p.id, dLat: p.pos.lat - a.pos.lat, dLng: p.pos.lng - a.pos.lng }
+            : p
+        );
+      }
+      return { ...a, points: pts ?? [], point: undefined };
+    }));
 
     setLegendBoxes(s.legendBoxes ?? []);
     setManifestBoxes(s.manifestBoxes ?? []);
@@ -2616,6 +2637,7 @@ const doDelete = React.useCallback(() => {
   // Stand drag no longer needs extra refs; we use uiDrag + pointermove like signs
   const lastDblClickTsRef = useRef(0);
   const rotateStandGuardRef = useRef(false);
+  const addArrowPointGuardRef = useRef(false); // true = next map click is from the add-point button, ignore it
 
 
 const lastTapRef = useRef({ id: null, t: 0 });
@@ -3468,27 +3490,33 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       ctx.strokeRect(0, 0, w, h);
     }
     ctx.restore();
-    // Draw dashed line to point if present
-    if (a.point?.pos) {
-      const pp = project(a.point.pos);
-      if (pp) {
-        const cp = toCanvas(pp);
-        ctx.save();
-        ctx.setLineDash([6, 6]);
-        ctx.strokeStyle = "#2563EB";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(sc.x, sc.y);
-        ctx.lineTo(cp.x, cp.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        // Draw the point dot
-        ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = "#2563EB";
-        ctx.fill();
-        ctx.restore();
-      }
+    // Draw dotted connector + tripod marker for each point
+    const exportPts = a.points ?? (a.point ? [a.point] : []);
+    for (const pt of exportPts) {
+      const ptLatLng = (pt.dLat !== undefined)
+        ? { lat: a.pos.lat + pt.dLat, lng: a.pos.lng + pt.dLng }
+        : (pt.pos ?? null);
+      if (!ptLatLng) continue;
+      const pp = project(ptLatLng);
+      if (!pp) continue;
+      const cp = toCanvas(pp);
+      ctx.save();
+      // Dotted line from arrow right-edge to tripod
+      ctx.setLineDash([2, 6]);
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(sc.x + w / 2, sc.y); // right edge of arrow
+      ctx.lineTo(cp.x, cp.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Tripod shape: horizontal bar + vertical stem
+      const TW = 18, TH = 5, STEM_W = 3, STEM_H = 12;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(cp.x - TW / 2, cp.y - TH - STEM_H, TW, TH); // horizontal bar
+      ctx.fillRect(cp.x - STEM_W / 2, cp.y - STEM_H, STEM_W, STEM_H); // vertical stem
+      ctx.restore();
     }
   }
 
@@ -4400,7 +4428,7 @@ setPanMode(false);
         hPx: DEFAULT_ARROW_HEIGHT_PX,
         rotDeg: 0,
         zRef: zoomNow,
-        point: null, // optional draggable anchor point { id, pos }
+        points: [],  // draggable anchor points [{ id, dLat, dLng }] — multiple allowed
       },
     ]);
     setSelectedEntity({ kind: "arrow", id });
@@ -4441,6 +4469,8 @@ function onMapMouseMove(e) {
   if (!ll) return;
 
   const cur = { lat: ll.lat(), lng: ll.lng() };
+
+  // createArrowPoint hoverPos is updated by the window-level pointermove handler (same as createStand)
 
     // ✅ Picture preview follows cursor while inserting
   if (activeTool === "insert:picture" && pendingPictureTool) {
@@ -4605,6 +4635,18 @@ const dedupeLastIfSame = (arr, p) => {
       return;
     }
 
+    // The "add point" button sets this ref synchronously on pointerdown.
+    // The map's click event fires in the same synchronous batch — we must
+    // ignore it so the mode stays active for the NEXT map click (the real placement).
+    if (addArrowPointGuardRef.current) {
+      addArrowPointGuardRef.current = false;
+      return;
+    }
+
+    // createArrowPoint is committed on pointerup (onUp), not on map click.
+    // If somehow a map click fires while in this mode, ignore it.
+    if (uiDrag?.type === "createArrowPoint") return;
+
     if (uiDrag?.type === "createStand" && selectedSign && uiDrag.signId === selectedSign.id) {
       const ll = e?.latLng;
       const p = uiDrag.hoverPos || (ll ? { lat: ll.lat(), lng: ll.lng() } : null);
@@ -4629,7 +4671,7 @@ const dedupeLastIfSame = (arr, p) => {
     }
 
     // If this click started on a sign/stand/handle/rotate control, select the sign
-    const domTarget = e?.domEvent?.target;
+    const domTarget = mapClickDomTarget ?? e?.domEvent?.target;
     const signInteractive = domTarget && typeof domTarget.closest === "function"
       ? domTarget.closest("[data-sign-interactive='1']")
       : null;
@@ -5372,6 +5414,26 @@ useEffect(() => {
         return;
       }
 
+      // Commit arrow point on mouse-release (drag-to-place, same pattern as createStand)
+      if (uiDrag.type === "createArrowPoint") {
+        const p = uiDrag.hoverPos ?? null;
+        if (p) {
+          const ptId = String(Date.now() + Math.random());
+          pushHistory();
+          setPlacedArrows((prev) =>
+            prev.map((a) =>
+              a.id !== uiDrag.arrowId ? a : {
+                ...a,
+                points: [...(a.points ?? []), { id: ptId, dLat: p.lat - a.pos.lat, dLng: p.lng - a.pos.lng }],
+              }
+            )
+          );
+        }
+        setUiDrag(null);
+        lockMapInteractions(false);
+        return;
+      }
+
       // rotateSign is ended by the dedicated rotateSign listener (see below)
       // to avoid competing "up" handlers causing vibration or dropped moves.
       if (uiDrag.type === "rotateSign") return;
@@ -5475,6 +5537,7 @@ useEffect(() => {
       t !== "moveArrow" &&
       t !== "resizeArrow" &&
       t !== "moveArrowPoint" &&
+      t !== "createArrowPoint" &&
       t !== "resizeWorkArea" &&
       t !== "resizeExportArea" &&
       t !== "moveExportArea"
@@ -5492,7 +5555,8 @@ useEffect(() => {
         uiDrag.type === "createStand" ||
         uiDrag.type === "moveArrow" ||
         uiDrag.type === "resizeArrow" ||
-        uiDrag.type === "moveArrowPoint";
+        uiDrag.type === "moveArrowPoint" ||
+        uiDrag.type === "createArrowPoint";
       // Some environments support PointerEvent but don't reliably emit mousemove
       // for mouse interactions. De-dupe mousemove vs pointermove for heavy overlays —
       // but never for sign drags: skipping events there makes move/resize feel sluggish.
@@ -5528,13 +5592,22 @@ useEffect(() => {
         uiDrag.type === "moveSign" ||
         uiDrag.type === "resizeSign" ||
         uiDrag.type === "moveStand" ||
-        uiDrag.type === "createStand";
+        uiDrag.type === "createStand" ||
+        uiDrag.type === "createArrowPoint";
       const curPx = signFamilyDrag
         ? p0
         : { x: Math.round(p0.x), y: Math.round(p0.y) };
       // curPx is in map div pixels; all resize deltas use map-div coords only
 
       if (uiDrag.type === "createStand") {
+        const off = uiDrag.offsetPx || { x: 0, y: 0 };
+        const ll = pxToLatLng({ x: curPx.x - off.x, y: curPx.y - off.y });
+        if (!ll) return;
+        setUiDrag((d) => (d ? { ...d, hoverPos: ll } : d));
+        return;
+      }
+
+      if (uiDrag.type === "createArrowPoint") {
         const off = uiDrag.offsetPx || { x: 0, y: 0 };
         const ll = pxToLatLng({ x: curPx.x - off.x, y: curPx.y - off.y });
         if (!ll) return;
@@ -5747,13 +5820,20 @@ useEffect(() => {
           prev.map((a) => (a.id === arrowId ? { ...a, pos: nextPos } : a))
         );
       } else if (uiDrag.type === "moveArrowPoint") {
-        const { arrowId, offsetPx } = uiDrag;
-        const nextPos = pxToLatLng({ x: curPx.x - offsetPx.x, y: curPx.y - offsetPx.y });
-        if (!nextPos) return;
+        const { arrowId, pointId, offsetPx } = uiDrag;
+        const nextPtPos = pxToLatLng({ x: curPx.x - offsetPx.x, y: curPx.y - offsetPx.y });
+        if (!nextPtPos) return;
         setPlacedArrows((prev) =>
-          prev.map((a) =>
-            a.id !== arrowId ? a : { ...a, point: { ...a.point, pos: nextPos } }
-          )
+          prev.map((a) => {
+            if (a.id !== arrowId) return a;
+            return {
+              ...a,
+              points: (a.points ?? []).map((pt) =>
+                pt.id !== pointId ? pt
+                  : { ...pt, dLat: nextPtPos.lat - a.pos.lat, dLng: nextPtPos.lng - a.pos.lng }
+              ),
+            };
+          })
         );
       } else if (uiDrag.type === "resizeArrow") {
         const { arrowId, corner, startSize, startPointerPx } = uiDrag;
@@ -10474,6 +10554,10 @@ height: pendingPictureTool.hPx * elementScale,
                 const arrowW = Math.round((arrow.wPx ?? DEFAULT_ARROW_WIDTH_PX) * Math.pow(2, liveZoom - arrowZRef));
                 const arrowH = Math.round((arrow.hPx ?? DEFAULT_ARROW_HEIGHT_PX) * Math.pow(2, liveZoom - arrowZRef));
 
+                // Normalised points array — supports legacy single-point field
+                const arrowPoints = arrow.points ?? (arrow.point ? [arrow.point] : []);
+                const isCreatingPointHere = uiDrag?.type === "createArrowPoint" && uiDrag.arrowId === arrow.id;
+
                 // Corner-pinning offset during resize (mirrors sign behavior)
                 const _isResizingThis = uiDrag?.type === "resizeArrow" && uiDrag.arrowId === arrow.id;
                 let _resizeTx = 0, _resizeTy = 0;
@@ -10636,60 +10720,7 @@ height: pendingPictureTool.hPx * elementScale,
                                   <RotateIcon active={isRotatingThis} />
                                 </div>
 
-                                {/* Point button (one blue control, no tripod/windmaster) */}
-                                <div
-                                  data-handle="1"
-                                  data-arrow-interactive="1"
-                                  style={{
-                                    position: "absolute",
-                                    left: arrowW + 8,
-                                    top: arrowH / 2 - 14,
-                                    display: "flex", flexDirection: "column", gap: 4,
-                                    pointerEvents: "auto",
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    title={arrow.point ? "Remove point" : "Add point"}
-                                    style={{
-                                      width: 30, height: 30, borderRadius: 6,
-                                      background: arrow.point ? "#2563EB" : "#E5E7EB",
-                                      border: "none", cursor: "pointer",
-                                      display: "flex", alignItems: "center", justifyContent: "center",
-                                      boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
-                                    }}
-                                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                    onClick={(e) => {
-                                      e.preventDefault(); e.stopPropagation();
-                                      if (arrow.point) {
-                                        // Remove point
-                                        pushHistory();
-                                        setPlacedArrows((prev) =>
-                                          prev.map((a) => (a.id === arrow.id ? { ...a, point: null } : a))
-                                        );
-                                      } else {
-                                        // Add point below the arrow
-                                        if (!projectionReady) return;
-                                        const centerPx = latLngToPx(arrow.pos);
-                                        if (!centerPx) return;
-                                        const ptPx = { x: centerPx.x, y: centerPx.y + arrowH / 2 + 30 };
-                                        const ptPos = pxToLatLng(ptPx) ?? arrow.pos;
-                                        pushHistory();
-                                        setPlacedArrows((prev) =>
-                                          prev.map((a) =>
-                                            a.id === arrow.id
-                                              ? { ...a, point: { id: String(Date.now()), pos: ptPos } }
-                                              : a
-                                          )
-                                        );
-                                      }
-                                    }}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                                      <circle cx="7" cy="7" r="5" fill={arrow.point ? "#fff" : "#6B7280"} />
-                                    </svg>
-                                  </button>
-                                </div>
+                                {/* Point button moved to its own OverlayViewF below — outside the rotated container */}
                               </div>
                             );
                           })()}
@@ -10697,67 +10728,202 @@ height: pendingPictureTool.hPx * elementScale,
                       </div>
                     </OverlayViewF>
 
-                    {/* Arrow point (draggable anchor) */}
-                    {arrow.point && projectionReady && (
-                      <OverlayViewF
-                        position={arrow.point.pos}
-                        mapPaneName="overlayMouseTarget"
-                        zIndex={94500}
-                      >
-                        <div
-                          data-arrow-interactive="1"
-                          style={{
-                            transform: "translate(-50%, -50%)",
-                            width: 16, height: 16,
-                            borderRadius: "50%",
-                            background: "#2563EB",
-                            border: "2px solid #fff",
-                            boxShadow: "0 1px 6px rgba(37,99,235,0.5)",
-                            cursor: uiDrag?.type === "moveArrowPoint" && uiDrag.arrowId === arrow.id ? "grabbing" : "grab",
-                            pointerEvents: "auto",
-                          }}
-                          onPointerDown={(e) => {
-                            e.preventDefault(); e.stopPropagation();
-                            e.currentTarget.setPointerCapture?.(e.pointerId);
-                            if (!projectionReady) return;
-                            const ptPx = latLngToPx(arrow.point.pos);
-                            if (!ptPx) return;
-                            const grabPx = clientToDivPx(e.clientX, e.clientY);
-                            if (!grabPx) return;
-                            lockMapInteractions(true);
-                            setUiDrag({
-                              type: "moveArrowPoint",
-                              arrowId: arrow.id,
-                              offsetPx: { x: grabPx.x - ptPx.x, y: grabPx.y - ptPx.y },
-                            });
-                          }}
-                        />
-                      </OverlayViewF>
-                    )}
-
-                    {/* Dashed connector line from arrow center to point */}
-                    {arrow.point && projectionReady && (() => {
-                      const arrowCenterPx = latLngToPx(arrow.pos);
-                      const pointPx = latLngToPx(arrow.point.pos);
-                      if (!arrowCenterPx || !pointPx) return null;
+                    {/* ── Tripod-style "add point" button — right side of arrow (mirrors sign stand) ── */}
+                    {isSelected && projectionReady && (() => {
+                      const GAP = 12;
+                      const BTN = 32;
                       return (
                         <OverlayViewF
                           position={arrow.pos}
-                          mapPaneName="overlayLayer"
-                          zIndex={93000}
+                          mapPaneName="overlayMouseTarget"
+                          zIndex={94600}
                         >
-                          <svg style={{ position: "absolute", left: 0, top: 0, width: 1, height: 1, overflow: "visible", pointerEvents: "none" }}>
-                            <line
-                              x1={0} y1={0}
-                              x2={pointPx.x - arrowCenterPx.x}
-                              y2={pointPx.y - arrowCenterPx.y}
-                              stroke="#2563EB" strokeWidth={1.5}
-                              strokeDasharray="5 5" strokeLinecap="round"
-                            />
-                          </svg>
+                          <div style={{
+                            transform: `translate(${Math.round(arrowW / 2) + GAP}px, -50%)`,
+                            pointerEvents: "auto",
+                          }}>
+                            <div
+                              data-handle="1"
+                              data-arrow-interactive="1"
+                              title="Drag to place a tripod point"
+                              style={{
+                                width: BTN, height: BTN, borderRadius: 8,
+                                border: "1.5px solid #7C3AED",
+                                background: "rgba(124,58,237,0.08)",
+                                display: "grid", placeItems: "center",
+                                cursor: "pointer", pointerEvents: "auto",
+                                boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                                userSelect: "none", touchAction: "none",
+                              }}
+                              onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault(); }}
+                              onPointerDown={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                e.currentTarget.setPointerCapture?.(e.pointerId);
+                                if (!projectionReady) return;
+                                lockMapInteractions(true);
+                                // anchor starts at the right edge of the arrow
+                                const centerPx = latLngToPx(arrow.pos);
+                                if (!centerPx) return;
+                                const anchorPx = { x: centerPx.x + arrowW / 2, y: centerPx.y };
+                                const anchorPos = pxToLatLng(anchorPx) ?? arrow.pos;
+                                const grabPx = clientToDivPx(e.clientX, e.clientY);
+                                const offsetPx = grabPx
+                                  ? { x: grabPx.x - anchorPx.x, y: grabPx.y - anchorPx.y }
+                                  : { x: 0, y: 0 };
+                                setUiDrag({ type: "createArrowPoint", arrowId: arrow.id, hoverPos: anchorPos, offsetPx });
+                              }}
+                            >
+                              {/* Tripod outline icon — matches TripodAddIcon */}
+                              <svg viewBox="0 0 64 64" width={20} height={20} style={{ pointerEvents: "none" }}>
+                                <rect x="10" y="10" width="44" height="10" rx="1.5" fill="none" stroke="#7C3AED" strokeWidth="3"/>
+                                <rect x="30" y="20" width="4" height="30" fill="none" stroke="#7C3AED" strokeWidth="3"/>
+                              </svg>
+                            </div>
+                          </div>
                         </OverlayViewF>
                       );
                     })()}
+
+                    {/* ── Live drag preview: dotted connector + ghost tripod (mirrors sign stand preview) ── */}
+                    {isCreatingPointHere && uiDrag.hoverPos && projectionReady && (() => {
+                      const proj = getProjection();
+                      const previewScale = Math.max(0.35, Math.min(2, Math.pow(2, (mapRef.current?.getZoom?.() ?? zoomNow) - (arrow.zRef ?? ELEMENT_BASE_ZOOM))));
+                      // Connector line: from arrow right-edge to cursor (mirrors sign stand preview exactly)
+                      const connectorEl = (() => {
+                        if (!proj || !window.google?.maps) return null;
+                        const arCtr = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(arrow.pos.lat, arrow.pos.lng));
+                        const hPx   = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(uiDrag.hoverPos.lat, uiDrag.hoverPos.lng));
+                        if (!arCtr || !hPx) return null;
+                        // x1/y1: right edge of arrow in arrow-centered SVG space (no rotation on arrows)
+                        const x1 = arrowW / 2;
+                        const y1 = 0;
+                        return (
+                          <OverlayViewF position={arrow.pos} mapPaneName="overlayLayer" zIndex={89000} getPixelPositionOffset={() => ({ x: 0, y: 0 })}>
+                            <svg style={{ position: "absolute", left: 0, top: 0, width: 1, height: 1, overflow: "visible", pointerEvents: "none" }}>
+                              <line
+                                x1={x1} y1={y1}
+                                x2={hPx.x - arCtr.x} y2={hPx.y - arCtr.y}
+                                stroke="#111" strokeWidth={2} strokeDasharray="0.01 8" strokeLinecap="round"
+                              />
+                            </svg>
+                          </OverlayViewF>
+                        );
+                      })();
+                      return (
+                        <>
+                          {connectorEl}
+                          {/* Ghost tripod at cursor */}
+                          <OverlayViewF position={uiDrag.hoverPos} mapPaneName="overlayMouseTarget" zIndex={97000}>
+                            <div style={{ transform: "translate(-50%, -50%)", cursor: "crosshair", pointerEvents: "none" }}>
+                              <svg viewBox="0 0 64 64" width={28 * previewScale} height={28 * previewScale}>
+                                <rect x="10" y="10" width="44" height="10" rx="1.5" fill="#000"/>
+                                <rect x="30" y="20" width="4"  height="30" fill="#000"/>
+                              </svg>
+                            </div>
+                          </OverlayViewF>
+                        </>
+                      );
+                    })()}
+
+                    {/* ── Placed tripod points: tripod icon + dotted connector + drag + delete ── */}
+                    {arrowPoints.map((pt) => {
+                      const ptPos = pt.dLat !== undefined
+                        ? { lat: arrow.pos.lat + pt.dLat, lng: arrow.pos.lng + pt.dLng }
+                        : (pt.pos ?? null);
+                      if (!ptPos || !projectionReady) return null;
+                      const isDraggingThis = uiDrag?.type === "moveArrowPoint" && uiDrag.arrowId === arrow.id && uiDrag.pointId === pt.id;
+                      const ptScale = Math.max(0.35, Math.min(2, Math.pow(2, (mapRef.current?.getZoom?.() ?? zoomNow) - (arrow.zRef ?? ELEMENT_BASE_ZOOM))));
+                      const arrowCenterPx = latLngToPx(arrow.pos);
+                      const ptPx = latLngToPx(ptPos);
+                      return (
+                        <React.Fragment key={pt.id}>
+                          {/* Dotted connector: arrow right-edge → tripod */}
+                          {arrowCenterPx && ptPx && (() => {
+                            const proj = getProjection();
+                            if (!proj || !window.google?.maps) return null;
+                            const arCtr = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(arrow.pos.lat, arrow.pos.lng));
+                            const stPx2 = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(ptPos.lat, ptPos.lng));
+                            if (!arCtr || !stPx2) return null;
+                            return (
+                              <OverlayViewF position={arrow.pos} mapPaneName="overlayLayer" zIndex={93000} getPixelPositionOffset={() => ({ x: 0, y: 0 })}>
+                                <svg style={{ position: "absolute", left: 0, top: 0, width: 1, height: 1, overflow: "visible", pointerEvents: "none" }}>
+                                  <line
+                                    x1={arrowW / 2} y1={0}
+                                    x2={stPx2.x - arCtr.x} y2={stPx2.y - arCtr.y}
+                                    stroke="#111" strokeWidth={2} strokeDasharray="0.01 8" strokeLinecap="round"
+                                  />
+                                </svg>
+                              </OverlayViewF>
+                            );
+                          })()}
+                          {/* Tripod marker — drag to move, hidden while dragging (shows ghost instead) */}
+                          <OverlayViewF position={ptPos} mapPaneName="overlayMouseTarget" zIndex={96000}>
+                            <div
+                              data-arrow-interactive="1"
+                              style={{
+                                transform: "translate(-50%, -50%)",
+                                cursor: isDraggingThis ? "grabbing" : "grab",
+                                pointerEvents: "auto",
+                                userSelect: "none",
+                                visibility: isDraggingThis ? "hidden" : "visible",
+                                position: "relative",
+                              }}
+                              onPointerDown={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                e.currentTarget.setPointerCapture?.(e.pointerId);
+                                if (!projectionReady) return;
+                                const curPtPx = latLngToPx(ptPos);
+                                if (!curPtPx) return;
+                                const grabPx = clientToDivPx(e.clientX, e.clientY);
+                                if (!grabPx) return;
+                                lockMapInteractions(true);
+                                setUiDrag({
+                                  type: "moveArrowPoint",
+                                  arrowId: arrow.id,
+                                  pointId: pt.id,
+                                  offsetPx: { x: grabPx.x - curPtPx.x, y: grabPx.y - curPtPx.y },
+                                });
+                              }}
+                            >
+                              {/* Tripod SVG (filled, same as SignSupportItem TripodStandSVG) */}
+                              <svg viewBox="0 0 64 64" width={28 * ptScale} height={28 * ptScale}>
+                                <rect x="10" y="10" width="44" height="10" rx="1.5" fill="#000"/>
+                                <rect x="30" y="20" width="4"  height="30" fill="#000"/>
+                                {isSelected && (
+                                  <rect x="9" y="9" width="46" height="48" rx="3" fill="transparent" stroke="#2563EB" strokeWidth="2" opacity="0.9"/>
+                                )}
+                              </svg>
+                              {/* Delete × — only when arrow selected */}
+                              {isSelected && (
+                                <div
+                                  style={{
+                                    position: "absolute", top: -6, right: -6,
+                                    width: 14, height: 14, borderRadius: "50%",
+                                    background: "#EF4444", color: "#fff",
+                                    fontSize: 10, fontWeight: "bold",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    cursor: "pointer", pointerEvents: "auto",
+                                    lineHeight: 1,
+                                  }}
+                                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                  onClick={(e) => {
+                                    e.preventDefault(); e.stopPropagation();
+                                    pushHistory();
+                                    setPlacedArrows((prev) =>
+                                      prev.map((a) => a.id !== arrow.id ? a : {
+                                        ...a, points: (a.points ?? []).filter((p) => p.id !== pt.id),
+                                      })
+                                    );
+                                  }}
+                                >
+                                  ×
+                                </div>
+                              )}
+                            </div>
+                          </OverlayViewF>
+                        </React.Fragment>
+                      );
+                    })}
                   </React.Fragment>
                 );
               })}
