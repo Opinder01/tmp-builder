@@ -4671,7 +4671,7 @@ const dedupeLastIfSame = (arr, p) => {
     }
 
     // If this click started on a sign/stand/handle/rotate control, select the sign
-    const domTarget = mapClickDomTarget ?? e?.domEvent?.target;
+    const domTarget = e?.domEvent?.target;
     const signInteractive = domTarget && typeof domTarget.closest === "function"
       ? domTarget.closest("[data-sign-interactive='1']")
       : null;
