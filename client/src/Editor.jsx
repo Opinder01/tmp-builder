@@ -4169,7 +4169,6 @@ setPanMode(false);
       ]);
       setActiveTool(null);
       setConesPanelOpen(false);
-      setSelectedConeId(newId);
     }
 
     cancelConesDrawing();
@@ -8862,7 +8861,7 @@ draggingCursor:
                   background: "#fff",
                   border: "2px solid #7C3AED",
                   borderRadius: "50%",
-                  cursor: "crosshair",
+                  cursor: "grab",
                   pointerEvents: "auto",
                   boxShadow: "0 1px 4px rgba(0,0,0,0.28)",
                   zIndex: 50,
@@ -8891,7 +8890,7 @@ draggingCursor:
                   background: "#e9d5ff",
                   border: "1.5px solid #7C3AED",
                   borderRadius: "50%",
-                  cursor: "crosshair",
+                  cursor: "pointer",
                   pointerEvents: "auto",
                   opacity: 0.75,
                   boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
