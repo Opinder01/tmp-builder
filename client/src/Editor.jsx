@@ -3955,43 +3955,22 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
           if (a && b) pdf.line(a.x, a.y, b.x, b.y);
         }
       } else {
-        // Build parallel plainPath / vertsPx so meters and pixels stay in sync
-        const plainPath = [];
-        const vertsPx = [];
-        for (const pt of path) {
-          const ll = toPlainLL(pt);
-          if (!ll) continue;
-          const px = project(ll);
-          if (!px) continue;
-          plainPath.push(ll);
-          vertsPx.push(px);
-        }
-        if (vertsPx.length < 2) continue;
-
-        // Compute export-canvas pixels per real-world meter along this path
-        let totalPx = 0, totalM = 0;
-        for (let i = 0; i < vertsPx.length - 1; i++) {
-          totalPx += distPx(vertsPx[i], vertsPx[i + 1]);
-          totalM  += distMetersLL(plainPath[i], plainPath[i + 1]);
-        }
-        if (totalM < 0.01 || totalPx < 1) continue;
-        const pxPerMeter = totalPx / totalM;
-
-        // Spacing and marker size both derived from the same export scale
-        const spacingM  = getConeSpacingMeters(f.typeId);
-        const spacingPx = spacingM * pxPerMeter;           // canvas pixels
-        const mmPerPx   = mapW_mm / imgW;                  // PDF mm per canvas pixel
-        const spacingMm = spacingPx * mmPerPx;             // PDF mm between markers
-
-        // Fill fraction from CONE_VISUAL: same ratio as on-screen editor
+        // Mirror the editor's elementScale formula exactly.
+        // imgW is in world-px at the export tile zoom (same coordinate space as project()).
+        // At zoom Z, elementScale = pow(2, Z-18), so cfg.markerSize * elementScale world-px
+        // is the same physical size as the editor renders the icon at that zoom.
         const cfg = CONE_VISUAL[f.typeId] || CONE_VISUAL.default;
-        const markerSizeMm = (cfg.markerSize / (cfg.spacingPx || 18)) * spacingMm;
+        const exportElementScale = Math.max(0.35, Math.min(1.2, Math.pow(2, zoom - 18)));
+        const markerSizeMm = Math.max(0.4, cfg.markerSize * exportElementScale * (mapW_mm / imgW));
 
-        // Resample pixel path at spacingPx to match editor visual density
-        const markersPx = resamplePolylinePx(vertsPx, spacingPx);
+        // Same lat/lng positions as the editor — no resampling difference
+        const markers = sampleConesMarkersForPath(
+          path.map((p) => toPlainLL(p)).filter(Boolean),
+          f.typeId
+        );
 
-        for (const px of markersPx) {
-          const mm = toPdf(px);
+        for (const pos of markers) {
+          const mm = toPdf(project(pos));
           if (!inMapRect(mm)) continue;
 
           if (f.typeId === "barrel") {
