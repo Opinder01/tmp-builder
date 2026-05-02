@@ -6269,40 +6269,6 @@ useEffect(() => {
     };
   }, [uiDrag]);
 
-  /* ================= Cone vertex drag: move one point, keep others fixed ================= */
-  useEffect(() => {
-    if (!uiDrag || uiDrag.type !== "moveConePoint") return;
-
-    function onMove(ev) {
-      const curPx = clientToDivPx(ev.clientX, ev.clientY);
-      if (!curPx) return;
-      const newPos = pxToLatLng(curPx);
-      if (!newPos) return;
-      const { coneId, ptIndex } = uiDrag;
-      setConesFeatures((prev) =>
-        prev.map((f) => {
-          if (f.id !== coneId) return f;
-          const newPath = [...f.path];
-          newPath[ptIndex] = newPos;
-          return { ...f, path: newPath };
-        })
-      );
-    }
-
-    function onUp() {
-      pushHistory();
-      lockMapInteractions(false);
-      setUiDrag(null);
-    }
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [uiDrag]);
-
   /* ================= Scale resize + move: smooth window mousemove ================= */
   useEffect(() => {
     if (!uiDrag || (uiDrag.type !== "resizeScale" && uiDrag.type !== "moveScale")) return;
@@ -7153,30 +7119,6 @@ const handleLegendToggle = (typeId) => {
   };
 
   /* ================= Cone vertex drag ================= */
-  const beginMoveConePoint = (coneId, ptIndex) => {
-    if (!projectionReady) return;
-    lockMapInteractions(true);
-    setUiDrag({ type: "moveConePoint", coneId, ptIndex });
-  };
-
-  /* ================= Cone midpoint insert + drag ================= */
-  const beginAddConeMidPoint = (coneId, afterIndex, midPt) => {
-    if (!projectionReady) return;
-    // Guard against map click deselecting the cone right after this mousedown
-    coneSelectionGuardRef.current = true;
-    // Insert the new vertex into the path, then immediately drag it
-    setConesFeatures((prev) =>
-      prev.map((f) => {
-        if (f.id !== coneId) return f;
-        const newPath = [...f.path];
-        newPath.splice(afterIndex + 1, 0, { lat: midPt.lat, lng: midPt.lng });
-        return { ...f, path: newPath };
-      })
-    );
-    lockMapInteractions(true);
-    setUiDrag({ type: "moveConePoint", coneId, ptIndex: afterIndex + 1 });
-  };
-
   /** Pick an existing cone for vertex editing — leave placement mode so map clicks are not new cone strokes (same idea as onSelectSign). */
   const selectConeForEdit = (coneId) => {
     if (!coneId) return;
@@ -8855,6 +8797,7 @@ draggingCursor:
                 );
 
                 // Shared: draggable white/purple vertex handles
+                // Uses pointer capture so drag is tracked synchronously — no useEffect timing gap.
                 const vtxHandleStyle = {
                   transform: "translate(-50%, -50%)",
                   width: 12, height: 12,
@@ -8866,24 +8809,47 @@ draggingCursor:
                   boxShadow: "0 1px 4px rgba(0,0,0,0.28)",
                   zIndex: 50,
                   userSelect: "none",
+                  touchAction: "none",
                 };
                 const vertexHandles = (isSelCone && coneClickOk)
                   ? f.path.map((pt, i) => (
                       <OverlayViewF key={`${f.id}_vtx_${i}`} position={pt} mapPaneName="overlayMouseTarget">
                         <div
                           style={vtxHandleStyle}
-                          onMouseDown={(e) => {
+                          onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            beginMoveConePoint(f.id, i);
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                            lockMapInteractions(true);
+                          }}
+                          onPointerMove={(e) => {
+                            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                            const curPx = clientToDivPx(e.clientX, e.clientY);
+                            if (!curPx) return;
+                            const newPos = pxToLatLng(curPx);
+                            if (!newPos) return;
+                            setConesFeatures((prev) =>
+                              prev.map((cone) => {
+                                if (cone.id !== f.id) return cone;
+                                const newPath = [...cone.path];
+                                newPath[i] = newPos;
+                                return { ...cone, path: newPath };
+                              })
+                            );
+                          }}
+                          onPointerUp={(e) => {
+                            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                            e.currentTarget.releasePointerCapture(e.pointerId);
+                            lockMapInteractions(false);
+                            pushHistory();
                           }}
                         />
                       </OverlayViewF>
                     ))
                   : null;
 
-                // Midpoint handles: smaller semi-transparent circles between each pair of vertices.
-                // Dragging one inserts a new vertex at that midpoint and immediately drags it.
+                // Midpoint handles: semi-transparent circles between vertices.
+                // Pointer-down inserts a new vertex then immediately drags it — all synchronous.
                 const midHandleStyle = {
                   transform: "translate(-50%, -50%)",
                   width: 8, height: 8,
@@ -8896,6 +8862,7 @@ draggingCursor:
                   boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
                   zIndex: 49,
                   userSelect: "none",
+                  touchAction: "none",
                 };
                 const midpointHandles = (isSelCone && coneClickOk && f.path.length >= 2)
                   ? f.path.slice(0, -1).map((pt, i) => {
@@ -8904,10 +8871,42 @@ draggingCursor:
                         <OverlayViewF key={`${f.id}_mid_${i}`} position={mid} mapPaneName="overlayMouseTarget">
                           <div
                             style={midHandleStyle}
-                            onMouseDown={(e) => {
+                            onPointerDown={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              beginAddConeMidPoint(f.id, i, mid);
+                              e.currentTarget.setPointerCapture(e.pointerId);
+                              coneSelectionGuardRef.current = true;
+                              // Insert new vertex at i+1 so onPointerMove can update it
+                              setConesFeatures((prev) =>
+                                prev.map((cone) => {
+                                  if (cone.id !== f.id) return cone;
+                                  const newPath = [...cone.path];
+                                  newPath.splice(i + 1, 0, { lat: mid.lat, lng: mid.lng });
+                                  return { ...cone, path: newPath };
+                                })
+                              );
+                              lockMapInteractions(true);
+                            }}
+                            onPointerMove={(e) => {
+                              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                              const curPx = clientToDivPx(e.clientX, e.clientY);
+                              if (!curPx) return;
+                              const newPos = pxToLatLng(curPx);
+                              if (!newPos) return;
+                              setConesFeatures((prev) =>
+                                prev.map((cone) => {
+                                  if (cone.id !== f.id) return cone;
+                                  const newPath = [...cone.path];
+                                  newPath[i + 1] = newPos;
+                                  return { ...cone, path: newPath };
+                                })
+                              );
+                            }}
+                            onPointerUp={(e) => {
+                              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                              e.currentTarget.releasePointerCapture(e.pointerId);
+                              lockMapInteractions(false);
+                              pushHistory();
                             }}
                           />
                         </OverlayViewF>
