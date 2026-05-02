@@ -4158,15 +4158,18 @@ setPanMode(false);
 
     if (path.length >= 2) {
       pushHistory();
-
+      const newId = String(Date.now() + Math.random());
       setConesFeatures((prev) => [
         ...prev,
         {
-          id: String(Date.now() + Math.random()),
+          id: newId,
           typeId: selectedConeType,
           path,
         },
       ]);
+      setActiveTool(null);
+      setConesPanelOpen(false);
+      setSelectedConeId(newId);
     }
 
     cancelConesDrawing();
@@ -7157,6 +7160,33 @@ const handleLegendToggle = (typeId) => {
     setUiDrag({ type: "moveConePoint", coneId, ptIndex });
   };
 
+  /* ================= Cone midpoint insert + drag ================= */
+  const beginAddConeMidPoint = (coneId, afterIndex, midPt) => {
+    if (!projectionReady) return;
+    // Guard against map click deselecting the cone right after this mousedown
+    coneSelectionGuardRef.current = true;
+    // Insert the new vertex into the path, then immediately drag it
+    setConesFeatures((prev) =>
+      prev.map((f) => {
+        if (f.id !== coneId) return f;
+        const newPath = [...f.path];
+        newPath.splice(afterIndex + 1, 0, { lat: midPt.lat, lng: midPt.lng });
+        return { ...f, path: newPath };
+      })
+    );
+    lockMapInteractions(true);
+    setUiDrag({ type: "moveConePoint", coneId, ptIndex: afterIndex + 1 });
+  };
+
+  /** Pick an existing cone for vertex editing — leave placement mode so map clicks are not new cone strokes (same idea as onSelectSign). */
+  const selectConeForEdit = (coneId) => {
+    if (!coneId) return;
+    coneSelectionGuardRef.current = true;
+    setActiveTool(null);
+    setConesPanelOpen(false);
+    setSelectedConeId(coneId);
+  };
+
   const beginMoveTitle = (titleId, clientPt, startBox) => {
     const startPointerPx = clientToDivPx(clientPt.x, clientPt.y);
     if (!startPointerPx) return;
@@ -8352,7 +8382,7 @@ const tileIconStyle = {
                   borderRadius: 8, background: "#fff5f5", color: "#dc2626",
                   cursor: "pointer", fontSize: 12, fontWeight: 700,
                 }}
-              >🗑 Delete Cone Line</button>
+              >🗑 Delete {currentLabel}</button>
             </div>
           );
         })()}
@@ -8807,8 +8837,7 @@ draggingCursor:
                       if (!coneClickOk) return;
                       e.domEvent?.preventDefault?.();
                       e.domEvent?.stopPropagation?.();
-                      coneSelectionGuardRef.current = true; // prevent map click from immediately clearing selection
-                      setSelectedConeId(f.id);
+                      selectConeForEdit(f.id);
                     }}
                     onRightClick={(e) => {
                       if (!coneClickOk) return;
@@ -8854,11 +8883,45 @@ draggingCursor:
                     ))
                   : null;
 
+                // Midpoint handles: smaller semi-transparent circles between each pair of vertices.
+                // Dragging one inserts a new vertex at that midpoint and immediately drags it.
+                const midHandleStyle = {
+                  transform: "translate(-50%, -50%)",
+                  width: 8, height: 8,
+                  background: "#e9d5ff",
+                  border: "1.5px solid #7C3AED",
+                  borderRadius: "50%",
+                  cursor: "crosshair",
+                  pointerEvents: "auto",
+                  opacity: 0.75,
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
+                  zIndex: 49,
+                  userSelect: "none",
+                };
+                const midpointHandles = (isSelCone && coneClickOk && f.path.length >= 2)
+                  ? f.path.slice(0, -1).map((pt, i) => {
+                      const mid = midpointLatLng(pt, f.path[i + 1]);
+                      return (
+                        <OverlayViewF key={`${f.id}_mid_${i}`} position={mid} mapPaneName="overlayMouseTarget">
+                          <div
+                            style={midHandleStyle}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              beginAddConeMidPoint(f.id, i, mid);
+                            }}
+                          />
+                        </OverlayViewF>
+                      );
+                    })
+                  : null;
+
                 if (f.typeId === "barrier") return (
                   <React.Fragment key={f.id}>
                     {hitPolyline}
                     {selGlow}
                     <BarrierPolyline path={f.path} />
+                    {midpointHandles}
                     {vertexHandles}
                   </React.Fragment>
                 );
@@ -8868,6 +8931,7 @@ draggingCursor:
                     {hitPolyline}
                     {selGlow}
                     <PedTapePolyline path={f.path} />
+                    {midpointHandles}
                     {vertexHandles}
                   </React.Fragment>
                 );
@@ -8890,17 +8954,18 @@ draggingCursor:
                             opacity: fx.ghost,
                             cursor: coneClickOk ? "pointer" : undefined,
                           }}
-                          onClick={(e) => {
+                          onMouseDown={(e) => {
                             if (!coneClickOk) return;
+                            e.preventDefault();
                             e.stopPropagation();
-                            coneSelectionGuardRef.current = true;
-                            setSelectedConeId(f.id);
+                            selectConeForEdit(f.id);
                           }}
                         >
                           <MarkerVisual typeId={f.typeId} strokeScale={fx.strokeScale} scale={elementScale} />
                         </div>
                       </OverlayViewF>
                     ))}
+                    {midpointHandles}
                     {vertexHandles}
                   </React.Fragment>
                 );
