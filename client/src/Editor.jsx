@@ -3993,33 +3993,34 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         for (const px of markersPx) {
           const mm = toPdf(px);
           if (!inMapRect(mm)) continue;
-          pdf.setLineWidth(Math.max(0.08, markerSizeMm * 0.06));
 
           if (f.typeId === "barrel") {
+            // Orange circle — fill only (no stroke) to stay in DeviceRGB at all zoom levels
             pdf.setFillColor(249, 115, 22);
-            pdf.setDrawColor(17, 17, 17);
-            pdf.circle(mm.x, mm.y, markerSizeMm / 2, "FD");
+            pdf.circle(mm.x, mm.y, markerSizeMm / 2, "F");
           } else if (f.typeId === "bollard") {
+            // Dark circle — fill only
             pdf.setFillColor(55, 65, 81);
-            pdf.setDrawColor(17, 17, 17);
-            pdf.circle(mm.x, mm.y, markerSizeMm / 2, "FD");
+            pdf.circle(mm.x, mm.y, markerSizeMm / 2, "F");
           } else if (f.typeId === "type1" || f.typeId === "type2") {
             const bw = markerSizeMm * 1.5, bh = markerSizeMm * 0.7;
             const sx = mm.x - bw / 2, sy = mm.y - bh / 2;
-            pdf.setFillColor(255, 255, 255);
-            pdf.setDrawColor(17, 17, 17);
+            // White rect with near-black border — use non-equal R/G/B to force DeviceRGB
+            pdf.setFillColor(255, 254, 255);
+            pdf.setDrawColor(18, 17, 17);
+            pdf.setLineWidth(Math.max(0.08, bh * 0.08));
             pdf.rect(sx, sy, bw, bh, "FD");
+            // Orange diagonal stripes — non-equal values → DeviceRGB stroke
             pdf.setDrawColor(245, 158, 11);
             pdf.setLineWidth(Math.max(0.1, bh * 0.2));
             pdf.line(sx + bw * 0.15, sy + bh * 0.3,  sx + bw * 0.5,  sy + bh * 0.1);
             pdf.line(sx + bw * 0.35, sy + bh * 0.5,  sx + bw * 0.85, sy + bh * 0.1);
             pdf.line(sx + bw * 0.1,  sy + bh * 0.8,  sx + bw * 0.75, sy + bh * 0.5);
           } else {
-            // Cone: amber upward triangle — height = markerSizeMm, base = half-height
+            // Cone: amber triangle pointing up — fill only, centered on marker position
             const th = markerSizeMm, tw = markerSizeMm * 0.5;
             pdf.setFillColor(245, 158, 11);
-            pdf.setDrawColor(17, 17, 17);
-            pdf.lines([[tw / 2, th], [-tw, 0]], mm.x - tw / 4, mm.y - th / 2, [1, 1], "FD", true);
+            pdf.lines([[tw / 2, th], [-tw, 0]], mm.x, mm.y - th / 2, [1, 1], "F", true);
           }
         }
       }
