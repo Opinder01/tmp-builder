@@ -8879,7 +8879,24 @@ draggingCursor:
                     {selGlow}
                     {markers.map((pos, idx) => (
                       <OverlayViewF key={`${f.id}_${idx}`} position={pos} mapPaneName="overlayMouseTarget">
-                        <div style={{ transform: "translate(-50%, -50%)", pointerEvents: "none", filter: fx.shadow, opacity: fx.ghost }}>
+                        {/* When selectable: the marker itself is the click target (OverlayViewF sits above
+                            the map canvas in the DOM, so an invisible hit-polyline beneath it never fires).
+                            When not selectable: keep pointer-events none so the marker is fully transparent. */}
+                        <div
+                          style={{
+                            transform: "translate(-50%, -50%)",
+                            pointerEvents: coneClickOk ? "auto" : "none",
+                            filter: fx.shadow,
+                            opacity: fx.ghost,
+                            cursor: coneClickOk ? "pointer" : undefined,
+                          }}
+                          onClick={(e) => {
+                            if (!coneClickOk) return;
+                            e.stopPropagation();
+                            coneSelectionGuardRef.current = true;
+                            setSelectedConeId(f.id);
+                          }}
+                        >
                           <MarkerVisual typeId={f.typeId} strokeScale={fx.strokeScale} scale={elementScale} />
                         </div>
                       </OverlayViewF>
