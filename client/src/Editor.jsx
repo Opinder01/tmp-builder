@@ -3955,36 +3955,68 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
           if (a && b) pdf.line(a.x, a.y, b.x, b.y);
         }
       } else {
-        const markers = sampleConesMarkersForPath(
-          path.map((p) => toPlainLL(p)).filter(Boolean),
-          f.typeId
-        );
-        for (const pos of markers) {
-          const mm = toPdf(project(pos));
+        // Build parallel plainPath / vertsPx so meters and pixels stay in sync
+        const plainPath = [];
+        const vertsPx = [];
+        for (const pt of path) {
+          const ll = toPlainLL(pt);
+          if (!ll) continue;
+          const px = project(ll);
+          if (!px) continue;
+          plainPath.push(ll);
+          vertsPx.push(px);
+        }
+        if (vertsPx.length < 2) continue;
+
+        // Compute export-canvas pixels per real-world meter along this path
+        let totalPx = 0, totalM = 0;
+        for (let i = 0; i < vertsPx.length - 1; i++) {
+          totalPx += distPx(vertsPx[i], vertsPx[i + 1]);
+          totalM  += distMetersLL(plainPath[i], plainPath[i + 1]);
+        }
+        if (totalM < 0.01 || totalPx < 1) continue;
+        const pxPerMeter = totalPx / totalM;
+
+        // Spacing and marker size both derived from the same export scale
+        const spacingM  = getConeSpacingMeters(f.typeId);
+        const spacingPx = spacingM * pxPerMeter;           // canvas pixels
+        const mmPerPx   = mapW_mm / imgW;                  // PDF mm per canvas pixel
+        const spacingMm = spacingPx * mmPerPx;             // PDF mm between markers
+
+        // Fill fraction from CONE_VISUAL: same ratio as on-screen editor
+        const cfg = CONE_VISUAL[f.typeId] || CONE_VISUAL.default;
+        const markerSizeMm = (cfg.markerSize / (cfg.spacingPx || 18)) * spacingMm;
+
+        // Resample pixel path at spacingPx to match editor visual density
+        const markersPx = resamplePolylinePx(vertsPx, spacingPx);
+
+        for (const px of markersPx) {
+          const mm = toPdf(px);
           if (!inMapRect(mm)) continue;
-          pdf.setLineWidth(0.15);
+          pdf.setLineWidth(Math.max(0.08, markerSizeMm * 0.06));
+
           if (f.typeId === "barrel") {
             pdf.setFillColor(249, 115, 22);
             pdf.setDrawColor(17, 17, 17);
-            pdf.circle(mm.x, mm.y, 1.0, "FD");
+            pdf.circle(mm.x, mm.y, markerSizeMm / 2, "FD");
           } else if (f.typeId === "bollard") {
             pdf.setFillColor(55, 65, 81);
             pdf.setDrawColor(17, 17, 17);
-            pdf.circle(mm.x, mm.y, 0.7, "FD");
+            pdf.circle(mm.x, mm.y, markerSizeMm / 2, "FD");
           } else if (f.typeId === "type1" || f.typeId === "type2") {
-            const bw = 4.0, bh = 2.0;
+            const bw = markerSizeMm * 1.5, bh = markerSizeMm * 0.7;
             const sx = mm.x - bw / 2, sy = mm.y - bh / 2;
             pdf.setFillColor(255, 255, 255);
             pdf.setDrawColor(17, 17, 17);
             pdf.rect(sx, sy, bw, bh, "FD");
             pdf.setDrawColor(245, 158, 11);
-            pdf.setLineWidth(0.4);
+            pdf.setLineWidth(Math.max(0.1, bh * 0.2));
             pdf.line(sx + bw * 0.15, sy + bh * 0.3,  sx + bw * 0.5,  sy + bh * 0.1);
             pdf.line(sx + bw * 0.35, sy + bh * 0.5,  sx + bw * 0.85, sy + bh * 0.1);
             pdf.line(sx + bw * 0.1,  sy + bh * 0.8,  sx + bw * 0.75, sy + bh * 0.5);
           } else {
-            // Default cone: amber triangle pointing up
-            const th = 2.5, tw = 1.5;
+            // Cone: amber upward triangle — height = markerSizeMm, base = half-height
+            const th = markerSizeMm, tw = markerSizeMm * 0.5;
             pdf.setFillColor(245, 158, 11);
             pdf.setDrawColor(17, 17, 17);
             pdf.lines([[tw / 2, th], [-tw, 0]], mm.x - tw / 4, mm.y - th / 2, [1, 1], "FD", true);
