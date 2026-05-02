@@ -8816,33 +8816,35 @@ draggingCursor:
                       <OverlayViewF key={`${f.id}_vtx_${i}`} position={pt} mapPaneName="overlayMouseTarget">
                         <div
                           style={vtxHandleStyle}
-                          onPointerDown={(e) => {
+                          onMouseDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            e.currentTarget.setPointerCapture(e.pointerId);
                             coneSelectionGuardRef.current = true;
                             lockMapInteractions(true);
-                          }}
-                          onPointerMove={(e) => {
-                            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                            const curPx = clientToDivPx(e.clientX, e.clientY);
-                            if (!curPx) return;
-                            const newPos = pxToLatLng(curPx);
-                            if (!newPos) return;
-                            setConesFeatures((prev) =>
-                              prev.map((cone) => {
-                                if (cone.id !== f.id) return cone;
-                                const newPath = [...cone.path];
-                                newPath[i] = newPos;
-                                return { ...cone, path: newPath };
-                              })
-                            );
-                          }}
-                          onPointerUp={(e) => {
-                            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                            e.currentTarget.releasePointerCapture(e.pointerId);
-                            lockMapInteractions(false);
-                            pushHistory();
+                            const coneId = f.id;
+                            const ptIdx = i;
+                            function onMove(ev) {
+                              const curPx = clientToDivPx(ev.clientX, ev.clientY);
+                              if (!curPx) return;
+                              const newPos = pxToLatLng(curPx);
+                              if (!newPos) return;
+                              setConesFeatures((prev) =>
+                                prev.map((cone) => {
+                                  if (cone.id !== coneId) return cone;
+                                  const np = [...cone.path];
+                                  np[ptIdx] = newPos;
+                                  return { ...cone, path: np };
+                                })
+                              );
+                            }
+                            function onUp() {
+                              window.removeEventListener("mousemove", onMove);
+                              window.removeEventListener("mouseup", onUp);
+                              lockMapInteractions(false);
+                              pushHistory();
+                            }
+                            window.addEventListener("mousemove", onMove);
+                            window.addEventListener("mouseup", onUp);
                           }}
                         />
                       </OverlayViewF>
@@ -8850,7 +8852,7 @@ draggingCursor:
                   : null;
 
                 // Midpoint handles: semi-transparent circles between vertices.
-                // Pointer-down inserts a new vertex then immediately drags it — all synchronous.
+                // mousedown inserts a new vertex and immediately starts dragging it.
                 const midHandleStyle = {
                   transform: "translate(-50%, -50%)",
                   width: 8, height: 8,
@@ -8863,7 +8865,6 @@ draggingCursor:
                   boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
                   zIndex: 49,
                   userSelect: "none",
-                  touchAction: "none",
                 };
                 const midpointHandles = (isSelCone && coneClickOk && f.path.length >= 2)
                   ? f.path.slice(0, -1).map((pt, i) => {
@@ -8872,42 +8873,44 @@ draggingCursor:
                         <OverlayViewF key={`${f.id}_mid_${i}`} position={mid} mapPaneName="overlayMouseTarget">
                           <div
                             style={midHandleStyle}
-                            onPointerDown={(e) => {
+                            onMouseDown={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              e.currentTarget.setPointerCapture(e.pointerId);
                               coneSelectionGuardRef.current = true;
-                              // Insert new vertex at i+1 so onPointerMove can update it
-                              setConesFeatures((prev) =>
-                                prev.map((cone) => {
-                                  if (cone.id !== f.id) return cone;
-                                  const newPath = [...cone.path];
-                                  newPath.splice(i + 1, 0, { lat: mid.lat, lng: mid.lng });
-                                  return { ...cone, path: newPath };
-                                })
-                              );
                               lockMapInteractions(true);
-                            }}
-                            onPointerMove={(e) => {
-                              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                              const curPx = clientToDivPx(e.clientX, e.clientY);
-                              if (!curPx) return;
-                              const newPos = pxToLatLng(curPx);
-                              if (!newPos) return;
+                              const coneId = f.id;
+                              const newPtIdx = i + 1;
+                              // Insert the new vertex immediately
                               setConesFeatures((prev) =>
                                 prev.map((cone) => {
-                                  if (cone.id !== f.id) return cone;
-                                  const newPath = [...cone.path];
-                                  newPath[i + 1] = newPos;
-                                  return { ...cone, path: newPath };
+                                  if (cone.id !== coneId) return cone;
+                                  const np = [...cone.path];
+                                  np.splice(newPtIdx, 0, { lat: mid.lat, lng: mid.lng });
+                                  return { ...cone, path: np };
                                 })
                               );
-                            }}
-                            onPointerUp={(e) => {
-                              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                              e.currentTarget.releasePointerCapture(e.pointerId);
-                              lockMapInteractions(false);
-                              pushHistory();
+                              function onMove(ev) {
+                                const curPx = clientToDivPx(ev.clientX, ev.clientY);
+                                if (!curPx) return;
+                                const newPos = pxToLatLng(curPx);
+                                if (!newPos) return;
+                                setConesFeatures((prev) =>
+                                  prev.map((cone) => {
+                                    if (cone.id !== coneId) return cone;
+                                    const np = [...cone.path];
+                                    np[newPtIdx] = newPos;
+                                    return { ...cone, path: np };
+                                  })
+                                );
+                              }
+                              function onUp() {
+                                window.removeEventListener("mousemove", onMove);
+                                window.removeEventListener("mouseup", onUp);
+                                lockMapInteractions(false);
+                                pushHistory();
+                              }
+                              window.addEventListener("mousemove", onMove);
+                              window.addEventListener("mouseup", onUp);
                             }}
                           />
                         </OverlayViewF>
