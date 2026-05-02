@@ -7118,7 +7118,7 @@ const handleLegendToggle = (typeId) => {
     setUiDrag({ type: "moveMeasPoint", measId, ptIndex });
   };
 
-  /* ================= Cone vertex drag ================= */
+  /* ================= Cone selection ================= */
   /** Pick an existing cone for vertex editing — leave placement mode so map clicks are not new cone strokes (same idea as onSelectSign). */
   const selectConeForEdit = (coneId) => {
     if (!coneId) return;
@@ -8820,6 +8820,7 @@ draggingCursor:
                             e.preventDefault();
                             e.stopPropagation();
                             e.currentTarget.setPointerCapture(e.pointerId);
+                            coneSelectionGuardRef.current = true;
                             lockMapInteractions(true);
                           }}
                           onPointerMove={(e) => {
