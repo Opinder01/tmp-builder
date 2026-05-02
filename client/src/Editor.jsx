@@ -2,7 +2,6 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { flushSync } from "react-dom";
 import { jsPDF } from "jspdf";
-import html2canvas from "html2canvas";
 import { useNavigate } from "react-router-dom";
 
 
@@ -29,8 +28,26 @@ import {
   DEFAULT_ARROW_WIDTH_PX,
   DEFAULT_ARROW_HEIGHT_PX,
 } from "./arrowCatalog";
+import {
+  normalizeExportLatLngBounds,
+  latLngToWorldPx,
+  EXPORT_PDF_TILE_GRID,
+  computeExportTileSpec,
+  stitchExportMapTiles,
+} from "./export/googleStaticMapStitch";
 
 const GMAP_LIBRARIES = ["places", "geometry"];
+
+/** Normalize pasted / cross-platform line endings for Comments (editor + PDF canvas). */
+function normalizeCommentLineBreaks(raw) {
+  return String(raw ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\u2028/g, "\n")
+    .replace(/\u2029/g, "\n")
+    .replace(/\u000b/g, "\n")
+    .replace(/\f/g, "\n");
+}
 
 /**
  * Pointer delta in map-div / CSS pixels → local sign axes (local +x = right, +y = down
@@ -1376,6 +1393,10 @@ const { isLoaded, loadError } = useLoadScript({
 
 const nav = useNavigate();
 
+  // Key used to force a clean Google Map remount when the saved location changes.
+  // Must be declared before any hooks that reference its setter.
+  const [mapKey, setMapKey] = useState(0);
+
   const savedLocation = JSON.parse(
     localStorage.getItem("tmp_new_location") || "{}"
   );
@@ -1493,17 +1514,27 @@ function TitleBoxContent({ data, scale: s = 1 }) {
       {/* Divider */}
       <div style={{ height: Math.max(1, 1 * s), background: "#111", opacity: 0.2 }} />
 
-      {/* ✅ Bottom row now shows Comments */}
-      <div
-  style={{
-    fontSize: Math.max(8, 12 * s),
-    color: "#111",
-    whiteSpace: "pre-wrap",   // ✅ THIS FIXES ENTER KEY
-    wordBreak: "break-word",
-  }}
->
-  <b>Comments:</b> {data?.comments || ""}
-</div>
+      {/* Comments: one block per physical line (newline-separated), mirrors PDF canvas wrapping */}
+      {(() => {
+        const lines = normalizeCommentLineBreaks(data?.comments ?? "").split("\n");
+        return (
+          <div
+            style={{
+              fontSize: Math.max(8, 12 * s),
+              color: "#111",
+              wordBreak: "break-word",
+              lineHeight: 1.35,
+            }}
+          >
+            <div>
+              <b>Comments:</b> {lines[0] ?? ""}
+            </div>
+            {lines.slice(1).map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        );
+      })()}
 
     </div>
   );
@@ -1516,7 +1547,7 @@ const [editingLabel, setEditingLabel] = useState(null);
   const mapHostRef = useRef(null);
   const lastMapViewRef = React.useRef({ center: null, zoom: null });
   const [mapReady, setMapReady] = useState(false);
-  const [mapKey, setMapKey] = useState(0);
+  // mapKey declared near top of component
 
   // Stand movement uses uiDrag (like signs); no marker-native drag.
 
@@ -1586,6 +1617,11 @@ const uploadInsertTitleLogo = (insertId, file) => {
 };
 
 
+  const [mapView, setMapView] = useState(() => ({
+    center: center,  // your existing center variable
+    zoom: 18,
+  }));
+
   const zoomIn = () => {
     const map = mapRef.current;
     if (!map) return;
@@ -1605,11 +1641,6 @@ const uploadInsertTitleLogo = (insertId, file) => {
   map.panTo(center);
   map.setZoom(18);
 };
-
-  const [mapView, setMapView] = useState(() => ({
-  center: center,  // your existing center variable
-  zoom: 18,
-}));
 useEffect(() => {
   const el = mapHostRef.current;
   if (!el) return;
@@ -2083,6 +2114,8 @@ const [workHover, setWorkHover] = useState(null);
   const [conesHoverPoint, setConesHoverPoint] = useState(null);
   const [conesPreviewSamples, setConesPreviewSamples] = useState([]);
   const [conesFeatures, setConesFeatures] = useState([]); // {id,typeId,path:[latlng...]}
+  const [selectedConeId, setSelectedConeId] = useState(null); // id of selected drawn cone (for vertex editing)
+  const coneSelectionGuardRef = useRef(false); // true = next map click came from a cone polyline, skip it
 
   /* ================= Measurements tool ================= */
   const [measPanelOpen, setMeasPanelOpen] = useState(false);
@@ -2151,6 +2184,7 @@ useEffect(() => {
   const [measVerticesState, setMeasVerticesState] = useState([]);
   const [measHoverPoint, setMeasHoverPoint] = useState(null);
   const [measurements, setMeasurements] = useState([]); // {id, mode, path:[latlng...]}
+  const [selectedMeasId, setSelectedMeasId] = useState(null); // id of selected measurement (for move/context)
 
   /* ================= Signs tool ================= */
   const [signsPanelOpen, setSignsPanelOpen] = useState(false);
@@ -2234,8 +2268,6 @@ const [printAreaBounds, setPrintAreaBounds] = useState(null);
 // During resize drag, exact pixel rect so handles don't jump (no round-trip through lat/lng)
 const [exportLiveRect, setExportLiveRect] = useState(null);
 // Export panel options
-const [exportPaperSize, setExportPaperSize] = useState("letter");
-const [exportOrientation, setExportOrientation] = useState("landscape");
 const [exportIncludeTitle, setExportIncludeTitle] = useState(true);
 const [exportIncludeLegend, setExportIncludeLegend] = useState(true);
 const [exportIncludeNotes, setExportIncludeNotes] = useState(true);
@@ -2243,13 +2275,13 @@ const [exportIncludeNorthArrow, setExportIncludeNorthArrow] = useState(true);
 const [exportIncludeScaleBar, setExportIncludeScaleBar] = useState(true);
 const exportOverlayRef = useRef(null); // map wrapper ref
 const [exportCaptureInProgress, setExportCaptureInProgress] = useState(false);
-const [exportPreviewUrl, setExportPreviewUrl]       = useState(null);  // satellite preview data URL
-const [exportPreviewLoading, setExportPreviewLoading] = useState(false); // true while fetching preview
 const exportResizeRef = useRef(null);  // single source of truth during export resize: { handle, startClientX, startClientY, originalRect }
 // Synchronous ref for Generate PDF: always holds the final export bounds (avoids stale React state)
 const exportBoundsForPdfRef = useRef(null);
 // Ref for export: ensures async exportSelectionToPdf always uses current plan data (avoids stale closure)
 const exportPlanDataRef = useRef({});
+// Must be declared before the exportPlanDataRef useEffect that lists it in its dependency array
+const [legendExclusions, setLegendExclusions] = useState(new Set()); // Set of typeId strings hidden from legend
 useEffect(() => {
   exportPlanDataRef.current = {
     workAreas,
@@ -2264,8 +2296,9 @@ useEffect(() => {
     northArrows,
     scales,
     insertObjects,
+    legendExclusions: Array.from(legendExclusions ?? []),
   };
-}, [workAreas, conesFeatures, measurements, placedSigns, placedArrows, legendBoxes, manifestBoxes, titleBoxes, titleBoxDataById, northArrows, scales, insertObjects]);
+}, [workAreas, conesFeatures, measurements, placedSigns, placedArrows, legendBoxes, manifestBoxes, titleBoxes, titleBoxDataById, northArrows, scales, insertObjects, legendExclusions]);
 // ================= PAGE FRAME (Permanent export boundary) =================
 // ✅ page frame stored in LAT/LNG (so it sticks to the map)
 const [pageFrameBounds, setPageFrameBounds] = useState(null); 
@@ -2354,7 +2387,7 @@ async function importAerialPhotoForFrame() {
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [uiDrag, setUiDrag] = useState(null);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, entityType, entityId, typeId }
-  const [legendExclusions, setLegendExclusions] = useState(new Set()); // Set of typeId strings hidden from legend
+  // legendExclusions declared earlier (before exportPlanDataRef useEffect) to avoid TDZ
   const [clipboard, setClipboard] = useState(null); // { kind, data }
   // Live rotation accumulator for signs (avoids stale closures + reattaching listeners)
   const rotateSignLiveRef = useRef(null); // { lastAngleDeg: number, accumulatedDeg: number } | null
@@ -2557,6 +2590,7 @@ function applyProjectSnapshot(snap) {
       northArrows: es.northArrows ?? [],
       scales: es.scales ?? [],
       insertObjects: es.insertObjects ?? [],
+      legendExclusions: Array.from(legendExclusions ?? []),
     };
   }
 
@@ -2725,248 +2759,6 @@ function cancelExportToPdf() {
   setExportLiveRect(null);
   setUiDrag(null);
   setExportCaptureInProgress(false);
-  setExportPreviewUrl(null);
-  setExportPreviewLoading(false);
-}
-
-async function exportViaScreenshot(selectedRectPx) {
-  const el = exportOverlayRef.current;
-  if (!el) return null;
-  setExportCaptureInProgress(true);
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  try {
-    const pixelRatio = window.devicePixelRatio || 1;
-    const canvas = await html2canvas(el, {
-      useCORS: true,
-      allowTaint: false,
-      scale: pixelRatio,
-      logging: false,
-    });
-    const r = selectedRectPx;
-    const cropCanvas = document.createElement("canvas");
-    cropCanvas.width = Math.max(1, r.w);
-    cropCanvas.height = Math.max(1, r.h);
-    const ctx = cropCanvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(
-      canvas,
-      r.x * pixelRatio, r.y * pixelRatio, r.w * pixelRatio, r.h * pixelRatio,
-      0, 0, r.w, r.h
-    );
-    return cropCanvas.toDataURL("image/png");
-  } catch {
-    return null;
-  } finally {
-    setExportCaptureInProgress(false);
-  }
-}
-
-/**
- * loadExportPreview — tiled aerial preview anchored to the blue export box.
- *
- * Source of truth: exportBoundsForPdfRef (lat/lng).  Screen pixels and
- * map.getCenter() are never used.
- *
- * Strategy: find the HIGHEST integer zoom where the bounds fit in a 5×5 tile
- * grid (each tile ≤ 640 CSS px).  Fewer zoom drops = imagery that matches
- * what the user sees on the interactive map.
- *
- * Each tile is requested at the EXACT world-pixel size (no over-fetch, no
- * crop) and the full image is scaled into its destination rect by drawImage.
- * This eliminates the rounding errors introduced by the previous +4/crop.
- */
-async function loadExportPreview() {
-  const rawBounds = exportBoundsForPdfRef.current ?? printAreaBounds;
-  if (!rawBounds) return;
-
-  const map = mapRef.current;
-  if (!map) return;
-
-  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  if (!key) { alert("Missing Google Maps API key."); return; }
-
-  setExportPreviewLoading(true);
-  setExportPreviewUrl(null);
-
-  try {
-    // ── Normalize bounds ──────────────────────────────────────────────────
-    const nwLat = Math.max(rawBounds.nw.lat, rawBounds.se.lat);
-    const seLat = Math.min(rawBounds.nw.lat, rawBounds.se.lat);
-    const nwLng = Math.min(rawBounds.nw.lng, rawBounds.se.lng);
-    const seLng = Math.max(rawBounds.nw.lng, rawBounds.se.lng);
-
-    const STATIC_MAP_MAX = 640; // Static Maps API max size (CSS px)
-    const GOOGLE_SCALE   = 2;   // scale=2 doubles device pixels, not world pixels
-    const MAX_TILES      = 5;   // max tiles per dimension (5×5 = 25 requests max)
-
-    // ── Web Mercator helpers ──────────────────────────────────────────────
-    const worldSize       = (z) => 256 * Math.pow(2, z);
-    const latLngToWorldPx = (lat, lng, z) => {
-      const s   = worldSize(z);
-      const x   = ((lng + 180) / 360) * s;
-      const sin = Math.sin((lat * Math.PI) / 180);
-      const y   = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
-      return { x, y };
-    };
-    const worldYToLat = (worldY, z) => {
-      const s   = worldSize(z);
-      const t   = worldY / s;
-      const k   = Math.exp((0.5 - t) * 4 * Math.PI);
-      const sin = (k - 1) / (k + 1);
-      return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
-    };
-
-    // ── Find highest zoom where bounds fit inside MAX_TILES×MAX_TILES ─────
-    // Using MAX_TILES=5 instead of 3 means we stay closer to the map's
-    // visual zoom level (fewer zoom drops → imagery matches the map better).
-    const mapFracZoom    = map.getZoom?.() ?? 18;
-    const mapCurrentZoom = Math.min(21, Math.round(mapFracZoom));
-    let zoom = mapCurrentZoom;
-    let nwWorld, seWorld, boundsPxW, boundsPxH;
-
-    for (let z = mapCurrentZoom; z >= 1; z--) {
-      const nw = latLngToWorldPx(nwLat, nwLng, z);
-      const se = latLngToWorldPx(seLat, seLng, z);
-      const w  = se.x - nw.x;   // always positive: east > west
-      const h  = se.y - nw.y;   // always positive: south y > north y in Mercator
-      zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
-      if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_TILES &&
-          Math.ceil(h / STATIC_MAP_MAX) <= MAX_TILES) break;
-    }
-
-    const numCols    = Math.min(MAX_TILES, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
-    const numRows    = Math.min(MAX_TILES, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
-    const tileWorldW = boundsPxW / numCols;  // exact world-px per tile (may be non-integer)
-    const tileWorldH = boundsPxH / numRows;
-    // Request exactly tileWorldW CSS pixels per tile (no over-fetch).
-    // drawImage will scale to fill the destination rect, absorbing any ±1px rounding.
-    const tileReqW   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldW)));
-    const tileReqH   = Math.max(1, Math.min(STATIC_MAP_MAX, Math.round(tileWorldH)));
-
-    // ── Map layer ─────────────────────────────────────────────────────────
-    const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
-    const maptype    = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw)
-                       ? maptypeRaw : "satellite";
-
-    // ── Build tile URLs from world-pixel centres ──────────────────────────
-    const tileFetches = [];
-    for (let row = 0; row < numRows; row++) {
-      for (let col = 0; col < numCols; col++) {
-        const cx  = nwWorld.x + (col + 0.5) * tileWorldW;
-        const cy  = nwWorld.y + (row + 0.5) * tileWorldH;
-        const lat = worldYToLat(cy, zoom);
-        const lng = (cx / worldSize(zoom)) * 360 - 180;
-        const url =
-          "https://maps.googleapis.com/maps/api/staticmap" +
-          `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
-          `&size=${tileReqW}x${tileReqH}` +
-          `&center=${lat.toFixed(7)},${lng.toFixed(7)}` +
-          `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
-        tileFetches.push({ row, col, url, tileLat: lat, tileLng: lng });
-      }
-    }
-
-    // ── Diagnostic logging (check browser console to verify alignment) ────
-    console.group("[Aerial Preview] diagnostics");
-    console.log("bounds NW :", nwLat.toFixed(7), nwLng.toFixed(7));
-    console.log("bounds SE :", seLat.toFixed(7), seLng.toFixed(7));
-    console.log("map zoom  :", mapFracZoom.toFixed(3), "→ tile zoom:", zoom,
-                "(dropped", mapCurrentZoom - zoom, "levels)");
-    console.log("grid      :", numCols + "×" + numRows,
-                "  tileWorldPx:", tileWorldW.toFixed(1) + "×" + tileWorldH.toFixed(1),
-                "  tileReq:", tileReqW + "×" + tileReqH);
-    console.log("layer     :", maptype);
-    tileFetches.forEach(({ row, col, tileLat, tileLng }) =>
-      console.log(`  tile[${col},${row}] center: ${tileLat.toFixed(7)}, ${tileLng.toFixed(7)}`)
-    );
-    console.groupEnd();
-
-    // ── Output canvas (world-px × GOOGLE_SCALE device-px) ────────────────
-    const outW  = Math.max(1, Math.round(boundsPxW * GOOGLE_SCALE));
-    const outH  = Math.max(1, Math.round(boundsPxH * GOOGLE_SCALE));
-    const canvas = document.createElement("canvas");
-    canvas.width  = outW;
-    canvas.height = outH;
-    const ctx = canvas.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-
-    // ── Fetch tiles in parallel then stitch ───────────────────────────────
-    const tileResults = await Promise.all(
-      tileFetches.map(({ row, col, url }) =>
-        fetchStaticMapAsDataUrl(url).then(dataUrl =>
-          new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.onload  = () => resolve({ row, col, img });
-            img.onerror = () => reject(new Error(`Preview tile (${col},${row}) failed to load.`));
-            img.src = dataUrl;
-          })
-        )
-      )
-    );
-
-    // Scale each tile into its destination rect, cropping Google's per-tile
-    // attribution bar (bottom ~22 CSS px = 44 natural px at scale=2) so it
-    // doesn't appear as repeated patches across the stitched image.
-    // The imagery is stretched by <3% vertically — imperceptible in aerials.
-    const ATTRIB_CROP_NAT = 44; // natural pixels to crop from bottom of each tile
-    for (const { row, col, img } of tileResults) {
-      const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
-      const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
-      const dstW = Math.round((col + 1) * tileWorldW * GOOGLE_SCALE) - dstX;
-      const dstH = Math.round((row + 1) * tileWorldH * GOOGLE_SCALE) - dstY;
-      const srcH = Math.max(1, img.naturalHeight - ATTRIB_CROP_NAT);
-      ctx.drawImage(img, 0, 0, img.naturalWidth, srcH, dstX, dstY, dstW, dstH);
-    }
-
-    // Draw a single consolidated attribution bar at the bottom of the composite.
-    const ATTRIB_TEXT = "Map data \u00A92026 Imagery \u00A92026 Airbus, Maxar Technologies \u00B7 Google";
-    const BAR_H = 22;
-    ctx.fillStyle = "rgba(255,255,255,0.80)";
-    ctx.fillRect(0, outH - BAR_H, outW, BAR_H);
-    ctx.fillStyle = "#444444";
-    ctx.font = "13px Arial, sans-serif";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    ctx.fillText(ATTRIB_TEXT, outW - 10, outH - BAR_H / 2);
-
-    setExportPreviewUrl(canvas.toDataURL("image/jpeg", 0.92));
-  } catch (e) {
-    alert("Could not load aerial preview:\n" + (e instanceof Error ? e.message : String(e)));
-  } finally {
-    setExportPreviewLoading(false);
-  }
-}
-
-async function runExportToPdf(selectedRectPx) {
-  const dataUrl = await exportViaScreenshot(selectedRectPx);
-  if (dataUrl) {
-    const orient = exportOrientation === "landscape" ? "l" : "p";
-    const format = ["letter", "legal", "tabloid", "a4", "a3"].includes(exportPaperSize) ? exportPaperSize : "letter";
-    const pdf = new jsPDF({ orientation: orient, unit: "mm", format });
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    const marginH = 4;
-    const marginV = 2;
-    const frameRect = { x: marginH, y: marginV, w: pageW - marginH * 2, h: pageH - marginV * 2 };
-    const imgW = selectedRectPx.w;
-    const imgH = selectedRectPx.h;
-    const scale = Math.min(frameRect.w / imgW, frameRect.h / imgH);
-    const drawW = imgW * scale;
-    const drawH = imgH * scale;
-    const offsetX = frameRect.x + (frameRect.w - drawW) / 2;
-    const offsetY = frameRect.y + (frameRect.h - drawH) / 2;
-    pdf.addImage(dataUrl, "PNG", offsetX, offsetY, drawW, drawH);
-    const blob = pdf.output("blob");
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank", "noopener,noreferrer");
-    if (!win || win.closed) pdf.save("TMP-export.pdf");
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    cancelExportToPdf();
-  } else {
-    await exportSelectionToPdf(null, selectedRectPx);
-  }
 }
 
 function resetExportAreaToViewport() {
@@ -3001,13 +2793,15 @@ function initPageFrameRect() {
 }
 
 async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) {
-  try {
   const map = mapRef.current;
   if (!map) {
-    alert("Map not ready. Please wait a moment and try again.");
+    alert("Map not ready.");
     return;
   }
 
+  setExportCaptureInProgress(true);
+  try {
+  // ── STEP 2: resolve export bounds + screen rect ──────────────────────────
   let bounds;
   let selectedRectPx;
   if (rectOverride) {
@@ -3017,147 +2811,90 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       w: Math.round(rectOverride.w),
       h: Math.round(rectOverride.h),
     };
-    // Derive bounds: use viewport interpolation when rect is fully visible (avoids projection offset issues)
-    const mapBounds = map.getBounds?.();
-    const div = map.getDiv?.();
-    const divRect = div?.getBoundingClientRect?.();
-    const r = selectedRectPx;
-    const vw = divRect?.width ?? 0;
-    const vh = divRect?.height ?? 0;
-    const fullyVisible = mapBounds && vw > 0 && vh > 0 && r.x >= 0 && r.y >= 0 && r.x + r.w <= vw && r.y + r.h <= vh;
-    if (fullyVisible) {
-      const ne = mapBounds.getNorthEast();
-      const sw = mapBounds.getSouthWest();
-      const leftFrac = r.x / vw;
-      const topFrac = r.y / vh;
-      const rightFrac = (r.x + r.w) / vw;
-      const bottomFrac = (r.y + r.h) / vh;
-      bounds = {
-        nw: {
-          lat: ne.lat() - topFrac * (ne.lat() - sw.lat()),
-          lng: sw.lng() + leftFrac * (ne.lng() - sw.lng()),
-        },
-        se: {
-          lat: ne.lat() - bottomFrac * (ne.lat() - sw.lat()),
-          lng: sw.lng() + rightFrac * (ne.lng() - sw.lng()),
-        },
-      };
+    // Prefer exact stored bounds (recorded when blue selection rectangle was drawn).
+    // Fall back to viewport pixel interpolation only when the ref is null.
+    const storedBounds = exportBoundsForPdfRef.current;
+    if (storedBounds) {
+      bounds = storedBounds;
     } else {
-      bounds = rectPxToBounds(selectedRectPx);
+      const mapBounds = map.getBounds?.();
+      const div      = map.getDiv?.();
+      const divRect  = div?.getBoundingClientRect?.();
+      const r  = selectedRectPx;
+      const vw = divRect?.width  ?? 0;
+      const vh = divRect?.height ?? 0;
+      const ok = mapBounds && vw > 0 && vh > 0 && r.x >= 0 && r.y >= 0 && r.x + r.w <= vw && r.y + r.h <= vh;
+      if (ok) {
+        const ne = mapBounds.getNorthEast();
+        const sw = mapBounds.getSouthWest();
+        bounds = {
+          nw: { lat: ne.lat() - (r.y / vh) * (ne.lat() - sw.lat()),         lng: sw.lng() + (r.x / vw) * (ne.lng() - sw.lng()) },
+          se: { lat: ne.lat() - ((r.y + r.h) / vh) * (ne.lat() - sw.lat()), lng: sw.lng() + ((r.x + r.w) / vw) * (ne.lng() - sw.lng()) },
+        };
+      } else {
+        bounds = rectPxToBounds(selectedRectPx);
+      }
     }
-    if (!bounds) {
-      alert("Export area is not ready. Could not convert selection to map coordinates.");
-      return;
-    }
+    if (!bounds) { alert("Export area not ready — could not resolve map coordinates."); return; }
   } else {
     bounds = boundsOverride ?? exportBoundsForPdfRef.current ?? printAreaBounds ?? pageFrameBounds;
     selectedRectPx = bounds ? boundsToRectPx(bounds) : null;
-    if (!selectedRectPx || !bounds) {
-      alert("Export area is not ready. Please wait a moment and try again.");
-      return;
-    }
+    if (!selectedRectPx || !bounds) { alert("Export area not ready."); return; }
   }
 
-  // Normalize bounds: ensure nw.lat >= se.lat and nw.lng <= se.lng for Static API consistency
-  const nwLat = Math.max(bounds.nw.lat, bounds.se.lat);
-  const seLat = Math.min(bounds.nw.lat, bounds.se.lat);
-  const nwLng = Math.min(bounds.nw.lng, bounds.se.lng);
-  const seLng = Math.max(bounds.nw.lng, bounds.se.lng);
-  bounds = { nw: { lat: nwLat, lng: nwLng }, se: { lat: seLat, lng: seLng } };
+  // ── STEP 3: normalize bounds ─────────────────────────────────────────────
+  bounds = normalizeExportLatLngBounds(bounds);
 
+  // ── STEP 4: API key + plan data ──────────────────────────────────────────
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  if (!key) {
-    alert("Missing VITE_GOOGLE_MAPS_API_KEY for Static Maps export.");
+  if (!key) { alert("Missing VITE_GOOGLE_MAPS_API_KEY."); return; }
+
+  // Read live React state (not exportPlanDataRef): ref updates in useEffect and can lag one frame behind the UI.
+  const legendExclusionsForExport = new Set(Array.from(legendExclusions ?? []));
+
+  // ── STEP 5: stitch Static Maps tiles (high tile budget → sharper imagery & labels) ──
+  const mapFracZoom = map.getZoom?.() ?? 18;
+  const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
+  const maptype = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw) ? maptypeRaw : "satellite";
+
+  const exportTileSpec = computeExportTileSpec(bounds, mapFracZoom, EXPORT_PDF_TILE_GRID);
+
+  let canvas, ctx, imgW, imgH, zoom, nwWorld, seWorld;
+  try {
+    const st = await stitchExportMapTiles(exportTileSpec, maptype, key, fetchStaticMapAsDataUrl);
+    canvas = st.canvas;
+    ctx = canvas.getContext("2d");
+    imgW = st.imgW;
+    imgH = st.imgH;
+    zoom = st.zoom;
+    nwWorld = st.nwWorld;
+    seWorld = st.seWorld;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    alert("Export failed — map tiles: " + msg);
+    cancelExportToPdf();
+    return;
+  }
+  if (!ctx) {
+    alert("Export failed — canvas context unavailable.");
+    cancelExportToPdf();
     return;
   }
 
-  // Use ref so export always has current plan data (avoids stale closure during async)
-  const plan = exportPlanDataRef.current;
-  const workAreas = plan.workAreas ?? [];
-  const conesFeatures = plan.conesFeatures ?? [];
-  const measurements = plan.measurements ?? [];
-  const placedSigns = plan.placedSigns ?? [];
-  const legendBoxes = plan.legendBoxes ?? [];
-  const manifestBoxes = plan.manifestBoxes ?? [];
-  const titleBoxes = plan.titleBoxes ?? [];
-  const titleBoxDataById = plan.titleBoxDataById ?? {};
-  const northArrows = plan.northArrows ?? [];
-  const scales = plan.scales ?? [];
-  const insertObjects = plan.insertObjects ?? [];
+  const outW = canvas.width;
+  const outH = canvas.height;
 
-  // Web Mercator: compute pixel dimensions of selected bounds at each zoom
-  const worldSize = (z) => 256 * Math.pow(2, z);
-  const latLngToWorldPx = (lat, lng, z) => {
-    const s = worldSize(z);
-    const x = ((lng + 180) / 360) * s;
-    const sin = Math.sin((lat * Math.PI) / 180);
-    const y = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s;
-    return { x, y };
-  };
-
-  const STATIC_MAP_MAX = 640;
-  const GOOGLE_SCALE = 2;
-
-  // ── Tiled high-resolution map fetch ──────────────────────────────────────────
-  // Instead of dropping zoom until the whole area fits in one 640px tile, we keep
-  // the HIGHEST zoom and fetch a grid of up to 3×3 tiles in parallel.
-  // Each tile: 640×640 CSS px → 1280×1280 real px (scale=2).
-  // 3×3 grid → up to 3840×3840 px canvas — far sharper than the old single tile.
-  const MAX_TILE_COLS = 3;
-  const MAX_TILE_ROWS = 3;
-
-  const worldYToLat = (worldY, z) => {
-    const s = worldSize(z);
-    const t = worldY / s;
-    const k = Math.exp((0.5 - t) * 4 * Math.PI);
-    const sin = (k - 1) / (k + 1);
-    return (Math.asin(Math.max(-1, Math.min(1, sin))) * 180) / Math.PI;
-  };
-
-  // Start from the current map zoom for maximum satellite detail.
-  // Round to integer: Static Maps API only accepts integer zoom; fractional
-  // values from map.getZoom() during animated transitions would cause the API
-  // to round the zoom differently from our world-pixel math → tile misalignment.
-  const mapCurrentZoom = Math.min(21, Math.round(map.getZoom?.() ?? 18));
-  let zoom = mapCurrentZoom;
-  let nwWorld, seWorld, boundsPxW, boundsPxH;
-
-  for (let z = mapCurrentZoom; z >= 1; z--) {
-    const nw = latLngToWorldPx(bounds.nw.lat, bounds.nw.lng, z);
-    const se = latLngToWorldPx(bounds.se.lat, bounds.se.lng, z);
-    const w = Math.abs(se.x - nw.x);
-    const h = Math.abs(se.y - nw.y);
-    if (Math.ceil(w / STATIC_MAP_MAX) <= MAX_TILE_COLS &&
-        Math.ceil(h / STATIC_MAP_MAX) <= MAX_TILE_ROWS) {
-      zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
-      break;
-    }
-    zoom = z; nwWorld = nw; seWorld = se; boundsPxW = w; boundsPxH = h;
-  }
-
-  const imgW = Math.max(1, Math.round(boundsPxW));
-  const imgH = Math.max(1, Math.round(boundsPxH));
-
-  const numCols = Math.min(MAX_TILE_COLS, Math.max(1, Math.ceil(boundsPxW / STATIC_MAP_MAX)));
-  const numRows = Math.min(MAX_TILE_ROWS, Math.max(1, Math.ceil(boundsPxH / STATIC_MAP_MAX)));
-
-  // World-pixel dimensions of each tile slot
-  const tileWorldW = boundsPxW / numCols;
-  const tileWorldH = boundsPxH / numRows;
-
-  // CSS-px request size per tile (slight over-fetch so center-crop eliminates edge drift)
-  const tileReqW = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldW) + 4);
-  const tileReqH = Math.min(STATIC_MAP_MAX, Math.ceil(tileWorldH) + 4);
-
+  // ── STEP 6: projection helpers ────────────────────────────────────────────
   const toPlainLL = (p) => {
     if (!p) return null;
-    if (typeof p.lat === "function" && typeof p.lng === "function") return { lat: p.lat(), lng: p.lng() };
-    if (typeof p.lat === "number" && typeof p.lng === "number") return { lat: p.lat, lng: p.lng };
-    if (typeof p.latitude === "number" && typeof p.longitude === "number") return { lat: p.latitude, lng: p.longitude };
+    if (typeof p.lat === "function") return { lat: p.lat(), lng: p.lng() };
+    if (typeof p.lat === "number")   return { lat: p.lat,   lng: p.lng   };
+    if (typeof p.latitude === "number") return { lat: p.latitude, lng: p.longitude };
     if (Array.isArray(p) && p.length >= 2) return { lat: p[1], lng: p[0] };
     return null;
   };
 
+  // project: lat/lng → imgW×imgH CSS-px coordinate space
   const project = (p) => {
     const ll = toPlainLL(p);
     if (!ll) return null;
@@ -3165,99 +2902,56 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const fracX = (seWorld.x - nwWorld.x) !== 0 ? (wp.x - nwWorld.x) / (seWorld.x - nwWorld.x) : 0.5;
     const fracY = (seWorld.y - nwWorld.y) !== 0 ? (wp.y - nwWorld.y) / (seWorld.y - nwWorld.y) : 0.5;
     const px = { x: fracX * imgW, y: fracY * imgH };
-    if (!Number.isFinite(px.x) || !Number.isFinite(px.y)) return null;
-    return px;
+    return Number.isFinite(px.x) && Number.isFinite(px.y) ? px : null;
   };
 
-  const maptypeRaw = mapLayer === "hybrid_clean" ? "hybrid" : mapLayer;
-  const maptype = ["satellite", "hybrid", "roadmap", "terrain"].includes(maptypeRaw) ? maptypeRaw : "roadmap";
-
-  // Build one URL per tile, centred on its geographic midpoint
-  const tileFetches = [];
-  for (let row = 0; row < numRows; row++) {
-    for (let col = 0; col < numCols; col++) {
-      const cx = nwWorld.x + (col + 0.5) * tileWorldW;
-      const cy = nwWorld.y + (row + 0.5) * tileWorldH;
-      const lat = worldYToLat(cy, zoom);
-      const lng = (cx / worldSize(zoom)) * 360 - 180;
-      const url =
-        "https://maps.googleapis.com/maps/api/staticmap" +
-        `?maptype=${maptype}&format=png&scale=${GOOGLE_SCALE}` +
-        `&size=${tileReqW}x${tileReqH}` +
-        `&center=${lat.toFixed(7)},${lng.toFixed(7)}` +
-        `&zoom=${zoom}&key=${encodeURIComponent(key)}`;
-      tileFetches.push({ row, col, url });
-    }
-  }
-
-  // Output canvas: imgW × imgH world-px, each rendered at GOOGLE_SCALE real px
-  const outW = Math.max(1, Math.round(imgW * GOOGLE_SCALE));
-  const outH = Math.max(1, Math.round(imgH * GOOGLE_SCALE));
-
-  const canvas = document.createElement("canvas");
-  canvas.width  = outW;
-  canvas.height = outH;
-  const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled  = true;
-  ctx.imageSmoothingQuality  = "high";
-
-  // Fetch all tiles in parallel then stitch them onto the canvas
-  try {
-    const tileResults = await Promise.all(
-      tileFetches.map(({ row, col, url }) =>
-        fetchStaticMapAsDataUrl(url).then(
-          (dataUrl) =>
-            new Promise((resolve, reject) => {
-              const img = new Image();
-              img.crossOrigin = "anonymous";
-              img.onload  = () => resolve({ row, col, img });
-              img.onerror = () => reject(new Error(`Map tile (${col},${row}) failed to load`));
-              img.src = dataUrl;
-            })
-        )
-      )
-    );
-
-    const ATTRIB_CROP_NAT = 44; // crop Google attribution bar (~22 CSS px × scale 2) from each tile
-    for (const { row, col, img } of tileResults) {
-      // Center-crop the over-fetched border pixels, then also crop the attribution
-      // bar from the bottom so it doesn't appear as repeated patches in the PDF.
-      const srcX = Math.round(((tileReqW  - tileWorldW) / 2) * GOOGLE_SCALE);
-      const srcY = Math.round(((tileReqH  - tileWorldH) / 2) * GOOGLE_SCALE);
-      const srcW = Math.round(tileWorldW * GOOGLE_SCALE);
-      const srcH = Math.max(1, Math.round(tileWorldH * GOOGLE_SCALE) - ATTRIB_CROP_NAT);
-      const dstX = Math.round(col * tileWorldW * GOOGLE_SCALE);
-      const dstY = Math.round(row * tileWorldH * GOOGLE_SCALE);
-      const dstW = Math.round(tileWorldW * GOOGLE_SCALE);
-      const dstH = Math.round(tileWorldH * GOOGLE_SCALE); // stretch content to fill row height
-      ctx.drawImage(img, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH);
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    alert("Export failed — could not load map image:\n\n" + msg + "\n\nFix the issue and try again. Do not export without a proper map.");
-    cancelExportToPdf();
-    return;
-  }
-
-  // Subtle white wash so overlays read cleanly over the aerial imagery
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
-  ctx.fillRect(0, 0, outW, outH);
-
-  // scaleToCanvas maps project() world-px coords → canvas px coords
-  const scaleToCanvas = outW / imgW; // = GOOGLE_SCALE = 2
-  const scaleFactor = 1;
-  // Use map's current zoom for overlay sizing so exported elements match what user sees
-  const editorZoom = map.getZoom?.() ?? zoom;
-  const zoomScaleExport = (zRef) => Math.pow(2, editorZoom - (zRef ?? 18));
+  // ── STEP 7: scale / coordinate helpers ───────────────────────────────────
+  // scaleToCanvas: project() returns coords in imgW×imgH CSS-px space;
+  // multiply by scaleToCanvas to get actual canvas pixels.
+  const scaleToCanvas = outW / imgW;
   const toCanvas = (px) => px && { x: px.x * scaleToCanvas, y: px.y * scaleToCanvas };
   const IN_BOUNDS_TOLERANCE = 8;
   const inBounds = (px) => px && px.x >= -IN_BOUNDS_TOLERANCE && px.x <= imgW + IN_BOUNDS_TOLERANCE && px.y >= -IN_BOUNDS_TOLERANCE && px.y <= imgH + IN_BOUNDS_TOLERANCE;
+
+  // editorZoom drives plan-element sizing, same zoom the editor uses on screen.
+  const editorZoom = map.getZoom?.() ?? mapFracZoom;
+  // exportCssW: width of the blue selection box in editor CSS px.
+  // exportCanvasScale: ratio of canvas px per editor CSS px (width axis only).
+  const exportCssW = Math.max(1, selectedRectPx.w);
+  const exportCssH = Math.max(1, selectedRectPx.h);
+  const exportCanvasScale = outW / exportCssW;
+
+  const planElementZoomForExport = (zRef) => Math.max(0.05, Math.pow(2, editorZoom - (zRef ?? ELEMENT_BASE_ZOOM)));
+  const cssPlanPx        = (px, zRef) => (px ?? 0) * planElementZoomForExport(zRef);
+  const cssPlanPxRounded = (px, zRef) => Math.max(1, Math.round(cssPlanPx(px, zRef)));
+  const cssSignPx        = (px, zRef) => (px ?? 0) * Math.pow(2, editorZoom - (zRef ?? ELEMENT_BASE_ZOOM));
+  const cssToCanvas      = (cssLen) => cssLen * exportCanvasScale;
+  const MEASURE_BASE_Z   = 18;
+  const measureScaleExport = Math.pow(2, editorZoom - MEASURE_BASE_Z);
+
+  // ── STEP 8: clip canvas to export area ───────────────────────────────────
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, outW, outH);
+  ctx.clip();
+
+  const loadRasterForExport = (url) => {
+    if (!url || typeof url !== "string") return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  };
+  const scaleBarRaster = await loadRasterForExport("/scale-bar.svg");
 
   const drawLine = (pts, color, lineWidth) => {
     const c = pts.map(toCanvas).filter(Boolean);
     if (c.length < 2) return;
     ctx.strokeStyle = color || "#111111";
-    ctx.lineWidth = lineWidth ?? 2;
+    ctx.lineWidth = (lineWidth ?? 2) * exportCanvasScale * measureScaleExport;
     ctx.beginPath();
     ctx.moveTo(c[0].x, c[0].y);
     for (let i = 1; i < c.length; i++) ctx.lineTo(c[i].x, c[i].y);
@@ -3268,7 +2962,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const c = pts.map(toCanvas).filter(Boolean);
     if (c.length < 3) return;
     ctx.strokeStyle = strokeColor || "#111111";
-    ctx.lineWidth = lineWidth ?? 2;
+    ctx.lineWidth = (lineWidth ?? 2) * exportCanvasScale * measureScaleExport;
     ctx.beginPath();
     ctx.moveTo(c[0].x, c[0].y);
     for (let i = 1; i < c.length; i++) ctx.lineTo(c[i].x, c[i].y);
@@ -3277,7 +2971,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     ctx.stroke();
   };
 
-  // Work areas (green fill + stroke) – match editor #00c853
+  // Work areas — match editor: strokeColor #00c853, fillOpacity 0.12, strokeWeight 2-3
   for (const wa of workAreas || []) {
     const pts = (wa?.path || []).map(project).filter(Boolean);
     if (pts.length >= 3) drawPolygon(pts, "#00c853", "rgba(0,200,83,0.12)", 2.5);
@@ -3289,19 +2983,49 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const c = toCanvas(centerPx);
     const relaxedTol = 24;
     if (c.x < -relaxedTol || c.x > outW + relaxedTol || c.y < -relaxedTol || c.y > outH + relaxedTol) return;
-    ctx.font = "bold 13px sans-serif";
+    ctx.font = `bold ${Math.max(10, 13 * exportCanvasScale * measureScaleExport)}px sans-serif`;
     ctx.fillStyle = "#111";
     ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = Math.max(1, 2.5 * exportCanvasScale * measureScaleExport);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.strokeText(text, c.x, c.y);
     ctx.fillText(text, c.x, c.y);
   };
+  // Closed filled arrowhead at both ends of a segment (A→B, B→A)
+  const drawMeasArrowhead = (ax, ay, bx, by) => {
+    const dx = bx - ax; const dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 6) return;
+    const ux = dx / len; const uy = dy / len;
+    const sz = Math.max(6, 9 * exportCanvasScale * measureScaleExport);
+    const hw = sz * 0.42;
+    ctx.fillStyle = "#111111";
+    // Arrow pointing toward B
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx - ux * sz + uy * hw, by - uy * sz - ux * hw);
+    ctx.lineTo(bx - ux * sz - uy * hw, by - uy * sz + ux * hw);
+    ctx.closePath(); ctx.fill();
+    // Arrow pointing toward A
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + ux * sz - uy * hw, ay + uy * sz + ux * hw);
+    ctx.lineTo(ax + ux * sz + uy * hw, ay + uy * sz - ux * hw);
+    ctx.closePath(); ctx.fill();
+  };
   for (const m of measurements || []) {
     const path = m?.path || [];
     const pts = path.map(project).filter(Boolean);
-    if (pts.length >= 2) drawLine(pts, "#111111", 2);
+    if (pts.length >= 2) {
+      drawLine(pts, "#111111", 2);
+      // Arrowheads at both ends of every segment
+      for (let i = 0; i < pts.length - 1; i++) {
+        const cA = toCanvas(pts[i]);
+        const cB = toCanvas(pts[i + 1]);
+        if (cA && cB) drawMeasArrowhead(cA.x, cA.y, cB.x, cB.y);
+      }
+    }
     if (m.mode === "distance" && path.length >= 2) {
       const a = toPlainLL(path[0]);
       const b = toPlainLL(path[path.length - 1]);
@@ -3334,7 +3058,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const drawConeTriangle = (centerPx, size = 8) => {
     const c = toCanvas(centerPx);
     if (!c) return;
-    const s = size * scaleToCanvas;
+    const s = size * exportCanvasScale;
     ctx.fillStyle = "#F59E0B";
     ctx.strokeStyle = "#111";
     ctx.lineWidth = 1;
@@ -3349,7 +3073,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const drawDotCircle = (centerPx, size, fillColor = "#F59E0B") => {
     const c = toCanvas(centerPx);
     if (!c) return;
-    const r = (size * scaleToCanvas) / 2;
+    const r = (size * exportCanvasScale) / 2;
     ctx.fillStyle = fillColor;
     ctx.strokeStyle = "#111";
     ctx.lineWidth = 1;
@@ -3361,7 +3085,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const drawBarricade = (centerPx, size = 10) => {
     const c = toCanvas(centerPx);
     if (!c) return;
-    const s = size * scaleToCanvas;
+    const s = size * exportCanvasScale;
     const w = s * 0.6;
     const h = s * 0.35;
     ctx.fillStyle = "#FFFFFF";
@@ -3372,7 +3096,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     ctx.fill();
     ctx.stroke();
     ctx.strokeStyle = "#F59E0B";
-    ctx.lineWidth = Math.max(1, 2 * scaleToCanvas * 0.3);
+    ctx.lineWidth = Math.max(1, 2 * exportCanvasScale * 0.3);
     ctx.beginPath();
     ctx.moveTo(c.x - w / 2 + w * 0.15, c.y - h / 2 + h * 0.3);
     ctx.lineTo(c.x - w / 2 + w * 0.5, c.y - h / 2 + h * 0.1);
@@ -3389,7 +3113,6 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     if (f.typeId === "barrier") drawLine(verts, "#9CA3AF", 2.5);
     else if (f.typeId === "ped_tape") drawLine(verts, "#DC2626", 2.5);
     else {
-      drawLine(verts, "#111111", 1.5);
       const markers = sampleConesMarkersForPath(
         path.map((p) => toPlainLL(p)).filter(Boolean),
         f.typeId
@@ -3417,14 +3140,68 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     });
   };
   const signImages = await Promise.all((placedSigns || []).map((s) => loadSignImage(s?.src)));
+
+  // Stand connectors + tripods first so dashed lines are not painted on top of sign artwork.
+  // Stand connector lines (dashed) + stand icons (tripod / windmaster)
+  for (const s of placedSigns || []) {
+    const signZRef = s?.zRef ?? ELEMENT_BASE_ZOOM;
+    // sc = canvas px per 1 CSS px of the stand icon (tracks sign zoom scale)
+    const sc = cssToCanvas(cssSignPx(1, signZRef));
+    for (const st of s?.stands || []) {
+      const p1 = project(s.pos);
+      const p2 = project(st?.pos);
+      if (!inBounds(p1) || !inBounds(p2)) continue;
+      const c1 = toCanvas(p1);
+      const c2 = toCanvas(p2);
+      // Dashed connector line — dash/gap and line-width scale with sign zoom (sc already tracks signZRef)
+      const dashLen = Math.max(2, 4 * sc);
+      ctx.setLineDash([dashLen, dashLen]);
+      ctx.strokeStyle = "#666666";
+      ctx.lineWidth = Math.max(1, 1 * sc);
+      ctx.beginPath();
+      ctx.moveTo(c1.x, c1.y);
+      ctx.lineTo(c2.x, c2.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Stand icon centered at st.pos
+      const rotDeg = st?.rotDeg ?? st?.rotationDeg ?? 0;
+      ctx.save();
+      ctx.translate(c2.x, c2.y);
+      ctx.rotate((rotDeg * Math.PI) / 180);
+      ctx.fillStyle = "#000000";
+      if (st.type === "windmaster") {
+        // Windmaster SVG: viewBox 96×64, scaledSize 40×28 CSS px, anchor center (20,14)
+        // viewBox anchor = (48, 32); scale x = 40/96, scale y = 28/64
+        // Circle 1: cx=22,cy=42,r=18  → offset from anchor: (-10.83, +4.375), r=7.875 CSS px
+        // Circle 2: cx=74,cy=42,r=18  → offset from anchor: (+10.83, +4.375), r=7.875 CSS px
+        // Bar: x=10,y=56,w=76,h=8     → offset: (-15.83, +10.5), w=31.67, h=3.5 CSS px
+        const R = Math.max(2, 7.875 * sc);
+        const cxL = -10.83 * sc; const cxR = 10.83 * sc; const cyC = 4.375 * sc;
+        ctx.beginPath(); ctx.arc(cxL, cyC, R, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cxR, cyC, R, 0, Math.PI * 2); ctx.fill();
+        ctx.fillRect(cxL - R * 0.1, cyC + R - Math.max(1, 1.5 * sc), (cxR - cxL) + R * 0.2, Math.max(1, 3.5 * sc));
+      } else {
+        // Tripod SVG: viewBox 64×64, scaledSize 28×28 CSS px, anchor center (14,14)
+        // viewBox anchor = (32,32); scale = 28/64 = 0.4375
+        // Bar rect(10,10,44,10) → offset: (-9.625, -9.625), w=19.25, h=4.375 CSS px
+        // Stem rect(30,20,4,30) → offset: (-0.875, -5.25), w=1.75, h=13.125 CSS px
+        const barW = Math.max(4, 19.25 * sc); const barH = Math.max(1.5, 4.375 * sc);
+        const stemW = Math.max(1, 1.75 * sc); const stemH = Math.max(4, 13.125 * sc);
+        ctx.fillRect(-barW / 2, -9.625 * sc, barW, barH);          // horizontal bar
+        ctx.fillRect(-stemW / 2, -5.25 * sc, stemW, stemH);         // vertical stem
+      }
+      ctx.restore();
+    }
+  }
+
   for (let i = 0; i < (placedSigns || []).length; i++) {
     const s = placedSigns[i];
     const p = project(s?.pos);
     if (!inBounds(p)) continue;
     const sc = toCanvas(p);
-    const zRef = s?.zRef ?? 18;
-    const w = (s?.wPx || 64) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
-    const h = (s?.hPx || 64) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
+    const zRef = s?.zRef ?? ELEMENT_BASE_ZOOM;
+    const w = cssToCanvas(cssSignPx(s?.wPx || 64, zRef));
+    const h = cssToCanvas(cssSignPx(s?.hPx || 64, zRef));
     const rotDeg = s?.rotDeg ?? s?.rotationDeg ?? 0;
     ctx.save();
     ctx.translate(sc.x, sc.y);
@@ -3435,9 +3212,9 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       ctx.drawImage(img, 0, 0, w, h);
     } else {
       ctx.strokeStyle = "#111111";
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = Math.max(1, 1.5 * exportCanvasScale);
       ctx.strokeRect(0, 0, w, h);
-      ctx.font = "10px sans-serif";
+      ctx.font = `${Math.max(10, 10 * exportCanvasScale)}px sans-serif`;
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -3446,51 +3223,16 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     ctx.restore();
   }
 
-  // Stand connector lines (dashed)
-  for (const s of placedSigns || []) {
-    for (const st of s?.stands || []) {
-      const p1 = project(s.pos);
-      const p2 = project(st?.pos);
-      if (!inBounds(p1) || !inBounds(p2)) continue;
-      const c1 = toCanvas(p1);
-      const c2 = toCanvas(p2);
-      ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = "#666666";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(c1.x, c1.y);
-      ctx.lineTo(c2.x, c2.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
-
-  // Arrow boards (same drawing pattern as placed signs)
-  const placedArrows = plan.placedArrows ?? [];
-  const arrowImages = await Promise.all((placedArrows).map((a) => loadSignImage(a?.src)));
+  // Arrow boards: tripod connectors first (same layering rule as signs), then arrow artwork.
+  const arrowImages = await Promise.all((placedArrows || []).map((a) => loadSignImage(a?.src)));
   for (let i = 0; i < placedArrows.length; i++) {
     const a = placedArrows[i];
     const p = project(a?.pos);
     if (!inBounds(p)) continue;
     const sc = toCanvas(p);
-    const zRef = a?.zRef ?? 18;
-    const w = (a?.wPx || DEFAULT_ARROW_WIDTH_PX) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
-    const h = (a?.hPx || DEFAULT_ARROW_HEIGHT_PX) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
-    const rotDeg = a?.rotDeg ?? 0;
-    ctx.save();
-    ctx.translate(sc.x, sc.y);
-    ctx.rotate((rotDeg * Math.PI) / 180);
-    ctx.translate(-w / 2, -h / 2);
-    const img = arrowImages[i];
-    if (img) {
-      ctx.drawImage(img, 0, 0, w, h);
-    } else {
-      ctx.strokeStyle = "#2563EB";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(0, 0, w, h);
-    }
-    ctx.restore();
-    // Draw dotted connector + tripod marker for each point
+    const zRef = a?.zRef ?? ELEMENT_BASE_ZOOM;
+    const w = cssToCanvas(cssSignPx(a?.wPx || DEFAULT_ARROW_WIDTH_PX, zRef));
+    const h = cssToCanvas(cssSignPx(a?.hPx || DEFAULT_ARROW_HEIGHT_PX, zRef));
     const exportPts = a.points ?? (a.point ? [a.point] : []);
     for (const pt of exportPts) {
       const ptLatLng = (pt.dLat !== undefined)
@@ -3501,23 +3243,57 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       if (!pp) continue;
       const cp = toCanvas(pp);
       ctx.save();
-      // Dotted line from arrow right-edge to tripod
-      ctx.setLineDash([2, 6]);
+      const arrowSc = cssToCanvas(cssSignPx(1, zRef));
+      ctx.setLineDash([Math.max(2, 2 * arrowSc), Math.max(4, 6 * arrowSc)]);
       ctx.strokeStyle = "#111";
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = Math.max(1, 1.5 * arrowSc);
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(sc.x + w / 2, sc.y); // right edge of arrow
+      ctx.moveTo(sc.x + w / 2, sc.y);
       ctx.lineTo(cp.x, cp.y);
       ctx.stroke();
       ctx.setLineDash([]);
-      // Tripod shape: horizontal bar + vertical stem
-      const TW = 18, TH = 5, STEM_W = 3, STEM_H = 12;
+      const TW = 18 * arrowSc, TH = 5 * arrowSc, STEM_W = 3 * arrowSc, STEM_H = 12 * arrowSc;
+      const ptRotRad = ((pt.rotDeg ?? 0) * Math.PI) / 180;
+      ctx.translate(cp.x, cp.y);
+      ctx.rotate(ptRotRad);
       ctx.fillStyle = "#000";
-      ctx.fillRect(cp.x - TW / 2, cp.y - TH - STEM_H, TW, TH); // horizontal bar
-      ctx.fillRect(cp.x - STEM_W / 2, cp.y - STEM_H, STEM_W, STEM_H); // vertical stem
+      ctx.fillRect(-TW / 2, -TH - STEM_H, TW, TH);
+      ctx.fillRect(-STEM_W / 2, -STEM_H, STEM_W, STEM_H);
       ctx.restore();
     }
+  }
+  for (let i = 0; i < placedArrows.length; i++) {
+    const a = placedArrows[i];
+    const p = project(a?.pos);
+    if (!inBounds(p)) continue;
+    const sc = toCanvas(p);
+    const zRef = a?.zRef ?? ELEMENT_BASE_ZOOM;
+    const w = cssToCanvas(cssSignPx(a?.wPx || DEFAULT_ARROW_WIDTH_PX, zRef));
+    const h = cssToCanvas(cssSignPx(a?.hPx || DEFAULT_ARROW_HEIGHT_PX, zRef));
+    const rotDeg = a?.rotDeg ?? 0;
+    ctx.save();
+    ctx.translate(sc.x, sc.y);
+    ctx.rotate((rotDeg * Math.PI) / 180);
+    ctx.translate(-w / 2, -h / 2);
+    const img = arrowImages[i];
+    if (img) {
+      const natW = img.naturalWidth || img.width || w;
+      const natH = img.naturalHeight || img.height || h;
+      if (natW > 0 && natH > 0) {
+        const fitScale = Math.min(w / natW, h / natH);
+        const dw = natW * fitScale;
+        const dh = natH * fitScale;
+        ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      } else {
+        ctx.drawImage(img, 0, 0, w, h);
+      }
+    } else {
+      ctx.strokeStyle = "#2563EB";
+      ctx.lineWidth = Math.max(1, 1.5 * exportCanvasScale);
+      ctx.strokeRect(0, 0, w, h);
+    }
+    ctx.restore();
   }
 
   // Insert objects (text, rect, table, picture) – skip line (drawn separately)
@@ -3534,6 +3310,78 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const pictureInserts = (insertObjects || []).filter((o) => (o.kind === "picture" || o.kind === "rect") && o.src);
   const pictureImages = await Promise.all(pictureInserts.map((o) => loadInsertImage(o.src)));
   const pictureByIndex = new Map(pictureInserts.map((o, i) => [o.id, pictureImages[i]]));
+
+  // Pre-load logos for title_box inserts
+  const titleBoxLogoInserts = (insertObjects || []).filter((o) => o.kind === "title_box" && o.data?.logoDataUrl);
+  const titleBoxLogoImgs = await Promise.all(titleBoxLogoInserts.map((o) => loadInsertImage(o.data.logoDataUrl)));
+  const titleBoxLogoById = new Map(titleBoxLogoInserts.map((o, i) => [o.id, titleBoxLogoImgs[i]]));
+
+  // Newline-aware word-wrap helper.
+  // • Splits text on \n (normalises \r\n / \r first).
+  // • Each paragraph is word-wrapped at maxW.
+  // • firstLineIndent: extra x-offset for the very first rendered line only
+  //   (lets a bold label share the first line with the body text).
+  const wrapCanvasTextNL = (targetCtx, text, maxW, lineH, x, y, maxY, firstLineIndent = 0) => {
+    const paragraphs = normalizeCommentLineBreaks(text).split("\n");
+    // Always draw with consistent baseline so height maths is predictable.
+    targetCtx.textBaseline = "top";
+    targetCtx.textAlign    = "left";
+    let cy       = y;
+    let firstOut = true; // true until we have drawn the very first output line
+    for (const para of paragraphs) {
+      const words = para.split(/[ \t]+/).filter(Boolean);
+      if (words.length === 0) {
+        // blank paragraph → blank line
+        cy += lineH;
+        firstOut = false;
+        if (cy > maxY) return;
+        continue;
+      }
+      let buf = "";
+      for (const word of words) {
+        const xOff  = firstOut ? firstLineIndent : 0;
+        const probe = buf ? buf + " " + word : word;
+        if (buf && targetCtx.measureText(probe).width > maxW - xOff) {
+          // flush buf
+          targetCtx.fillText(buf, x + xOff, cy);
+          cy += lineH;
+          firstOut = false;
+          if (cy > maxY) return;
+          buf = word;
+        } else {
+          buf = probe;
+        }
+      }
+      if (buf) {
+        const xOff = firstOut ? firstLineIndent : 0;
+        targetCtx.fillText(buf, x + xOff, cy);
+        cy += lineH;
+        firstOut = false;
+        if (cy > maxY) return;
+      }
+    }
+  };
+
+  // Raster legend/title/manifest text at 2× then scale down so PDF composites stay sharp (vs soft canvas fillText).
+  const OVERLAY_PANEL_PIXEL_RATIO = 2;
+  const drawScaledPanelBlit = (destCtx, destX, destY, destW, destH, paint) => {
+    const pr = OVERLAY_PANEL_PIXEL_RATIO;
+    const sw = Math.max(1, Math.ceil(destW * pr));
+    const sh = Math.max(1, Math.ceil(destH * pr));
+    const sub = document.createElement("canvas");
+    sub.width = sw;
+    sub.height = sh;
+    const sx = sub.getContext("2d");
+    if (!sx) return;
+    sx.setTransform(pr, 0, 0, pr, 0, 0);
+    sx.imageSmoothingEnabled = true;
+    sx.imageSmoothingQuality = "high";
+    paint(sx, destW, destH);
+    destCtx.imageSmoothingEnabled = true;
+    destCtx.imageSmoothingQuality = "high";
+    destCtx.drawImage(sub, 0, 0, sw, sh, destX, destY, destW, destH);
+  };
+
   for (const obj of insertObjects || []) {
     if (obj.kind === "line") continue;
     const pos = obj.pos || obj.position;
@@ -3541,22 +3389,138 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const p = project(pos);
     if (!inBounds(p)) continue;
     const sc = toCanvas(p);
-    const zRef = obj.zRef ?? 18;
-    const w = (obj.wPx || 100) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
-    const h = (obj.hPx || 60) * zoomScaleExport(zRef) * scaleFactor * scaleToCanvas * 0.5;
+    const zRef = obj.zRef ?? ELEMENT_BASE_ZOOM;
+    const w = cssToCanvas(cssPlanPx(obj.wPx || 100, zRef));
+    const h = cssToCanvas(cssPlanPx(obj.hPx || 60, zRef));
     const rotDeg = obj.rotDeg ?? obj.rotationDeg ?? 0;
-    const left = 0;
-    const top = 0;
-    const fontSize = Math.max(8, obj.fontSize ?? 11);
+    const fontSize = Math.max(8, (obj.fontSize ?? 11) * exportCanvasScale);
     const fontFamily = obj.fontFamily || "Arial, sans-serif";
+    const pad = Math.max(4, w * 0.02);
     ctx.save();
     ctx.translate(sc.x, sc.y);
     ctx.rotate((rotDeg * Math.PI) / 180);
     ctx.translate(-w / 2, -h / 2);
     ctx.strokeStyle = "#111111";
-    ctx.lineWidth = 1.5;
-    ctx.fillStyle = "#FFFFFF";
-    if (obj.kind === "table") {
+    ctx.lineWidth = Math.max(1, 1.5 * exportCanvasScale);
+
+    if (obj.kind === "title_box") {
+      // Match TitleBoxContent exactly: padding/gap/fonts scale with map zoom only.
+      const d = obj.data || {};
+      const logoImg = titleBoxLogoById.get(obj.id);
+      const tPad   = cssToCanvas(cssPlanPx(10, zRef));
+      const gap    = cssToCanvas(cssPlanPx(6,  zRef));
+      const gap12  = cssToCanvas(cssPlanPx(12, zRef));
+      const logoW  = cssToCanvas(cssPlanPx(90, zRef));
+      const logoH  = cssToCanvas(cssPlanPx(70, zRef));
+      // Editor border is Math.max(1, 2*s) — use cssPlanPx(2) to match
+      const borderW = Math.max(0.5, cssToCanvas(cssPlanPx(2, zRef)));
+
+      drawScaledPanelBlit(ctx, 0, 0, w, h, (sx, pw, ph) => {
+        sx.fillStyle = "#FFFFFF";
+        sx.fillRect(0, 0, pw, ph);
+        sx.strokeStyle = "#111111";
+        sx.lineWidth = borderW;
+        sx.strokeRect(0, 0, pw, ph);
+
+        const textX = tPad + logoW + gap12;
+        let ty = tPad;
+
+        sx.fillStyle = "#111111";
+        sx.textAlign = "left";
+        sx.textBaseline = "top";
+
+        const projFs     = cssToCanvas(cssPlanPx(14, zRef));
+        const fieldFs    = cssToCanvas(cssPlanPx(12, zRef));
+        const logoLabelFs = cssToCanvas(cssPlanPx(11, zRef));
+
+        const drawLV = (label, value, x0, y0, fs) => {
+          sx.font = `700 ${fs}px system-ui, sans-serif`;
+          sx.fillStyle = "#111111";
+          sx.fillText(label, x0, y0);
+          const labelW = sx.measureText(label).width;
+          sx.font = `${fs}px system-ui, sans-serif`;
+          sx.fillText(value, x0 + labelW, y0);
+          return x0 + labelW + sx.measureText(value).width;
+        };
+
+        sx.strokeStyle = "#dddddd";
+        sx.lineWidth = Math.max(1, cssToCanvas(cssPlanPx(1, zRef)));
+        sx.strokeRect(tPad, tPad, logoW, logoH);
+        if (logoImg) {
+          const logoScale = Number(d.logoScale) || 1;
+          const ar = (logoImg.naturalWidth || 1) / (logoImg.naturalHeight || 1);
+          const innerPad = 2 * exportCanvasScale;
+          const maxLW = Math.max(1, logoW - innerPad * 2);
+          const maxLH = Math.max(1, logoH - innerPad * 2);
+          let lw2 = Math.min(maxLW, maxLH * ar);
+          let lh2 = lw2 / ar;
+          const lcx = tPad + logoW / 2;
+          const lcy = tPad + logoH / 2;
+          sx.save();
+          sx.translate(lcx, lcy);
+          sx.scale(logoScale, logoScale);
+          sx.drawImage(logoImg, -lw2 / 2, -lh2 / 2, lw2, lh2);
+          sx.restore();
+        } else {
+          sx.font = `${logoLabelFs}px system-ui, sans-serif`;
+          sx.fillStyle = "#666666";
+          sx.textAlign = "center";
+          sx.textBaseline = "middle";
+          sx.fillText("Logo", tPad + logoW / 2, tPad + logoH / 2);
+          sx.textAlign = "left";
+          sx.textBaseline = "top";
+          sx.fillStyle = "#111111";
+        }
+
+        sx.font = `900 ${projFs}px system-ui, sans-serif`;
+        sx.fillStyle = "#111111";
+        sx.fillText("Project:", textX, ty);
+        const projLabelW = sx.measureText("Project: ").width;
+        sx.font = `800 ${projFs}px system-ui, sans-serif`;
+        sx.fillText(d.project || "", textX + projLabelW, ty);
+        ty += projFs + cssToCanvas(cssPlanPx(4, zRef));
+
+        sx.fillStyle = "#111111";
+        let fx = textX;
+        fx = drawLV("Date:", ` ${d.date || ""}`, fx, ty, fieldFs);
+        fx += sx.measureText("   ").width;
+        drawLV("Author:", ` ${d.author || ""}`, fx, ty, fieldFs);
+        ty += fieldFs * 1.3;
+
+        drawLV("Job Location:", ` ${d.jobLocation || ""}`, textX, ty, fieldFs);
+        ty += fieldFs * 1.3;
+
+        const rowBottom = Math.max(tPad + logoH, ty);
+        const divY = rowBottom + gap;
+        const divH = Math.max(1, cssToCanvas(cssPlanPx(1, zRef)));
+        sx.globalAlpha = 0.2;
+        sx.fillStyle = "#111111";
+        sx.fillRect(tPad, divY, pw - 2 * tPad, divH);
+        sx.globalAlpha = 1;
+
+        const cmtY = divY + divH + gap;
+        sx.textAlign    = "left";
+        sx.textBaseline = "top";
+        sx.font = `700 ${fieldFs}px system-ui, sans-serif`;
+        sx.fillStyle = "#111111";
+        sx.fillText("Comments:", tPad, cmtY);
+        const cmtLabelW = sx.measureText("Comments: ").width;
+        sx.font = `${fieldFs}px system-ui, sans-serif`;
+        sx.fillStyle = "#111111";
+        sx.textBaseline = "top";
+        sx.textAlign    = "left";
+        {
+          const cmtRaw = normalizeCommentLineBreaks(d.comments || "");
+          const cmtMaxY = ph - tPad;
+          const maxTextW = pw - 2 * tPad;
+          const cmtLineH = fieldFs * 1.35;
+          if (cmtRaw) {
+            wrapCanvasTextNL(sx, cmtRaw, maxTextW, cmtLineH, tPad, cmtY, cmtMaxY, cmtLabelW);
+          }
+        }
+      });
+
+    } else if (obj.kind === "table") {
       const rows = obj.rows ?? (obj.rowHeights?.length ?? obj.cells?.length ?? 2);
       const cols = obj.cols ?? (obj.colWidths?.length ?? obj.cells?.[0]?.length ?? 2);
       const rowHeights = Array.from({ length: rows }, (_, i) => obj.rowHeights?.[i] ?? 60);
@@ -3565,23 +3529,17 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const sumCol = colWidths.reduce((a, b) => a + b, 0) || 1;
       const cells = obj.cells ?? Array.from({ length: rows }, () => Array(cols).fill(""));
       ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(left, top, w, h);
-      ctx.strokeRect(left, top, w, h);
-      const xPos = [left];
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeRect(0, 0, w, h);
+      const xPos = [0];
       for (let c = 0; c < cols; c++) xPos.push(xPos[xPos.length - 1] + (colWidths[c] ?? 120) / sumCol * w);
-      const yPos = [top];
+      const yPos = [0];
       for (let r = 0; r < rows; r++) yPos.push(yPos[yPos.length - 1] + (rowHeights[r] ?? 60) / sumRow * h);
       for (let i = 1; i < cols; i++) {
-        ctx.beginPath();
-        ctx.moveTo(xPos[i], top);
-        ctx.lineTo(xPos[i], top + h);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(xPos[i], 0); ctx.lineTo(xPos[i], h); ctx.stroke();
       }
       for (let i = 1; i < rows; i++) {
-        ctx.beginPath();
-        ctx.moveTo(left, yPos[i]);
-        ctx.lineTo(left + w, yPos[i]);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, yPos[i]); ctx.lineTo(w, yPos[i]); ctx.stroke();
       }
       ctx.font = `${fontSize}px ${fontFamily}`;
       ctx.fillStyle = "#111";
@@ -3600,18 +3558,21 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       }
     } else if ((obj.kind === "picture" || obj.kind === "rect") && obj.src) {
       const img = pictureByIndex.get(obj.id);
-      if (img) {
-        ctx.drawImage(img, 0, 0, w, h);
-      }
+      if (img) ctx.drawImage(img, 0, 0, w, h);
       ctx.strokeRect(0, 0, w, h);
     } else {
+      // textbox, text, rect without src
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, w, h);
       ctx.strokeRect(0, 0, w, h);
-      ctx.font = `${fontSize}px ${fontFamily}`;
-      ctx.fillStyle = "#111";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      const text = obj.text || (obj.cells?.flat?.()?.join?.(" ")) || "";
-      ctx.fillText(String(text).slice(0, 80), 4, 4);
+      const text = obj.text || "";
+      if (text) {
+        ctx.font = `${fontSize}px ${fontFamily}`;
+        ctx.fillStyle = obj.color || "#111111";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        wrapCanvasTextNL(ctx, text, w - pad * 2, fontSize + 3, pad, pad, h - pad);
+      }
     }
     ctx.restore();
   }
@@ -3623,27 +3584,132 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     if (pts.length >= 2) drawLine(pts, obj.stroke || "#111111", obj.strokeWidth ?? 2);
   }
 
-  // Legend / Manifest / Title / North / Scale (if enabled)
+  // Legend / Manifest / Title / North / Scale (if enabled) — match editor CSS sizing (scalePxPlan + contentScalePlan)
+  const LEGEND_CLABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Ped. Tape", type1: "Type 1", type2: "Type 2" };
   if (exportIncludeLegend) {
     for (const lb of legendBoxes || []) {
       const p = project(lb?.pos);
       if (!inBounds(p)) continue;
       const sc = toCanvas(p);
-      const w = (lb.wPx || 180) * zoomScaleExport(lb.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
-      const h = (lb.hPx || 100) * zoomScaleExport(lb.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
+      const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
+      // Geometric-mean scale: matches editor (zoom × sqrt(wScale × hScale)) so internal
+      // content (title, icons, labels) grows/shrinks proportionally with box resize.
+      const LEGEND_DEFAULT_W = 260;
+      const LEGEND_DEFAULT_H = 240;
+      const _lbScaleX = (lb.wPx ?? LEGEND_DEFAULT_W) / LEGEND_DEFAULT_W;
+      const _lbScaleY = (lb.hPx ?? LEGEND_DEFAULT_H) / LEGEND_DEFAULT_H;
+      const sCss = planElementZoomForExport(zRef) * Math.sqrt(_lbScaleX * _lbScaleY);
+      const w = cssToCanvas(cssPlanPxRounded(lb.wPx || LEGEND_DEFAULT_W, zRef));
+      const h = cssToCanvas(cssPlanPxRounded(lb.hPx || LEGEND_DEFAULT_H, zRef));
       const left = sc.x - w / 2;
       const top = sc.y - h / 2;
-      ctx.strokeStyle = "#111111";
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(left, top, w, h);
-      ctx.strokeRect(left, top, w, h);
-      ctx.font = "bold 11px sans-serif";
-      ctx.fillStyle = "#111";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText("Legend", left + 4, top + 4);
-      ctx.font = "10px sans-serif";
-      ctx.fillText("(legend items later)", left + 4, top + 22);
+      const pad = cssToCanvas(10 * sCss);
+      const borderW = Math.max(0.5, cssToCanvas(1 * sCss));
+      const radius = cssToCanvas(4 * sCss);
+
+      // Build a unified legend item list (signs → cones → work area), same order as on-screen flex layout.
+      const legendItems = [];
+
+      const signByCode = {};
+      for (let si = 0; si < (placedSigns || []).length; si++) {
+        const sg = placedSigns[si];
+        const code = sg.typeId ?? sg.code ?? sg.id;
+        if (legendExclusionsForExport.has(code)) continue;
+        if (!signByCode[code]) signByCode[code] = { si, code };
+      }
+      for (const { si, code } of Object.values(signByCode)) {
+        legendItems.push({ type: "sign", si, code });
+      }
+
+      const coneTypes = new Set();
+      for (const f of conesFeatures || []) {
+        if (f?.typeId && !legendExclusionsForExport.has(f.typeId)) coneTypes.add(f.typeId);
+      }
+      for (const typeId of coneTypes) {
+        legendItems.push({ type: "cone", typeId });
+      }
+
+      if ((workAreas || []).length > 0 && !legendExclusionsForExport.has("workArea")) {
+        legendItems.push({ type: "workArea" });
+      }
+
+      drawScaledPanelBlit(ctx, left, top, w, h, (sx, pw, ph) => {
+        sx.fillStyle = "#FFFFFF";
+        sx.beginPath();
+        if (sx.roundRect) sx.roundRect(0, 0, pw, ph, radius);
+        else sx.rect(0, 0, pw, ph);
+        sx.fill();
+        sx.strokeStyle = "#111111";
+        sx.lineWidth = borderW;
+        sx.stroke();
+
+        let y = pad;
+        sx.fillStyle = "#111";
+        sx.textAlign = "left";
+        sx.textBaseline = "top";
+        sx.font = `700 ${Math.max(8, cssToCanvas(18 * sCss))}px system-ui, sans-serif`;
+        sx.fillText("Legend", pad, y);
+        y += cssToCanvas(18 * sCss) + cssToCanvas(6 * sCss);
+        sx.fillRect(pad, y, pw - 2 * pad, Math.max(1, cssToCanvas(2 * sCss)));
+        y += cssToCanvas(8 * sCss) + Math.max(1, cssToCanvas(2 * sCss));
+
+        const iconSz = cssToCanvas(28 * sCss);
+        const labelF = Math.max(7, cssToCanvas(10 * sCss));
+        const gap = cssToCanvas(6 * sCss);
+        const itemW = iconSz + cssToCanvas(8 * sCss);
+        let x = pad;
+        let rowH = 0;
+
+        for (const item of legendItems) {
+          if (x + itemW > pw - pad) {
+            x = pad;
+            y += rowH + gap;
+            rowH = 0;
+          }
+
+          if (item.type === "sign") {
+            const simg = signImages[item.si];
+            if (simg) sx.drawImage(simg, x, y, iconSz, iconSz);
+            else sx.strokeRect(x, y, iconSz, iconSz);
+            sx.font = `${labelF}px system-ui, sans-serif`;
+            sx.fillStyle = "#222";
+            sx.textAlign = "center";
+            const tw = sx.measureText(item.code).width;
+            sx.fillText(tw > itemW - 2 ? String(item.code).slice(0, 12) : item.code, x + iconSz / 2, y + iconSz + 2);
+            sx.textAlign = "left";
+          } else if (item.type === "cone") {
+            sx.fillStyle = "#F59E0B";
+            sx.beginPath();
+            sx.moveTo(x + iconSz / 2, y);
+            sx.lineTo(x + iconSz / 2 + iconSz / 4, y + iconSz);
+            sx.lineTo(x + iconSz / 2 - iconSz / 4, y + iconSz);
+            sx.closePath();
+            sx.fill();
+            sx.strokeStyle = "#111";
+            sx.lineWidth = Math.max(1, exportCanvasScale);
+            sx.stroke();
+            sx.font = `${labelF}px system-ui, sans-serif`;
+            sx.fillStyle = "#222";
+            sx.textAlign = "center";
+            sx.fillText(LEGEND_CLABEL[item.typeId] || item.typeId, x + iconSz / 2, y + iconSz + 2);
+            sx.textAlign = "left";
+          } else if (item.type === "workArea") {
+            sx.fillStyle = "rgba(0,200,83,0.18)";
+            sx.fillRect(x, y, iconSz, iconSz);
+            sx.strokeStyle = "#00c853";
+            sx.lineWidth = Math.max(1, 2 * exportCanvasScale);
+            sx.strokeRect(x, y, iconSz, iconSz);
+            sx.font = `${labelF}px system-ui, sans-serif`;
+            sx.fillStyle = "#222";
+            sx.textAlign = "center";
+            sx.fillText("Work Area", x + iconSz / 2, y + iconSz + 2);
+            sx.textAlign = "left";
+          }
+
+          rowH = Math.max(rowH, iconSz + labelF + cssToCanvas(4 * sCss));
+          x += itemW + gap;
+        }
+      });
     }
   }
   if (exportIncludeNotes) {
@@ -3672,28 +3738,50 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const p = project(mb?.pos);
       if (!inBounds(p)) continue;
       const sc = toCanvas(p);
-      const w = (mb.wPx || 200) * zoomScaleExport(mb.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
-      const h = (mb.hPx || 120) * zoomScaleExport(mb.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
+      const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
+      // Geometric-mean scale: matches editor (zoom × sqrt(wScale × hScale)) so internal
+      // content (title, rows, labels) grows/shrinks proportionally with box resize.
+      const MANIFEST_DEFAULT_W = 240;
+      const MANIFEST_DEFAULT_H = 220;
+      const _mbScaleX = (mb.wPx ?? MANIFEST_DEFAULT_W) / MANIFEST_DEFAULT_W;
+      const _mbScaleY = (mb.hPx ?? MANIFEST_DEFAULT_H) / MANIFEST_DEFAULT_H;
+      const sCss = planElementZoomForExport(zRef) * Math.sqrt(_mbScaleX * _mbScaleY);
+      const w = cssToCanvas(cssPlanPxRounded(mb.wPx || MANIFEST_DEFAULT_W, zRef));
+      const h = cssToCanvas(cssPlanPxRounded(mb.hPx || MANIFEST_DEFAULT_H, zRef));
       const left = sc.x - w / 2;
       const top = sc.y - h / 2;
-      ctx.strokeStyle = "#111111";
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(left, top, w, h);
-      ctx.strokeRect(left, top, w, h);
-      ctx.font = "bold 11px sans-serif";
-      ctx.fillStyle = "#111";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText("Manifest", left + 4, top + 4);
-      if (manifestRows.length > 0) {
-        ctx.font = "10px sans-serif";
-        manifestRows.forEach((r, i) => {
-          ctx.fillText(`${r.count} x ${r.label}`, left + 8, top + 22 + i * 14);
-        });
-      } else {
-        ctx.font = "10px sans-serif";
-        ctx.fillText("(no items yet)", left + 8, top + 22);
-      }
+      const pad = cssToCanvas(10 * sCss);
+      const borderW = Math.max(0.5, cssToCanvas(1 * sCss));
+      const radius = cssToCanvas(4 * sCss);
+
+      drawScaledPanelBlit(ctx, left, top, w, h, (sx, pw, ph) => {
+        sx.fillStyle = "#FFFFFF";
+        sx.beginPath();
+        if (sx.roundRect) sx.roundRect(0, 0, pw, ph, radius);
+        else sx.rect(0, 0, pw, ph);
+        sx.fill();
+        sx.strokeStyle = "#111111";
+        sx.lineWidth = borderW;
+        sx.stroke();
+        sx.fillStyle = "#111";
+        sx.textAlign = "left";
+        sx.textBaseline = "top";
+        sx.font = `700 ${Math.max(8, cssToCanvas(18 * sCss))}px system-ui, sans-serif`;
+        sx.fillText("Manifest", pad, pad);
+        let my = pad + cssToCanvas(18 * sCss) + cssToCanvas(6 * sCss);
+        sx.fillRect(pad, my, pw - 2 * pad, Math.max(1, cssToCanvas(2 * sCss)));
+        my += cssToCanvas(8 * sCss) + Math.max(1, cssToCanvas(2 * sCss));
+        const rowFont = Math.max(8, cssToCanvas(16 * sCss));
+        sx.font = `400 ${rowFont}px system-ui, sans-serif`;
+        if (manifestRows.length > 0) {
+          manifestRows.forEach((r, i) => {
+            sx.fillText(`${r.count} x ${r.label}`, pad, my + i * (rowFont * 1.35));
+          });
+        } else {
+          sx.font = `400 ${Math.max(8, cssToCanvas(13 * sCss))}px system-ui, sans-serif`;
+          sx.fillText("(no items yet)", pad, my);
+        }
+      });
     }
   }
   if (exportIncludeTitle) {
@@ -3701,16 +3789,105 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const p = project(tb?.pos);
       if (!inBounds(p)) continue;
       const sc = toCanvas(p);
-      const w = (tb.wPx || 360) * zoomScaleExport(tb.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
-      const h = (tb.hPx || 120) * zoomScaleExport(tb.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
+      const zRef = tb.zRef ?? ELEMENT_BASE_ZOOM;
+      const sCss = planElementZoomForExport(zRef);
+      const w = cssToCanvas(cssPlanPxRounded(tb.wPx || 360, zRef));
+      const h = cssToCanvas(cssPlanPxRounded(tb.hPx || 120, zRef));
       const data = titleBoxDataById?.[tb.id] || {};
-      ctx.strokeStyle = "#111111";
-      ctx.strokeRect(sc.x - w / 2, sc.y - h / 2, w, h);
-      ctx.font = "11px sans-serif";
-      ctx.fillStyle = "#111";
-      ["Project", "Job", "Date"].forEach((label, i) => {
-        const val = data[label.toLowerCase()] || label;
-        ctx.fillText(String(val).slice(0, 40), sc.x - w / 2 + 8, sc.y - h / 2 + 18 + i * 14);
+      const left = sc.x - w / 2;
+      const top  = sc.y - h / 2;
+
+      const tPad   = cssToCanvas(cssPlanPx(10, zRef));
+      const gap    = cssToCanvas(cssPlanPx(6,  zRef));
+      const gap12  = cssToCanvas(cssPlanPx(12, zRef));
+      const logoW  = cssToCanvas(cssPlanPx(90, zRef));
+      const logoH  = cssToCanvas(cssPlanPx(70, zRef));
+      const borderW = Math.max(0.5, cssToCanvas(cssPlanPx(2, zRef)));
+
+      drawScaledPanelBlit(ctx, left, top, w, h, (sx, pw, ph) => {
+        sx.fillStyle = "#FFFFFF";
+        sx.fillRect(0, 0, pw, ph);
+        sx.strokeStyle = "#111111";
+        sx.lineWidth = borderW;
+        sx.strokeRect(0, 0, pw, ph);
+
+        const textX = tPad + logoW + gap12;
+        let ty = tPad;
+
+        sx.fillStyle = "#111111";
+        sx.textAlign = "left";
+        sx.textBaseline = "top";
+
+        const projFs    = cssToCanvas(cssPlanPx(14, zRef));
+        const fieldFs   = cssToCanvas(cssPlanPx(12, zRef));
+        const logoLblFs = cssToCanvas(cssPlanPx(11, zRef));
+
+        const tbDrawLV = (label, value, x0, y0, fs) => {
+          sx.font = `700 ${fs}px system-ui, sans-serif`;
+          sx.fillStyle = "#111111";
+          sx.fillText(label, x0, y0);
+          const labelW = sx.measureText(label).width;
+          sx.font = `${fs}px system-ui, sans-serif`;
+          sx.fillText(value, x0 + labelW, y0);
+          return x0 + labelW + sx.measureText(value).width;
+        };
+
+        sx.strokeStyle = "#dddddd";
+        sx.lineWidth = Math.max(1, cssToCanvas(cssPlanPx(1, zRef)));
+        sx.strokeRect(tPad, tPad, logoW, logoH);
+        sx.font = `${logoLblFs}px system-ui, sans-serif`;
+        sx.fillStyle = "#666666";
+        sx.textAlign = "center";
+        sx.textBaseline = "middle";
+        sx.fillText("Logo", tPad + logoW / 2, tPad + logoH / 2);
+        sx.textAlign = "left";
+        sx.textBaseline = "top";
+        sx.fillStyle = "#111111";
+
+        sx.font = `900 ${projFs}px system-ui, sans-serif`;
+        sx.fillText("Project:", textX, ty);
+        const projLabelW = sx.measureText("Project: ").width;
+        sx.font = `800 ${projFs}px system-ui, sans-serif`;
+        sx.fillText(data.project || "", textX + projLabelW, ty);
+        ty += projFs + cssToCanvas(cssPlanPx(4, zRef));
+
+        let fx = textX;
+        fx = tbDrawLV("Date:", ` ${data.date || ""}`, fx, ty, fieldFs);
+        fx += sx.measureText("   ").width;
+        tbDrawLV("Author:", ` ${data.author || ""}`, fx, ty, fieldFs);
+        ty += fieldFs * 1.3;
+
+        tbDrawLV("Job Location:", ` ${data.jobLocation || ""}`, textX, ty, fieldFs);
+        ty += fieldFs * 1.3;
+
+        const rowBottom = Math.max(tPad + logoH, ty);
+        const divY = rowBottom + gap;
+        const divH = Math.max(1, cssToCanvas(cssPlanPx(1, zRef)));
+        sx.globalAlpha = 0.2;
+        sx.fillStyle = "#111111";
+        sx.fillRect(tPad, divY, pw - 2 * tPad, divH);
+        sx.globalAlpha = 1;
+
+        const cmtY = divY + divH + gap;
+        sx.textAlign    = "left";
+        sx.textBaseline = "top";
+        sx.font = `700 ${fieldFs}px system-ui, sans-serif`;
+        sx.fillStyle = "#111111";
+        sx.fillText("Comments:", tPad, cmtY);
+        const cmtLabelW = sx.measureText("Comments: ").width;
+        sx.font = `${fieldFs}px system-ui, sans-serif`;
+        sx.fillStyle = "#111111";
+        sx.textBaseline = "top";
+        sx.textAlign    = "left";
+        {
+          const cmtRaw = normalizeCommentLineBreaks(data.comments || "");
+          const cmtMaxY = ph - tPad;
+          const maxTextW = pw - 2 * tPad;
+          const cmtLineH = fieldFs * 1.35;
+          if (cmtRaw) {
+            wrapCanvasTextNL(sx, cmtRaw, maxTextW, cmtLineH, tPad, cmtY, cmtMaxY, cmtLabelW);
+          }
+        }
       });
     }
   }
@@ -3719,15 +3896,26 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const p = project(na?.pos);
       if (!inBounds(p)) continue;
       const sc = toCanvas(p);
-      const size = (na.wPx || 70) * zoomScaleExport(na.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
+      const zRef = na.zRef ?? ELEMENT_BASE_ZOOM;
+      const size = cssToCanvas(cssPlanPxRounded(na.wPx || 70, zRef));
+      ctx.save();
+      ctx.translate(sc.x, sc.y);
+      ctx.rotate(((na.rotDeg ?? 0) * Math.PI) / 180);
+      // Replicate NorthArrowSVG: viewBox "23 8 54 54", path "M50 10 L75 60 L50 48 L25 60 Z"
+      // Points converted to centre-relative fractions of the element's bounding box (size × size):
+      //   (50,10) → centre dx=0,   dy=-0.463  (tip)
+      //   (75,60) → centre dx=+0.463, dy=+0.463  (bottom-right)
+      //   (50,48) → centre dx=0,   dy=+0.241  (waist)
+      //   (25,60) → centre dx=-0.463, dy=+0.463  (bottom-left)
       ctx.fillStyle = "#000000";
       ctx.beginPath();
-      ctx.moveTo(sc.x, sc.y - size / 2);
-      ctx.lineTo(sc.x + size / 4, sc.y + size / 2);
-      ctx.lineTo(sc.x - size / 4, sc.y + size / 2);
+      ctx.moveTo(0,                    -size * 0.463); // tip
+      ctx.lineTo(+size * 0.463,        +size * 0.463); // bottom-right
+      ctx.lineTo(0,                    +size * 0.241); // waist
+      ctx.lineTo(-size * 0.463,        +size * 0.463); // bottom-left
       ctx.closePath();
       ctx.fill();
-      ctx.stroke();
+      ctx.restore();
     }
   }
   if (exportIncludeScaleBar) {
@@ -3735,429 +3923,97 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const p = project(sc?.pos);
       if (!inBounds(p)) continue;
       const c = toCanvas(p);
-      const w = (sc.wPx || 120) * zoomScaleExport(sc.zRef ?? 18) * scaleFactor * scaleToCanvas * 0.5;
-      const h = 20;
-      ctx.strokeStyle = "#111111";
-      ctx.strokeRect(c.x - w / 2, c.y - h / 2, w, h);
-      ctx.font = "10px sans-serif";
-      ctx.fillStyle = "#111";
-      ctx.textAlign = "left";
-      ctx.fillText("Scale", c.x - w / 2 + 4, c.y + 4);
-    }
-  }
-
-  // Height (mm) reserved at the top of every exported PDF for the branding header.
-  const PDF_HEADER_H = 9; // compact: title + subtitle with minimal breathing room
-
-  function getMapFrameRect(pageW, pageH) {
-    const marginH = 2;  // mm left/right — tight side margins
-    const marginV = 1;  // mm bottom — minimal bottom margin
-    return {
-      x: marginH,
-      y: PDF_HEADER_H,               // map starts immediately below the header ribbon
-      w: pageW - marginH * 2,
-      h: pageH - PDF_HEADER_H - marginV,
-    };
-  }
-
-  /** Draw the TMPBUILDER.CA branding header in the white ribbon above the map. */
-  function drawPdfBrandingHeader(pdfDoc, pageW) {
-    // Title — bold, compact
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setFontSize(11);
-    pdfDoc.setTextColor(30, 30, 30);
-    pdfDoc.text("TMPBUILDER.CA", pageW / 2, 3.8, { align: "center" });
-
-    // Subtitle — lighter, smaller
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.setFontSize(6.5);
-    pdfDoc.setTextColor(90, 90, 90);
-    pdfDoc.text("Traffic Management Plan", pageW / 2, 7, { align: "center" });
-
-    // Thin separator line between header and map
-    pdfDoc.setDrawColor(180, 180, 180);
-    pdfDoc.setLineWidth(0.3);
-    pdfDoc.line(2, PDF_HEADER_H - 0.3, pageW - 2, PDF_HEADER_H - 0.3);
-
-    // Reset colours so subsequent drawing isn't affected
-    pdfDoc.setTextColor(0, 0, 0);
-    pdfDoc.setDrawColor(0, 0, 0);
-  }
-
-  function projectLatLngToExportPx(p) {
-    return project(p);
-  }
-
-  function projectExportPxToPdf(pt, frameRect) {
-    // Map export image pixels (0..imgW, 0..imgH) into the inner map frame on the PDF page
-    const nx = pt.x / imgW;
-    const ny = pt.y / imgH;
-    return {
-      x: frameRect.x + nx * frameRect.w,
-      y: frameRect.y + ny * frameRect.h,
-    };
-  }
-
-  function buildExportScene(frameRect) {
-    return {
-      frameRect,
-      imgW,
-      imgH,
-      projectLatLngToExportPx,
-      projectExportPxToPdf,
-    };
-  }
-
-  function drawPdfPageBackground(pdfDoc, pageW, pageH) {
-    pdfDoc.setFillColor(255, 255, 255);
-    pdfDoc.rect(0, 0, pageW, pageH, "F");
-  }
-
-  function drawPdfMapFrame(pdfDoc, frameRect) {
-    pdfDoc.setDrawColor(0, 0, 0);
-    pdfDoc.setLineWidth(1.5);
-    pdfDoc.rect(frameRect.x, frameRect.y, frameRect.w, frameRect.h);
-  }
-
-  function drawPdfAerialBase(pdfDoc, baseDataUrl, frameRect) {
-    pdfDoc.addImage(baseDataUrl, "PNG", frameRect.x, frameRect.y, frameRect.w, frameRect.h, undefined, "NONE");
-  }
-
-  function drawPdfPolyline(pdfDoc, pointsPx, frameRect, options = {}) {
-    const { color = "#111111", width = 0.8 } = options;
-    const pts = (pointsPx || [])
-      .filter(Boolean)
-      .map((pt) => projectExportPxToPdf(pt, frameRect));
-    if (pts.length < 2) return;
-    const hex = String(color || "#000000").replace("#", "");
-    const r = parseInt(hex.slice(0, 2), 16) || 0;
-    const g = parseInt(hex.slice(2, 4), 16) || 0;
-    const b = parseInt(hex.slice(4, 6), 16) || 0;
-    pdfDoc.setDrawColor(r, g, b);
-    pdfDoc.setLineWidth(width);
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i];
-      const bPt = pts[i + 1];
-      pdfDoc.line(a.x, a.y, bPt.x, bPt.y);
-    }
-  }
-
-  function drawPdfPolygon(pdfDoc, pointsPx, frameRect, options = {}) {
-    const { strokeColor = "#111111", strokeWidth = 0.8 } = options;
-    const pts = (pointsPx || [])
-      .filter(Boolean)
-      .map((pt) => projectExportPxToPdf(pt, frameRect));
-    if (pts.length < 3) return;
-    const hex = String(strokeColor || "#000000").replace("#", "");
-    const r = parseInt(hex.slice(0, 2), 16) || 0;
-    const g = parseInt(hex.slice(2, 4), 16) || 0;
-    const b = parseInt(hex.slice(4, 6), 16) || 0;
-    pdfDoc.setDrawColor(r, g, b);
-    pdfDoc.setLineWidth(strokeWidth);
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i];
-      const bPt = pts[(i + 1) % pts.length];
-      pdfDoc.line(a.x, a.y, bPt.x, bPt.y);
-    }
-  }
-
-  function drawPdfTextBox(pdfDoc, text, centerPx, boxPx, frameRect, options = {}) {
-    if (!centerPx || !boxPx) return;
-    const {
-      fontSize = 9,
-      padding = 4,
-      strokeColor = "#111111",
-      fillColor = "#FFFFFF",
-      align = "left",
-    } = options;
-    const c = projectExportPxToPdf(centerPx, frameRect);
-    const w = (boxPx.w / imgW) * frameRect.w;
-    const h = (boxPx.h / imgH) * frameRect.h;
-    const hexStroke = String(strokeColor || "#000000").replace("#", "");
-    const sr = parseInt(hexStroke.slice(0, 2), 16) || 0;
-    const sg = parseInt(hexStroke.slice(2, 4), 16) || 0;
-    const sb = parseInt(hexStroke.slice(4, 6), 16) || 0;
-    pdfDoc.setDrawColor(sr, sg, sb);
-    if (fillColor) {
-      const hexFill = String(fillColor).replace("#", "");
-      const fr = parseInt(hexFill.slice(0, 2), 16) || 255;
-      const fg = parseInt(hexFill.slice(2, 4), 16) || 255;
-      const fb = parseInt(hexFill.slice(4, 6), 16) || 255;
-      pdfDoc.setFillColor(fr, fg, fb);
-      pdfDoc.rect(c.x - w / 2, c.y - h / 2, w, h, "FD");
-    } else {
-      pdfDoc.rect(c.x - w / 2, c.y - h / 2, w, h);
-    }
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.setFontSize(fontSize);
-    pdfDoc.setTextColor(0, 0, 0);
-    const textX = align === "center" ? c.x : c.x - w / 2 + padding;
-    const textY = c.y;
-    pdfDoc.text(String(text || ""), textX, textY, { baseline: "middle" });
-  }
-
-  function drawPdfVectorOverlay(pdfDoc, scene) {
-    const { frameRect } = scene;
-    const inExport = (p) => p && p.x >= 0 && p.x <= imgW && p.y >= 0 && p.y <= imgH;
-
-    const projectPoint = (ll) => projectLatLngToExportPx(ll);
-
-    // Work areas: vector polygon outlines
-    for (const wa of workAreas || []) {
-      const pts = (wa?.path || []).map(projectPoint).filter(Boolean);
-      if (pts.length >= 3) {
-        drawPdfPolygon(pdfDoc, pts, frameRect, { strokeColor: "#16A34A", strokeWidth: 0.8 });
-      }
-    }
-
-    // Measurements: crisp vector lines
-    for (const m of measurements || []) {
-      const pts = (m?.path || []).map(projectPoint).filter(Boolean);
-      if (pts.length >= 2) {
-        drawPdfPolyline(pdfDoc, pts, frameRect, { color: "#111111", width: 0.9 });
-      }
-    }
-
-    // Cones / barriers / ped_tape: centerlines as vectors
-    for (const f of conesFeatures || []) {
-      const verts = (f?.path || []).map(projectPoint).filter(Boolean);
-      if (verts.length < 2) continue;
-      if (f.typeId === "barrier") {
-        drawPdfPolyline(pdfDoc, verts, frameRect, { color: "#9CA3AF", width: 1.2 });
-      } else if (f.typeId === "ped_tape") {
-        drawPdfPolyline(pdfDoc, verts, frameRect, { color: "#DC2626", width: 1.2 });
+      const zRef = sc.zRef ?? ELEMENT_BASE_ZOOM;
+      const w = cssToCanvas(cssPlanPxRounded(sc.wPx || 120, zRef));
+      const h = cssToCanvas(cssPlanPxRounded(sc.hPx || 60, zRef));
+      const left = c.x - w / 2;
+      const top = c.y - h / 2;
+      if (scaleBarRaster) {
+        ctx.drawImage(scaleBarRaster, left, top, w, h);
       } else {
-        drawPdfPolyline(pdfDoc, verts, frameRect, { color: "#111111", width: 0.9 });
-      }
-    }
-
-    // TODO: cone symbols could be drawn here as repeated vector markers along verts
-
-    // Legend boxes (if enabled)
-    if (exportIncludeLegend) {
-    for (const lb of legendBoxes || []) {
-      const p = projectPoint(lb?.pos);
-      if (!inExport(p)) continue;
-      const w = (lb.wPx || 180) * zoomScale(lb.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      const h = (lb.hPx || 100) * zoomScale(lb.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      drawPdfTextBox(
-        pdfDoc,
-        "Legend",
-        p,
-        { w, h },
-        frameRect,
-        { fontSize: 9, align: "left", strokeColor: "#111111", fillColor: "#FFFFFF" }
-      );
-    }
-    }
-
-    if (exportIncludeNotes) {
-    for (const mb of manifestBoxes || []) {
-      const p = projectPoint(mb?.pos);
-      if (!inExport(p)) continue;
-      const w = (mb.wPx || 200) * zoomScale(mb.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      const h = (mb.hPx || 120) * zoomScale(mb.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      drawPdfTextBox(
-        pdfDoc,
-        "Manifest",
-        p,
-        { w, h },
-        frameRect,
-        { fontSize: 9, align: "left", strokeColor: "#111111", fillColor: "#FFFFFF" }
-      );
-    }
-    }
-
-    // Title boxes (if enabled)
-    if (exportIncludeTitle) {
-    for (const tb of titleBoxes || []) {
-      const p = projectPoint(tb?.pos);
-      if (!inExport(p)) continue;
-      const w = (tb.wPx || 360) * zoomScale(tb.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      const h = (tb.hPx || 120) * zoomScale(tb.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      const data = titleBoxDataById?.[tb.id] || {};
-      const c = projectExportPxToPdf(p, frameRect);
-      const bw = (w / imgW) * frameRect.w;
-      const bh = (h / imgH) * frameRect.h;
-      pdfDoc.setDrawColor(0, 0, 0);
-      pdfDoc.setLineWidth(0.8);
-      pdfDoc.rect(c.x - bw / 2, c.y - bh / 2, bw, bh);
-      pdfDoc.setFont("helvetica", "normal");
-      pdfDoc.setFontSize(9);
-      pdfDoc.setTextColor(0, 0, 0);
-      const lines = [data.project || "Project", data.job || "Job", data.date || "Date"].filter(Boolean);
-      lines.forEach((line, i) => {
-        const tx = c.x - bw / 2 + 6;
-        const ty = c.y - bh / 2 + 10 + i * 10;
-        pdfDoc.text(String(line), tx, ty);
-      });
-      // TODO: logo / comments could be added here
-    }
-    }
-
-    // North arrows (if enabled)
-    if (exportIncludeNorthArrow) {
-    for (const na of northArrows || []) {
-      const p = projectPoint(na?.pos);
-      if (!inExport(p)) continue;
-      const size = (na.wPx || 70) * zoomScale(na.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      const c = projectExportPxToPdf(p, frameRect);
-      const s = (size / imgW) * frameRect.w;
-      pdfDoc.setDrawColor(0, 0, 0);
-      pdfDoc.setFillColor(0, 0, 0);
-      pdfDoc.setLineWidth(0.5);
-      pdfDoc.line(c.x, c.y - s / 2, c.x + s / 4, c.y + s / 2);
-      pdfDoc.line(c.x + s / 4, c.y + s / 2, c.x - s / 4, c.y + s / 2);
-      pdfDoc.line(c.x - s / 4, c.y + s / 2, c.x, c.y - s / 2);
-    }
-    }
-
-    // Scale bars (if enabled)
-    if (exportIncludeScaleBar) {
-    for (const sc of scales || []) {
-      const p = projectPoint(sc?.pos);
-      if (!inExport(p)) continue;
-      const w = (sc.wPx || 120) * zoomScale(sc.zRef ?? ELEMENT_BASE_ZOOM) * scaleFactor;
-      const h = 20;
-      const c = projectExportPxToPdf(p, frameRect);
-      const bw = (w / imgW) * frameRect.w;
-      const bh = (h / imgH) * frameRect.h;
-      pdfDoc.setDrawColor(0, 0, 0);
-      pdfDoc.setLineWidth(0.7);
-      pdfDoc.rect(c.x - bw / 2, c.y - bh / 2, bw, bh);
-      pdfDoc.setFont("helvetica", "normal");
-      pdfDoc.setFontSize(8);
-      pdfDoc.text("Scale", c.x - bw / 2 + 4, c.y + 3);
-    }
-    }
-
-    // Placed signs – vector placeholder boxes at correct positions
-    for (const s of placedSigns || []) {
-      const p = projectPoint(s?.pos);
-      if (!inExport(p)) continue;
-      const w = s?.wPx || 64;
-      const h = s?.hPx || 64;
-      const c = projectExportPxToPdf(p, frameRect);
-      const bw = (w / imgW) * frameRect.w;
-      const bh = (h / imgH) * frameRect.h;
-      pdfDoc.setDrawColor(0, 0, 0);
-      pdfDoc.setLineWidth(0.6);
-      pdfDoc.rect(c.x - bw / 2, c.y - bh / 2, bw, bh);
-      // optional simple label so sign presence is obvious
-      pdfDoc.setFont("helvetica", "normal");
-      pdfDoc.setFontSize(7);
-      pdfDoc.text("SIGN", c.x - bw / 2 + 3, c.y - 2);
-    }
-
-    // Insert objects (rect/text/table) – vector where reasonable
-    for (const obj of insertObjects || []) {
-      const pos = obj.pos || obj.position;
-      if (!pos) continue;
-      const p = projectPoint(pos);
-      if (!inExport(p)) continue;
-      const zRef = obj.zRef ?? ELEMENT_BASE_ZOOM;
-      const w = (obj.wPx || 100) * zoomScale(zRef) * scaleFactor;
-      const h = (obj.hPx || 60) * zoomScale(zRef) * scaleFactor;
-      const c = projectExportPxToPdf(p, frameRect);
-      const bw = (w / imgW) * frameRect.w;
-      const bh = (h / imgH) * frameRect.h;
-
-      if (obj.kind === "rect" || obj.kind === "table") {
-        pdfDoc.setDrawColor(0, 0, 0);
-        pdfDoc.setLineWidth(0.8);
-        pdfDoc.rect(c.x - bw / 2, c.y - bh / 2, bw, bh);
-      } else if (obj.kind === "text") {
-        pdfDoc.setFont("helvetica", "normal");
-        pdfDoc.setFontSize(9);
-        pdfDoc.text(String(obj.text || ""), c.x - bw / 2 + 4, c.y);
-      } else {
-        // Generic labeled box
-        pdfDoc.setDrawColor(0, 0, 0);
-        pdfDoc.setLineWidth(0.5);
-        pdfDoc.rect(c.x - bw / 2, c.y - bh / 2, bw, bh);
-        const text = obj.text || obj.cells?.flat?.()?.join?.(" ") || "";
-        pdfDoc.setFont("helvetica", "normal");
-        pdfDoc.setFontSize(8);
-        pdfDoc.text(String(text).slice(0, 40), c.x - bw / 2 + 4, c.y);
+        ctx.strokeStyle = "#111111";
+        ctx.lineWidth = Math.max(1, exportCanvasScale);
+        ctx.strokeRect(left, top, w, h);
+        ctx.font = `${Math.max(8, 10 * exportCanvasScale)}px sans-serif`;
+        ctx.fillStyle = "#111";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Plan scale", left + cssToCanvas(4), c.y);
       }
     }
   }
 
-  // Draw a single consolidated attribution bar at the very bottom of the canvas
-  // (replaces the per-tile attribution patches that were cropped above).
+  // ── STEP 9: attribution bar (Google requirement) ─────────────────────────
+  ctx.restore(); // end clip
   {
-    const ATTRIB_TEXT = "Map data \u00A92026 Imagery \u00A92026 Airbus, Maxar Technologies \u00B7 Google";
-    const BAR_H = 22;
-    ctx.fillStyle = "rgba(255,255,255,0.80)";
+    const ATTRIB = "Map data \u00A9 Google";
+    const BAR_H  = Math.max(18, Math.round(outH * 0.018));
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
     ctx.fillRect(0, outH - BAR_H, outW, BAR_H);
-    ctx.fillStyle = "#444444";
-    ctx.font = "13px Arial, sans-serif";
+    ctx.fillStyle = "#444";
+    ctx.font = `${Math.max(10, BAR_H * 0.65)}px Arial, sans-serif`;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(ATTRIB_TEXT, outW - 10, outH - BAR_H / 2);
+    ctx.fillText(ATTRIB, outW - 8, outH - BAR_H / 2);
   }
 
-  // --- STEP 5: Final output — custom page size matches export box exactly ---
-  // Use a custom PDF page whose aspect ratio exactly matches imgW:imgH so the
-  // map fills the page edge-to-edge with no letterboxing at all.
-  // Max printable short-side: 297mm (A3). Scale down proportionally if larger.
-  const MARGIN_H = 2;   // mm — left/right
-  const MAX_SHORT  = 297; // mm — A3 short side cap
-  const mapAspect  = imgW / imgH;           // e.g. 2.5 for a wide export
-  // Available map area height after the header ribbon and margins
-  // We'll compute page dims so the map area fills the remaining space exactly.
-  // pageW and pageH chosen so: map width = pageW - 2*MARGIN_H,
-  //                              map height = (pageW - 2*MARGIN_H) / mapAspect
-  //                              page height = PDF_HEADER_H + map height + 1mm bottom
-  let mapAreaW_mm = MAX_SHORT; // start at max width
-  let mapAreaH_mm = mapAreaW_mm / mapAspect;
-  // If height exceeds max, constrain by height instead
-  const pageHCandidate = PDF_HEADER_H + mapAreaH_mm + 1;
-  if (pageHCandidate > MAX_SHORT * 1.5) {
-    mapAreaH_mm = MAX_SHORT * 1.5 - PDF_HEADER_H - 1;
-    mapAreaW_mm = mapAreaH_mm * mapAspect;
+  // ── STEP 10: PDF output (full stitched pixel dimensions embedded for print clarity) ──
+  const MARGIN   = 2;    // mm — left/right margin
+  const HDR_H    = 9;    // mm — branding header height
+  const MAX_SIDE = 297;  // mm — A3 short-side cap (legibility comes from stitched tile resolution)
+  const aspect   = imgW / imgH;
+  let mapW_mm = MAX_SIDE;
+  let mapH_mm = mapW_mm / aspect;
+  if (HDR_H + mapH_mm + 1 > MAX_SIDE * 1.5) {
+    mapH_mm = MAX_SIDE * 1.5 - HDR_H - 1;
+    mapW_mm = mapH_mm * aspect;
   }
-  const pageW = mapAreaW_mm + MARGIN_H * 2;
-  const pageH = PDF_HEADER_H + mapAreaH_mm + 1;
+  const pageW = mapW_mm + MARGIN * 2;
+  const pageH = HDR_H + mapH_mm + 1;
 
   const pdf = new jsPDF({ orientation: pageW >= pageH ? "l" : "p", unit: "mm", format: [pageW, pageH] });
 
-  // Map sits right below the header ribbon, full width between side margins
-  const drawRect = { x: MARGIN_H, y: PDF_HEADER_H, w: mapAreaW_mm, h: mapAreaH_mm };
-  const basePng = canvas.toDataURL("image/png");
+  // White background
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(0, 0, pageW, pageH, "F");
 
-  // Layer 1: page background (white)
-  drawPdfPageBackground(pdf, pageW, pageH);
+  // Branding header
+  pdf.setFont("helvetica", "bold");   pdf.setFontSize(11); pdf.setTextColor(30, 30, 30);
+  pdf.text("TMPBUILDER.CA", pageW / 2, 3.8, { align: "center" });
+  pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5); pdf.setTextColor(90, 90, 90);
+  pdf.text("Traffic Management Plan", pageW / 2, 7, { align: "center" });
+  pdf.setDrawColor(180, 180, 180); pdf.setLineWidth(0.3);
+  pdf.line(2, HDR_H - 0.3, pageW - 2, HDR_H - 0.3);
+  pdf.setTextColor(0, 0, 0); pdf.setDrawColor(0, 0, 0);
 
-  // Layer 2: branding header — "TMPBUILDER.CA / Traffic Management Plan"
-  drawPdfBrandingHeader(pdf, pageW);
+  // Map image (aerial + all overlays composited on canvas)
+  const mapRect = { x: MARGIN, y: HDR_H, w: mapW_mm, h: mapH_mm };
+  pdf.addImage(canvas.toDataURL("image/png"), "PNG", mapRect.x, mapRect.y, mapRect.w, mapRect.h, undefined, "NONE");
 
-  // Layer 3: black border around drawing area
-  drawPdfMapFrame(pdf, drawRect);
+  // Border around map
+  pdf.setDrawColor(0, 0, 0); pdf.setLineWidth(1.5);
+  pdf.rect(mapRect.x, mapRect.y, mapRect.w, mapRect.h);
 
-  // Layer 4: map + TMP overlays (composited on canvas)
-  drawPdfAerialBase(pdf, basePng, drawRect);
-
-  // Try to open PDF in new tab; if popup blocked, fall back to download
+  // Open in new tab; fall back to download if popup blocked
   const blob = pdf.output("blob");
-  const url = URL.createObjectURL(blob);
-  const newWin = window.open(url, "_blank", "noopener,noreferrer");
-  if (!newWin || newWin.closed) {
-    pdf.save("TMP-export.pdf");
-  }
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, "_blank", "noopener,noreferrer");
+  if (!win || win.closed) pdf.save("TMP-export.pdf");
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 
   cancelExportToPdf();
   } catch (err) {
-    console.error("Export to PDF failed:", err);
-    const msg = err instanceof Error ? err.message : (err?.message || (typeof err === "object" ? "Unknown error" : String(err)));
-    alert("Export failed: " + msg);
+    console.error("PDF export failed:", err);
+    alert("Export failed: " + (err instanceof Error ? err.message : String(err)));
+  } finally {
+    setExportCaptureInProgress(false);
   }
 }
 
 
   function openConesTool() {
   if (measIsDrawing) cancelMeasDrawing();
+  setSelectedMeasId(null); // clear any measurement selection when switching to another tool
 
   setActiveTool("cones");
   setConesPanelOpen(true);
@@ -4167,7 +4023,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 }
 function openMeasTool() {
   if (conesIsDrawing) cancelConesDrawing();
-
+  setSelectedConeId(null);
   setActiveTool("measurements");
   setMeasPanelOpen(true);
   setConesPanelOpen(false);
@@ -4209,6 +4065,7 @@ setPanMode(false);
     setArrowPanelOpen(false);
     if (conesIsDrawing) cancelConesDrawing();
     if (measIsDrawing) cancelMeasDrawing();
+    setSelectedConeId(null);
   }
 
   function openArrowTool() {
@@ -4219,6 +4076,7 @@ setPanMode(false);
     setMeasPanelOpen(false);
     if (conesIsDrawing) cancelConesDrawing();
     if (measIsDrawing) cancelMeasDrawing();
+    setSelectedConeId(null);
   }
 
   function closeConesPanel() {
@@ -4241,13 +4099,15 @@ setPanMode(false);
       return;
     }
 
-    if (tab === "Plan Elements" && activeTab === "Plan Elements") {
-      setOpenFileMenu(false);
+    setOpenFileMenu(false);
+
+    // Clicking the already-active tab toggles it off (collapses the ribbon)
+    if (tab === activeTab) {
+      setActiveTab(null);
       deactivateAllTools();
       return;
     }
 
-    setOpenFileMenu(false);
     setActiveTab(tab);
 
     if (tab !== "Plan Elements") {
@@ -4255,7 +4115,8 @@ setPanMode(false);
     }
   };
 
-  const showRibbon = activeTab !== "File";
+  // Ribbon is visible only when a non-File tab is actively selected
+  const showRibbon = activeTab !== null && activeTab !== "File";
 
   /* ================= Cones sampling (px) ================= */
   function recomputeConesPreviewSamples(latlngPath) {
@@ -4579,6 +4440,21 @@ if (activeTool === "work_area" && isDrawingWorkArea) {
         return;
       }
 
+      if (uiDrag.type === "rotateArrowPoint") {
+        const { arrowId, pointId, centerPx, startAngleDeg, startPointerAngleDeg } = uiDrag;
+        const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
+        const nextDeg = startAngleDeg + (angleNow - startPointerAngleDeg);
+        setPlacedArrows((prev) =>
+          prev.map((a) => a.id !== arrowId ? a : {
+            ...a,
+            points: (a.points ?? []).map((pt) =>
+              pt.id !== pointId ? pt : { ...pt, rotDeg: nextDeg }
+            ),
+          })
+        );
+        return;
+      }
+
       // resizeScale + moveScale are now handled by the dedicated window-level useEffect
 
       if (uiDrag.type === "createStand") {
@@ -4632,6 +4508,14 @@ const dedupeLastIfSame = (arr, p) => {
     // Ignore the first map click immediately after a stand rotation drag
     if (rotateStandGuardRef.current) {
       rotateStandGuardRef.current = false;
+      return;
+    }
+
+    // Ignore map click that fires immediately after clicking on a cone polyline
+    // (mousedown on the polyline fires first, setting the guard; this prevents the
+    //  map click from deselecting the cone or starting an unwanted new drawing)
+    if (coneSelectionGuardRef.current) {
+      coneSelectionGuardRef.current = false;
       return;
     }
 
@@ -4948,6 +4832,7 @@ return;
 
       // CONES
       if (isConesToolActive) {
+        setSelectedConeId(null); // clicking empty map space deselects any selected cone
         if (!conesIsDrawing) startConesDrawingAt(p);
         else addConesVertex(p);
         return;
@@ -4955,6 +4840,8 @@ return;
 
             // MEASUREMENTS
       if (isMeasToolActive) {
+        // Clicking empty map space always clears measurement selection
+        setSelectedMeasId(null);
         if (measMode === "distance") {
           if (!measIsDrawing) startMeasDrawingAt(p);
           else finalizeMeasDrawing(p);
@@ -4962,6 +4849,10 @@ return;
           if (!measIsDrawing) startMeasDrawingAt(p);
           else addMeasVertex(p);
         }
+      } else {
+        // Any other tool: also clear measurement + cone selection
+        setSelectedMeasId(null);
+        setSelectedConeId(null);
       }
       // setSelectedEntity(null);  // <-- disable: keep selection until dbl/right click
 
@@ -5224,6 +5115,8 @@ useEffect(() => {
         if (uiDrag) setUiDrag(null);
         if (conesIsDrawing) cancelConesDrawing();
         if (measIsDrawing) cancelMeasDrawing();
+        setSelectedMeasId(null);
+        setSelectedConeId(null);
         if (isSignsToolActive) {
           setActiveTool(null);
           setSignsPanelOpen(false);
@@ -5424,11 +5317,14 @@ useEffect(() => {
             prev.map((a) =>
               a.id !== uiDrag.arrowId ? a : {
                 ...a,
-                points: [...(a.points ?? []), { id: ptId, dLat: p.lat - a.pos.lat, dLng: p.lng - a.pos.lng }],
+                points: [...(a.points ?? []), { id: ptId, dLat: p.lat - a.pos.lat, dLng: p.lng - a.pos.lng, rotDeg: 0 }],
               }
             )
           );
         }
+        // Block the map click that fires immediately after pointer-up.
+        // Without this, onMapClick sees activeTool==="arrows" and places a duplicate arrow.
+        addArrowPointGuardRef.current = true;
         setUiDrag(null);
         lockMapInteractions(false);
         return;
@@ -5468,7 +5364,8 @@ useEffect(() => {
         uiDrag.type === "moveArrow" ||
         uiDrag.type === "resizeArrow" ||
         uiDrag.type === "rotateArrow" ||
-        uiDrag.type === "moveArrowPoint"
+        uiDrag.type === "moveArrowPoint" ||
+        uiDrag.type === "rotateArrowPoint"
       ) {
         pushHistory();
       }
@@ -5484,7 +5381,8 @@ useEffect(() => {
         uiDrag.type === "moveArrow" ||
         uiDrag.type === "resizeArrow" ||
         uiDrag.type === "rotateArrow" ||
-        uiDrag.type === "moveArrowPoint"
+        uiDrag.type === "moveArrowPoint" ||
+        uiDrag.type === "rotateArrowPoint"
       ) {
         lockMapInteractions(false);
       }
@@ -5500,13 +5398,9 @@ useEffect(() => {
         }
         exportResizeRef.current = null;
         setExportLiveRect(null);
-        // Clear stale preview — box was resized, old preview no longer matches
-        setExportPreviewUrl(null);
       }
       if (uiDrag.type === "moveExportArea") {
         setExportLiveRect(null);
-        // Clear stale preview — box was moved, old preview no longer matches
-        setExportPreviewUrl(null);
       }
       setUiDrag(null);
     }
@@ -5817,7 +5711,22 @@ useEffect(() => {
         const nextPos = pxToLatLng(newCenterPx);
         if (!nextPos) return;
         setPlacedArrows((prev) =>
-          prev.map((a) => (a.id === arrowId ? { ...a, pos: nextPos } : a))
+          prev.map((a) => {
+            if (a.id !== arrowId) return a;
+            // Arrow moved by this delta — compensate each tripod point's offset so its
+            // world position (a.pos + pt.dLat/dLng) stays fixed while the arrow moves.
+            const moveLat = nextPos.lat - a.pos.lat;
+            const moveLng = nextPos.lng - a.pos.lng;
+            return {
+              ...a,
+              pos: nextPos,
+              points: (a.points ?? []).map((pt) => ({
+                ...pt,
+                dLat: pt.dLat - moveLat,
+                dLng: pt.dLng - moveLng,
+              })),
+            };
+          })
         );
       } else if (uiDrag.type === "moveArrowPoint") {
         const { arrowId, pointId, offsetPx } = uiDrag;
@@ -6003,7 +5912,7 @@ useEffect(() => {
     };
   }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
 
-  /* ================= Legend resize: smooth window mousemove ================= */
+  /* ================= Legend resize: identical math to resizeInsert ================= */
   useEffect(() => {
     if (!uiDrag || uiDrag.type !== "resizeLegend") return;
 
@@ -6011,47 +5920,71 @@ useEffect(() => {
       const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
       if (!curPointerPx) return;
 
-      const { legendId, corner, startSize, startPointerPx } = uiDrag;
+      const { legendId, corner, startSize, startPointerPx, centerPx } = uiDrag;
       const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
-      const dx = curPointerPx.x - startPointerPx.x;
-      const dy = curPointerPx.y - startPointerPx.y;
-      const baseDx = unscalePx(dx, zRef);
-      const baseDy = unscalePx(dy, zRef);
+      const kPlan = planElementZoomScale(zRef);
 
-      let w = startSize.wPx;
-      let h = startSize.hPx;
+      // Same rotation-aware local-space delta as resizeInsert (legend never rotates so deg=0)
+      const p0 = rotatePt(startPointerPx, centerPx, 0);
+      const p1 = rotatePt(curPointerPx,   centerPx, 0);
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
 
-      if (corner === "se") {
-        w = startSize.wPx + baseDx;
-        h = startSize.hPx + baseDy;
-      }
-      if (corner === "sw") {
-        w = startSize.wPx - baseDx;
-        h = startSize.hPx + baseDy;
-      }
-      if (corner === "ne") {
-        w = startSize.wPx + baseDx;
-        h = startSize.hPx - baseDy;
-      }
-      if (corner === "nw") {
-        w = startSize.wPx - baseDx;
-        h = startSize.hPx - baseDy;
-      }
-      // ✅ side handles (bars)
-if (corner === "e") w = startSize.wPx + baseDx;
-if (corner === "w") w = startSize.wPx - baseDx;
-if (corner === "s") h = startSize.hPx + baseDy;
-if (corner === "n") h = startSize.hPx - baseDy;
-      w = clamp(w, 140, 600);
-      h = clamp(h, 120, 600);
+      // Work in screen pixels, same as resizeInsert
+      const startVisualW = scalePxPlan(startSize.wPx, zRef);
+      const startVisualH = scalePxPlan(startSize.hPx, zRef);
+      let visualW = startVisualW;
+      let visualH = startVisualH;
+
+      if      (corner === "se") { visualW += dx; visualH += dy; }
+      else if (corner === "sw") { visualW -= dx; visualH += dy; }
+      else if (corner === "ne") { visualW += dx; visualH -= dy; }
+      else if (corner === "nw") { visualW -= dx; visualH -= dy; }
+      else if (corner === "e")  { visualW += dx; }
+      else if (corner === "w")  { visualW -= dx; }
+      else if (corner === "s")  { visualH += dy; }
+      else if (corner === "n")  { visualH -= dy; }
+
+      // Minimum size only — no maximum cap
+      visualW = Math.max(scalePxPlan(60, zRef), visualW);
+      visualH = Math.max(scalePxPlan(40, zRef), visualH);
+
+      const w = visualW / kPlan;
+      const h = visualH / kPlan;
+
+      // Edge-anchored centre shift — same formula as resizeInsert
+      const shiftDx = (visualW - startVisualW) / 2;
+      const shiftDy = (visualH - startVisualH) / 2;
+      let shiftLocal = { x: 0, y: 0 };
+      if      (corner === "se") shiftLocal = { x:  shiftDx, y:  shiftDy };
+      else if (corner === "sw") shiftLocal = { x: -shiftDx, y:  shiftDy };
+      else if (corner === "ne") shiftLocal = { x:  shiftDx, y: -shiftDy };
+      else if (corner === "nw") shiftLocal = { x: -shiftDx, y: -shiftDy };
+      else if (corner === "e")  shiftLocal = { x:  shiftDx, y: 0 };
+      else if (corner === "w")  shiftLocal = { x: -shiftDx, y: 0 };
+      else if (corner === "s")  shiftLocal = { x: 0, y:  shiftDy };
+      else if (corner === "n")  shiftLocal = { x: 0, y: -shiftDy };
+
+      const shiftWorld = rotatePt(shiftLocal, { x: 0, y: 0 }, 0);
+      const nextCenterPx = { x: centerPx.x + shiftWorld.x, y: centerPx.y + shiftWorld.y };
+      const nextPos = pxToLatLng(nextCenterPx);
 
       setLegendBoxes((prev) =>
-        prev.map((lb) => (lb.id === legendId ? { ...lb, wPx: w, hPx: h } : lb))
+        prev.map((lb) => {
+          if (lb.id !== legendId) return lb;
+          return { ...lb, wPx: w, hPx: h, ...(nextPos ? { pos: nextPos } : {}) };
+        })
       );
     }
 
+    function onUp() { setUiDrag(null); }
+
     window.addEventListener("mousemove", onMove);
-    return () => window.removeEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
   }, [uiDrag]);
 
   /* ================= Title move/resize: smooth window mousemove ================= */
@@ -6081,37 +6014,32 @@ if (corner === "n") h = startSize.hPx - baseDy;
       if (uiDrag.type === "resizeTitle") {
         const { titleId, corner, startBox } = uiDrag;
 
+        // Title box uses pixel coords (x, y = top-left corner), so edge-anchored
+        // resize is simply: adjust the edge being dragged, keep opposite edge fixed.
         let x = startBox.x;
         let y = startBox.y;
         let w = startBox.w;
         let h = startBox.h;
 
-        if (corner === "se") {
-          w = startBox.w + dx;
-          h = startBox.h + dy;
-        }
-        if (corner === "sw") {
-          x = startBox.x + dx;
-          w = startBox.w - dx;
-          h = startBox.h + dy;
-        }
-        if (corner === "ne") {
-          y = startBox.y + dy;
-          w = startBox.w + dx;
-          h = startBox.h - dy;
-        }
-        if (corner === "nw") {
-          x = startBox.x + dx;
-          y = startBox.y + dy;
-          w = startBox.w - dx;
-          h = startBox.h - dy;
-        }
+        // Corners
+        if      (corner === "se") { w = startBox.w + dx; h = startBox.h + dy; }
+        else if (corner === "sw") { x = startBox.x + dx; w = startBox.w - dx; h = startBox.h + dy; }
+        else if (corner === "ne") { y = startBox.y + dy; w = startBox.w + dx; h = startBox.h - dy; }
+        else if (corner === "nw") { x = startBox.x + dx; y = startBox.y + dy; w = startBox.w - dx; h = startBox.h - dy; }
+        // Edges
+        else if (corner === "n") { y = startBox.y + dy; h = startBox.h - dy; }
+        else if (corner === "s") { h = startBox.h + dy; }
+        else if (corner === "e") { w = startBox.w + dx; }
+        else if (corner === "w") { x = startBox.x + dx; w = startBox.w - dx; }
 
-        w = clamp(w, 420, 1400);
-        h = clamp(h, 110, 700);
+        // Minimum size only — no maximum cap
+        const minW = 200;
+        const minH = 60;
+        if (w < minW) { if (corner === "nw" || corner === "sw" || corner === "w") x = startBox.x + startBox.w - minW; w = minW; }
+        if (h < minH) { if (corner === "nw" || corner === "ne" || corner === "n") y = startBox.y + startBox.h - minH; h = minH; }
 
-        let logoW = startBox.logoW;
-        logoW = clamp(logoW, 80, Math.floor(w * 0.4));
+        let logoW = startBox.logoW ?? Math.floor(startBox.w * 0.2);
+        logoW = clamp(logoW, 60, Math.floor(w * 0.4));
 
         setTitleBoxes((prev) =>
           prev.map((tb) =>
@@ -6152,7 +6080,7 @@ useEffect(() => {
 
     // ---------- RESIZE TABLE ----------
     if (uiDrag.type === "resizeTable") {
-      const { id, corner, startSize, startPointerPx, startCols, startRows } = uiDrag;
+      const { id, corner, startSize, startPointerPx, startCols, startRows, startPos } = uiDrag;
       const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
 
       const dx = curPointerPx.x - startPointerPx.x;
@@ -6165,17 +6093,18 @@ useEffect(() => {
       let visualW = startVisualW;
       let visualH = startVisualH;
 
-      if (corner === "se") { visualW = startVisualW + dx; visualH = startVisualH + dy; }
-      if (corner === "sw") { visualW = startVisualW - dx; visualH = startVisualH + dy; }
-      if (corner === "ne") { visualW = startVisualW + dx; visualH = startVisualH - dy; }
-      if (corner === "nw") { visualW = startVisualW - dx; visualH = startVisualH - dy; }
-      if (corner === "e")  { visualW = startVisualW + dx; }
-      if (corner === "w")  { visualW = startVisualW - dx; }
-      if (corner === "s")  { visualH = startVisualH + dy; }
-      if (corner === "n")  { visualH = startVisualH - dy; }
+      if      (corner === "se") { visualW = startVisualW + dx; visualH = startVisualH + dy; }
+      else if (corner === "sw") { visualW = startVisualW - dx; visualH = startVisualH + dy; }
+      else if (corner === "ne") { visualW = startVisualW + dx; visualH = startVisualH - dy; }
+      else if (corner === "nw") { visualW = startVisualW - dx; visualH = startVisualH - dy; }
+      else if (corner === "e")  { visualW = startVisualW + dx; }
+      else if (corner === "w")  { visualW = startVisualW - dx; }
+      else if (corner === "s")  { visualH = startVisualH + dy; }
+      else if (corner === "n")  { visualH = startVisualH - dy; }
 
-      visualW = clamp(visualW, scalePx(220, zRef), scalePx(1400, zRef));
-      visualH = clamp(visualH, scalePx(140, zRef), scalePx(900, zRef));
+      // Minimum size only — no maximum cap
+      visualW = Math.max(scalePx(80, zRef), visualW);
+      visualH = Math.max(scalePx(60, zRef), visualH);
 
       const w = unscalePx(visualW, zRef);
       const h = unscalePx(visualH, zRef);
@@ -6183,12 +6112,24 @@ useEffect(() => {
       // scale columns/rows so the grid fits new w/h
       const sumCols = (startCols || []).reduce((a, b) => a + b, 0) || 1;
       const sumRows = (startRows || []).reduce((a, b) => a + b, 0) || 1;
+      const nextCols = (startCols || []).map((cw) => Math.max(20, cw * (w / sumCols)));
+      const nextRows = (startRows || []).map((rh) => Math.max(16, rh * (h / sumRows)));
 
-      const colScale = w / sumCols;
-      const rowScale = h / sumRows;
+      // Edge-anchored: shift center so opposite edge stays fixed
+      let csx = 0, csy = 0;
+      if      (corner === "se") { csx =  dx / 2; csy =  dy / 2; }
+      else if (corner === "sw") { csx = -dx / 2; csy =  dy / 2; }
+      else if (corner === "ne") { csx =  dx / 2; csy = -dy / 2; }
+      else if (corner === "nw") { csx = -dx / 2; csy = -dy / 2; }
+      else if (corner === "e")  { csx =  dx / 2; }
+      else if (corner === "w")  { csx = -dx / 2; }
+      else if (corner === "s")  { csy =  dy / 2; }
+      else if (corner === "n")  { csy = -dy / 2; }
 
-      const nextCols = (startCols || []).map((cw) => Math.max(40, cw * colScale));
-      const nextRows = (startRows || []).map((rh) => Math.max(32, rh * rowScale));
+      const startPosPx = startPos ? latLngToPx(startPos) : null;
+      const nextPos = startPosPx
+        ? pxToLatLng({ x: startPosPx.x + csx, y: startPosPx.y + csy })
+        : null;
 
       setInsertObjects((prev) =>
         prev.map((o) => {
@@ -6199,6 +6140,7 @@ useEffect(() => {
             hPx: h,
             colWidths: nextCols,
             rowHeights: nextRows,
+            ...(nextPos ? { pos: nextPos } : {}),
           };
         })
       );
@@ -6217,7 +6159,7 @@ useEffect(() => {
   };
 }, [uiDrag, setInsertObjects, zoomNow]);
 
-  /* ================= Manifest resize: smooth window mousemove ================= */
+  /* ================= Manifest resize: identical math to resizeInsert ================= */
   useEffect(() => {
     if (!uiDrag || uiDrag.type !== "resizeManifest") return;
 
@@ -6225,49 +6167,138 @@ useEffect(() => {
       const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
       if (!curPointerPx) return;
 
-      const { manifestId, corner, startSize, startPointerPx } = uiDrag;
+      const { manifestId, corner, startSize, startPointerPx, centerPx } = uiDrag;
       const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
-      const dx = curPointerPx.x - startPointerPx.x;
-      const dy = curPointerPx.y - startPointerPx.y;
-      const baseDx = unscalePx(dx, zRef);
-      const baseDy = unscalePx(dy, zRef);
+      const kPlan = planElementZoomScale(zRef);
 
-      let w = startSize.wPx;
-      let h = startSize.hPx;
+      // Same rotation-aware local-space delta as resizeInsert (manifest never rotates so deg=0)
+      const p0 = rotatePt(startPointerPx, centerPx, 0);
+      const p1 = rotatePt(curPointerPx,   centerPx, 0);
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
 
-      if (corner === "se") {
-        w = startSize.wPx + baseDx;
-        h = startSize.hPx + baseDy;
-      }
-      if (corner === "sw") {
-        w = startSize.wPx - baseDx;
-        h = startSize.hPx + baseDy;
-      }
-      if (corner === "ne") {
-        w = startSize.wPx + baseDx;
-        h = startSize.hPx - baseDy;
-      }
-      if (corner === "nw") {
-        w = startSize.wPx - baseDx;
-        h = startSize.hPx - baseDy;
-      }
-      // ✅ side handles (bars)
-if (corner === "e") w = startSize.wPx + baseDx;
-if (corner === "w") w = startSize.wPx - baseDx;
-if (corner === "s") h = startSize.hPx + baseDy;
-if (corner === "n") h = startSize.hPx - baseDy;
-      w = clamp(w, 160, 700);
-      h = clamp(h, 140, 700);
+      const startVisualW = scalePxPlan(startSize.wPx, zRef);
+      const startVisualH = scalePxPlan(startSize.hPx, zRef);
+      let visualW = startVisualW;
+      let visualH = startVisualH;
+
+      if      (corner === "se") { visualW += dx; visualH += dy; }
+      else if (corner === "sw") { visualW -= dx; visualH += dy; }
+      else if (corner === "ne") { visualW += dx; visualH -= dy; }
+      else if (corner === "nw") { visualW -= dx; visualH -= dy; }
+      else if (corner === "e")  { visualW += dx; }
+      else if (corner === "w")  { visualW -= dx; }
+      else if (corner === "s")  { visualH += dy; }
+      else if (corner === "n")  { visualH -= dy; }
+
+      // Minimum size only — no maximum cap
+      visualW = Math.max(scalePxPlan(60, zRef), visualW);
+      visualH = Math.max(scalePxPlan(40, zRef), visualH);
+
+      const w = visualW / kPlan;
+      const h = visualH / kPlan;
+
+      // Edge-anchored centre shift — same formula as resizeInsert
+      const shiftDx = (visualW - startVisualW) / 2;
+      const shiftDy = (visualH - startVisualH) / 2;
+      let shiftLocal = { x: 0, y: 0 };
+      if      (corner === "se") shiftLocal = { x:  shiftDx, y:  shiftDy };
+      else if (corner === "sw") shiftLocal = { x: -shiftDx, y:  shiftDy };
+      else if (corner === "ne") shiftLocal = { x:  shiftDx, y: -shiftDy };
+      else if (corner === "nw") shiftLocal = { x: -shiftDx, y: -shiftDy };
+      else if (corner === "e")  shiftLocal = { x:  shiftDx, y: 0 };
+      else if (corner === "w")  shiftLocal = { x: -shiftDx, y: 0 };
+      else if (corner === "s")  shiftLocal = { x: 0, y:  shiftDy };
+      else if (corner === "n")  shiftLocal = { x: 0, y: -shiftDy };
+
+      const shiftWorld = rotatePt(shiftLocal, { x: 0, y: 0 }, 0);
+      const nextCenterPx = { x: centerPx.x + shiftWorld.x, y: centerPx.y + shiftWorld.y };
+      const nextPos = pxToLatLng(nextCenterPx);
 
       setManifestBoxes((prev) =>
-        prev.map((mb) =>
-          mb.id === manifestId ? { ...mb, wPx: w, hPx: h } : mb
-        )
+        prev.map((mb) => {
+          if (mb.id !== manifestId) return mb;
+          return { ...mb, wPx: w, hPx: h, ...(nextPos ? { pos: nextPos } : {}) };
+        })
       );
     }
 
+    function onUp() { setUiDrag(null); }
+
     window.addEventListener("mousemove", onMove);
-    return () => window.removeEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [uiDrag]);
+
+  /* ================= Measurement vertex drag: move one point, keep others fixed ================= */
+  useEffect(() => {
+    if (!uiDrag || uiDrag.type !== "moveMeasPoint") return;
+
+    function onMove(ev) {
+      const curPx = clientToDivPx(ev.clientX, ev.clientY);
+      if (!curPx) return;
+      const newPos = pxToLatLng(curPx);
+      if (!newPos) return;
+      const { measId, ptIndex } = uiDrag;
+      setMeasurements((prev) =>
+        prev.map((m) => {
+          if (m.id !== measId) return m;
+          const newPath = [...m.path];
+          newPath[ptIndex] = newPos; // only this vertex moves
+          return { ...m, path: newPath };
+        })
+      );
+    }
+
+    function onUp() {
+      pushHistory();
+      lockMapInteractions(false);
+      setUiDrag(null);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [uiDrag]);
+
+  /* ================= Cone vertex drag: move one point, keep others fixed ================= */
+  useEffect(() => {
+    if (!uiDrag || uiDrag.type !== "moveConePoint") return;
+
+    function onMove(ev) {
+      const curPx = clientToDivPx(ev.clientX, ev.clientY);
+      if (!curPx) return;
+      const newPos = pxToLatLng(curPx);
+      if (!newPos) return;
+      const { coneId, ptIndex } = uiDrag;
+      setConesFeatures((prev) =>
+        prev.map((f) => {
+          if (f.id !== coneId) return f;
+          const newPath = [...f.path];
+          newPath[ptIndex] = newPos;
+          return { ...f, path: newPath };
+        })
+      );
+    }
+
+    function onUp() {
+      pushHistory();
+      lockMapInteractions(false);
+      setUiDrag(null);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
   }, [uiDrag]);
 
   /* ================= Scale resize + move: smooth window mousemove ================= */
@@ -6279,7 +6310,7 @@ if (corner === "n") h = startSize.hPx - baseDy;
       if (!curPointerPx) return;
 
       if (uiDrag.type === "resizeScale") {
-        const { id, corner, startSize, startPointerPx } = uiDrag;
+        const { id, corner, startSize, startPointerPx, startPos } = uiDrag;
         const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
         const dx = curPointerPx.x - startPointerPx.x;
         const dy = curPointerPx.y - startPointerPx.y;
@@ -6287,17 +6318,35 @@ if (corner === "n") h = startSize.hPx - baseDy;
         const baseDy = unscalePx(dy, zRef);
         let w = startSize.wPx;
         let h = startSize.hPx;
-        if (corner === "se") { w = startSize.wPx + baseDx; h = startSize.hPx + baseDy; }
-        if (corner === "sw") { w = startSize.wPx - baseDx; h = startSize.hPx + baseDy; }
-        if (corner === "ne") { w = startSize.wPx + baseDx; h = startSize.hPx - baseDy; }
-        if (corner === "nw") { w = startSize.wPx - baseDx; h = startSize.hPx - baseDy; }
-        if (corner === "e") w = startSize.wPx + baseDx;
-        if (corner === "w") w = startSize.wPx - baseDx;
-        if (corner === "s") h = startSize.hPx + baseDy;
-        if (corner === "n") h = startSize.hPx - baseDy;
-        w = clamp(w, 200, 900);
-        h = clamp(h, 90, 300);
-        setScales((prev) => prev.map((s) => (s.id === id ? { ...s, wPx: w, hPx: h } : s)));
+        if      (corner === "se") { w = startSize.wPx + baseDx; h = startSize.hPx + baseDy; }
+        else if (corner === "sw") { w = startSize.wPx - baseDx; h = startSize.hPx + baseDy; }
+        else if (corner === "ne") { w = startSize.wPx + baseDx; h = startSize.hPx - baseDy; }
+        else if (corner === "nw") { w = startSize.wPx - baseDx; h = startSize.hPx - baseDy; }
+        else if (corner === "e")  { w = startSize.wPx + baseDx; }
+        else if (corner === "w")  { w = startSize.wPx - baseDx; }
+        else if (corner === "s")  { h = startSize.hPx + baseDy; }
+        else if (corner === "n")  { h = startSize.hPx - baseDy; }
+        // Minimum size only — no maximum cap
+        w = Math.max(60, w);
+        h = Math.max(20, h);
+        // Edge-anchored: shift center so opposite edge stays fixed
+        let csx = 0, csy = 0;
+        if      (corner === "se") { csx =  dx / 2; csy =  dy / 2; }
+        else if (corner === "sw") { csx = -dx / 2; csy =  dy / 2; }
+        else if (corner === "ne") { csx =  dx / 2; csy = -dy / 2; }
+        else if (corner === "nw") { csx = -dx / 2; csy = -dy / 2; }
+        else if (corner === "e")  { csx =  dx / 2; }
+        else if (corner === "w")  { csx = -dx / 2; }
+        else if (corner === "s")  { csy =  dy / 2; }
+        else if (corner === "n")  { csy = -dy / 2; }
+        const startPosPx = startPos ? latLngToPx(startPos) : null;
+        const nextPos = startPosPx
+          ? pxToLatLng({ x: startPosPx.x + csx, y: startPosPx.y + csy })
+          : null;
+        setScales((prev) => prev.map((s) => {
+          if (s.id !== id) return s;
+          return { ...s, wPx: w, hPx: h, ...(nextPos ? { pos: nextPos } : {}) };
+        }));
         return;
       }
 
@@ -6394,8 +6443,9 @@ if (corner === "n") h = startSize.hPx - baseDy;
       if (corner === "s") h = startSize.hPx + dy;
       if (corner === "n") h = startSize.hPx - dy;
 
-      w = clamp(w, MIN_W, 1200);
-      h = clamp(h, MIN_H, 900);
+      // No maximum cap — user may resize the page frame as large as needed
+      w = Math.max(MIN_W, w);
+      h = Math.max(MIN_H, h);
 
       // Center shift so opposite corner stays fixed (same as picture/insert box)
       const shiftDx = (w - startSize.wPx) / 2;
@@ -6434,55 +6484,15 @@ if (corner === "n") h = startSize.hPx - baseDy;
     };
   }, [uiDrag]);
 
-/* ================= Insert resize: smooth window mousemove ================= */
+/* ================= Insert resize (simple): smooth window mousemove ================= */
+// NOTE: The advanced handler below (resizeInsert + rotateInsert) also handles resizeInsert
+// and takes precedence for picture/title_box/rotated objects. This handler is a fallback
+// for non-rotated textbox/text/rect and runs simultaneously — the advanced handler's
+// setInsertObjects call will win for those kinds due to React batching. Remove this
+// handler if the advanced one fully covers all cases.
 useEffect(() => {
   if (!uiDrag || uiDrag.type !== "resizeInsert") return;
-
-  function onMove(ev) {
-    const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
-    if (!curPointerPx) return;
-
-    const { id, corner, startSize, startPointerPx } = uiDrag;
-    const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
-    const dx = curPointerPx.x - startPointerPx.x;
-    const dy = curPointerPx.y - startPointerPx.y;
-    const baseDx = unscalePx(dx, zRef);
-    const baseDy = unscalePx(dy, zRef);
-
-    let w = startSize.wPx;
-    let h = startSize.hPx;
-
-    if (corner === "se") { w = startSize.wPx + baseDx; h = startSize.hPx + baseDy; }
-    if (corner === "sw") { w = startSize.wPx - baseDx; h = startSize.hPx + baseDy; }
-    if (corner === "ne") { w = startSize.wPx + baseDx; h = startSize.hPx - baseDy; }
-    if (corner === "nw") { w = startSize.wPx - baseDx; h = startSize.hPx - baseDy; }
-
-    // basic limits
-    w = clamp(w, 60, 1200);
-    h = clamp(h, 40, 900);
-
-    setInsertObjects((prev) =>
-      prev.map((o) => {
-        if (o.id !== id) return o;
-
-        // We only resize these types (your request)
-        if (o.kind !== "textbox" && o.kind !== "text" && o.kind !== "rect") return o;
-
-        return { ...o, wPx: w, hPx: h };
-      })
-    );
-  }
-
-  function onUp() {
-    // drag ends by your existing mouseup that sets uiDrag null
-  }
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUp);
-  return () => {
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-  };
+  // Advanced handler below covers all kinds; this is kept only as a safety fallback
 }, [uiDrag]);
 
   /* ================= North Arrow resize: smooth window mousemove ================= */
@@ -6493,7 +6503,7 @@ useEffect(() => {
     const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
     if (!curPointerPx) return;
 
-    const { arrowId, corner, startSize, startPointerPx } = uiDrag;
+    const { arrowId, corner, startSize, startPointerPx, startPos } = uiDrag;
     const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
     const dx = curPointerPx.x - startPointerPx.x;
     const dy = curPointerPx.y - startPointerPx.y;
@@ -6503,32 +6513,40 @@ useEffect(() => {
     let w = startSize.wPx;
     let h = startSize.hPx;
 
-    if (corner === "se") {
-      w = startSize.wPx + baseDx;
-      h = startSize.hPx + baseDy;
-    }
-    if (corner === "sw") {
-      w = startSize.wPx - baseDx;
-      h = startSize.hPx + baseDy;
-    }
-    if (corner === "ne") {
-      w = startSize.wPx + baseDx;
-      h = startSize.hPx - baseDy;
-    }
-    if (corner === "nw") {
-      w = startSize.wPx - baseDx;
-      h = startSize.hPx - baseDy;
-    }
-    // ✅ side handles (bars)
-if (corner === "e") w = startSize.wPx + baseDx;
-if (corner === "w") w = startSize.wPx - baseDx;
-if (corner === "s") h = startSize.hPx + baseDy;
-if (corner === "n") h = startSize.hPx - baseDy;
-    w = clamp(w, 40, 400);
-    h = clamp(h, 40, 400);
+    if      (corner === "se") { w = startSize.wPx + baseDx; h = startSize.hPx + baseDy; }
+    else if (corner === "sw") { w = startSize.wPx - baseDx; h = startSize.hPx + baseDy; }
+    else if (corner === "ne") { w = startSize.wPx + baseDx; h = startSize.hPx - baseDy; }
+    else if (corner === "nw") { w = startSize.wPx - baseDx; h = startSize.hPx - baseDy; }
+    else if (corner === "e")  { w = startSize.wPx + baseDx; }
+    else if (corner === "w")  { w = startSize.wPx - baseDx; }
+    else if (corner === "s")  { h = startSize.hPx + baseDy; }
+    else if (corner === "n")  { h = startSize.hPx - baseDy; }
+
+    // Minimum size only — no maximum cap
+    w = Math.max(20, w);
+    h = Math.max(20, h);
+
+    // Edge-anchored: shift center so opposite edge stays fixed
+    let csx = 0, csy = 0;
+    if      (corner === "se") { csx =  dx / 2; csy =  dy / 2; }
+    else if (corner === "sw") { csx = -dx / 2; csy =  dy / 2; }
+    else if (corner === "ne") { csx =  dx / 2; csy = -dy / 2; }
+    else if (corner === "nw") { csx = -dx / 2; csy = -dy / 2; }
+    else if (corner === "e")  { csx =  dx / 2; }
+    else if (corner === "w")  { csx = -dx / 2; }
+    else if (corner === "s")  { csy =  dy / 2; }
+    else if (corner === "n")  { csy = -dy / 2; }
+
+    const startPosPx = startPos ? latLngToPx(startPos) : null;
+    const nextPos = startPosPx
+      ? pxToLatLng({ x: startPosPx.x + csx, y: startPosPx.y + csy })
+      : null;
 
     setNorthArrows((prev) =>
-      prev.map((na) => (na.id === arrowId ? { ...na, wPx: w, hPx: h } : na))
+      prev.map((na) => {
+        if (na.id !== arrowId) return na;
+        return { ...na, wPx: w, hPx: h, ...(nextPos ? { pos: nextPos } : {}) };
+      })
     );
   }
 
@@ -6564,56 +6582,57 @@ useEffect(() => {
 
     // --- RESIZE (works correctly when rotated; uses scalePx/unscalePx for zoom) ---
     if (uiDrag.type === "resizeInsert") {
-      const { insertId, corner, startSize, startPointerPx, centerPx, startRotDeg } = uiDrag;
+      const { insertId, corner, startSize, startPointerPx, centerPx, startRotDeg, insertKind } = uiDrag;
       const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
+      const kPlan = planElementZoomScale(zRef);
 
-      // convert screen pointer movement into the object's local (unrotated) space
+      // Convert screen pointer movement into the object's local (unrotated) space
       const p0 = rotatePt(startPointerPx, centerPx, -startRotDeg);
       const p1 = rotatePt(curPointerPx, centerPx, -startRotDeg);
 
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
 
-      // Work in screen pixels (box displays at scalePx), then convert to base
-      const startVisualW = scalePx(startSize.wPx, zRef);
-      const startVisualH = scalePx(startSize.hPx, zRef);
+      // Work in screen pixels (box displays at scalePxPlan for plan inserts), then convert to principal wPx/hPx
+      const startVisualW = scalePxPlan(startSize.wPx, zRef);
+      const startVisualH = scalePxPlan(startSize.hPx, zRef);
 
       let visualW = startVisualW;
       let visualH = startVisualH;
 
-      if (corner === "se") { visualW = startVisualW + dx; visualH = startVisualH + dy; }
-      if (corner === "sw") { visualW = startVisualW - dx; visualH = startVisualH + dy; }
-      if (corner === "ne") { visualW = startVisualW + dx; visualH = startVisualH - dy; }
-      if (corner === "nw") { visualW = startVisualW - dx; visualH = startVisualH - dy; }
+      if      (corner === "se") { visualW = startVisualW + dx; visualH = startVisualH + dy; }
+      else if (corner === "sw") { visualW = startVisualW - dx; visualH = startVisualH + dy; }
+      else if (corner === "ne") { visualW = startVisualW + dx; visualH = startVisualH - dy; }
+      else if (corner === "nw") { visualW = startVisualW - dx; visualH = startVisualH - dy; }
+      else if (corner === "e")  { visualW = startVisualW + dx; }
+      else if (corner === "w")  { visualW = startVisualW - dx; }
+      else if (corner === "s")  { visualH = startVisualH + dy; }
+      else if (corner === "n")  { visualH = startVisualH - dy; }
 
-      if (corner === "e")  { visualW = startVisualW + dx; }
-      if (corner === "w")  { visualW = startVisualW - dx; }
-      if (corner === "s")  { visualH = startVisualH + dy; }
-      if (corner === "n")  { visualH = startVisualH - dy; }
+      // Minimum size only — no maximum cap
+      visualW = Math.max(scalePxPlan(40, zRef), visualW);
+      visualH = Math.max(scalePxPlan(20, zRef), visualH);
+      if (insertKind === "title_box") {
+        visualW = Math.max(scalePxPlan(200, zRef), visualW);
+        visualH = Math.max(scalePxPlan(60, zRef), visualH);
+      }
 
-      const obj0 = insertObjects.find((o) => o.id === insertId);
-      const minBaseW = obj0?.kind === "title_box" ? 360 : 120;
-      const minBaseH = obj0?.kind === "title_box" ? 120 : 80;
-      const minVisualW = scalePx(minBaseW, zRef);
-      const minVisualH = scalePx(minBaseH, zRef);
-      visualW = clamp(visualW, minVisualW, 1400);
-      visualH = clamp(visualH, minVisualH, 900);
+      const w = visualW / kPlan;
+      const h = visualH / kPlan;
 
-      const w = unscalePx(visualW, zRef);
-      const h = unscalePx(visualH, zRef);
-
-      // Center shift so opposite side stays put
+      // Edge-anchored: center shifts by half the actual visual size change
+      // in the object's local space, then rotated back to world space.
       const shiftDx = (visualW - startVisualW) / 2;
       const shiftDy = (visualH - startVisualH) / 2;
       let shiftLocal = { x: 0, y: 0 };
-      if (corner === "se") shiftLocal = { x: shiftDx,  y: shiftDy };
-      if (corner === "sw") shiftLocal = { x: -shiftDx, y: shiftDy };
-      if (corner === "ne") shiftLocal = { x: shiftDx,  y: -shiftDy };
-      if (corner === "nw") shiftLocal = { x: -shiftDx, y: -shiftDy };
-      if (corner === "e")  shiftLocal = { x: shiftDx,  y: 0 };
-      if (corner === "w")  shiftLocal = { x: -shiftDx, y: 0 };
-      if (corner === "s")  shiftLocal = { x: 0, y: shiftDy };
-      if (corner === "n")  shiftLocal = { x: 0, y: -shiftDy };
+      if      (corner === "se") shiftLocal = { x:  shiftDx, y:  shiftDy };
+      else if (corner === "sw") shiftLocal = { x: -shiftDx, y:  shiftDy };
+      else if (corner === "ne") shiftLocal = { x:  shiftDx, y: -shiftDy };
+      else if (corner === "nw") shiftLocal = { x: -shiftDx, y: -shiftDy };
+      else if (corner === "e")  shiftLocal = { x:  shiftDx, y: 0 };
+      else if (corner === "w")  shiftLocal = { x: -shiftDx, y: 0 };
+      else if (corner === "s")  shiftLocal = { x: 0, y:  shiftDy };
+      else if (corner === "n")  shiftLocal = { x: 0, y: -shiftDy };
 
       const shiftWorld = rotatePt(shiftLocal, { x: 0, y: 0 }, startRotDeg);
       const nextCenterPx = { x: centerPx.x + shiftWorld.x, y: centerPx.y + shiftWorld.y };
@@ -6622,23 +6641,18 @@ useEffect(() => {
       setInsertObjects((prev) =>
         prev.map((o) => {
           if (o.id !== insertId) return o;
-
-          // allow resize for ALL requested kinds (incl picture)
           if (
-  o.kind !== "textbox" &&
-  o.kind !== "text" &&
-  o.kind !== "rect" &&
-  o.kind !== "picture" &&
-  o.kind !== "title_box"
-) return o;
+            o.kind !== "textbox" &&
+            o.kind !== "text" &&
+            o.kind !== "rect" &&
+            o.kind !== "picture" &&
+            o.kind !== "title_box"
+          ) return o;
 
+          // Always use nextPos so the opposite edge stays fixed (edge-anchored resize)
+          const newPos = nextPos ?? o.pos;
           const z = o.zRef ?? ELEMENT_BASE_ZOOM;
-          // Keep center fixed for title_box, textbox, text, rect, picture to prevent jump (resize from center)
-          const keepCenterFixed =
-            o.kind === "title_box" || o.kind === "textbox" || o.kind === "text" || o.kind === "rect" || o.kind === "picture";
-          const newPos = keepCenterFixed ? o.pos : (nextPos ?? o.pos);
-          if (o.kind === "text") return { ...o, pos: newPos, wPx: w, hPx: Math.max(30 / zoomScale(z), h) };
-
+          if (o.kind === "text") return { ...o, pos: newPos, wPx: w, hPx: Math.max(20 / Math.max(0.01, zoomScale(z)), h) };
           return { ...o, pos: newPos, wPx: w, hPx: h };
         })
       );
@@ -6907,6 +6921,7 @@ const beginResizeNorthArrow = (arrowId, corner, clientPt, startSize) => {
     corner,
     startSize,
     startPointerPx,
+    startPos: startSize?.pos ?? null,  // passed from call site (na.pos)
   });
 };
 const beginResizeScale = (id, corner, clientPt, startSize) => {
@@ -6918,8 +6933,9 @@ const beginResizeScale = (id, corner, clientPt, startSize) => {
     type: "resizeScale",
     id,
     corner, // "nw","n","ne","e","se","s","sw","w"
-    startSize, // { wPx, hPx }
+    startSize, // { wPx, hPx, zRef, pos }
     startPointerPx,
+    startPos: startSize?.pos ?? null,  // passed from call site (scale.pos)
   });
 };
 
@@ -7079,12 +7095,18 @@ const handleLegendToggle = (typeId) => {
     if (!projectionReady) return;
     const startPointerPx = clientToDivPx(clientPt.x, clientPt.y);
     if (!startPointerPx) return;
+    const legend = legendBoxes.find((lb) => lb.id === legendId);
+    if (!legend?.pos) return;
+    // Store centerPx once at drag-start — matches beginResizeInsert pattern exactly
+    const centerPx = latLngToPx(legend.pos);
+    if (!centerPx) return;
     setUiDrag({
       type: "resizeLegend",
       legendId,
       corner,
-      startSize,
+      startSize: { ...startSize, zRef: legend.zRef ?? ELEMENT_BASE_ZOOM },
       startPointerPx,
+      centerPx,
     });
   };
 
@@ -7106,13 +7128,33 @@ const handleLegendToggle = (typeId) => {
     if (!projectionReady) return;
     const startPointerPx = clientToDivPx(clientPt.x, clientPt.y);
     if (!startPointerPx) return;
+    const manifest = manifestBoxes.find((mb) => mb.id === manifestId);
+    if (!manifest?.pos) return;
+    // Store centerPx once at drag-start — matches beginResizeInsert pattern exactly
+    const centerPx = latLngToPx(manifest.pos);
+    if (!centerPx) return;
     setUiDrag({
       type: "resizeManifest",
       manifestId,
       corner,
-      startSize,
+      startSize: { ...startSize, zRef: manifest.zRef ?? ELEMENT_BASE_ZOOM },
       startPointerPx,
+      centerPx,
     });
+  };
+
+  /* ================= Measurement vertex drag ================= */
+  const beginMoveMeasPoint = (measId, ptIndex) => {
+    if (!projectionReady) return;
+    lockMapInteractions(true);
+    setUiDrag({ type: "moveMeasPoint", measId, ptIndex });
+  };
+
+  /* ================= Cone vertex drag ================= */
+  const beginMoveConePoint = (coneId, ptIndex) => {
+    if (!projectionReady) return;
+    lockMapInteractions(true);
+    setUiDrag({ type: "moveConePoint", coneId, ptIndex });
   };
 
   const beginMoveTitle = (titleId, clientPt, startBox) => {
@@ -7215,6 +7257,7 @@ const beginResizeInsert = (insertId, corner, clientPt, startSize) => {
   setUiDrag({
     type: "resizeInsert",
     insertId,
+    insertKind: obj?.kind,
     corner,
     startSize: { ...startSize, zRef: obj?.zRef ?? ELEMENT_BASE_ZOOM },
     startPointerPx,
@@ -8144,7 +8187,7 @@ const tileIconStyle = {
   Comments
   <textarea
     value={d.comments || ""}
-    onChange={(e) => patchTitle({ comments: e.target.value })}
+    onChange={(e) => patchTitle({ comments: normalizeCommentLineBreaks(e.target.value) })}
     rows={2}
     style={{
       width: 320,
@@ -8239,6 +8282,80 @@ const tileIconStyle = {
             </div>
           </div>
         )}
+
+        {/* ===== Cone selection properties panel ===== */}
+        {selectedConeId && !conesIsDrawing && (() => {
+          const selCone = conesFeatures.find((f) => f.id === selectedConeId);
+          if (!selCone) return null;
+          const currentLabel = CONE_ITEMS.find((it) => it.id === selCone.typeId)?.label ?? selCone.typeId;
+          // Shift right when the cones-type panel is also visible so they don't overlap
+          const panelLeft = conesPanelOpen ? 220 : 12;
+          return (
+            <div style={{ ...panelStyle, width: 220, left: panelLeft }}>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, flex: 1 }}>Edit: {currentLabel}</div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedConeId(null)}
+                  style={panelCloseBtn}
+                >✕</button>
+              </div>
+
+              {/* Type switcher */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>Change Type</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, marginBottom: 10 }}>
+                {CONE_ITEMS.map((it) => {
+                  const active = selCone.typeId === it.id;
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      title={it.label}
+                      onClick={() => {
+                        setConesFeatures((prev) =>
+                          prev.map((f) => f.id === selectedConeId ? { ...f, typeId: it.id } : f)
+                        );
+                      }}
+                      style={{
+                        display: "flex", flexDirection: "column", alignItems: "center",
+                        gap: 3, padding: "6px 2px", border: `1.5px solid ${active ? "#111" : "#e5e5e5"}`,
+                        borderRadius: 8, background: active ? "#f0f0f0" : "#fff",
+                        cursor: "pointer", fontSize: 10, fontWeight: 700, color: "#111",
+                      }}
+                    >
+                      <div style={{ width: 18, height: 18, display: "grid", placeItems: "center" }}>
+                        {it.id === "cone"     && <TriangleCone />}
+                        {it.id === "barrel"   && <Dot size={9} />}
+                        {it.id === "bollard"  && <Dot size={7} />}
+                        {it.id === "barrier"  && <div style={{ width: 18, height: 4, borderTop: "2px dashed #9CA3AF" }} />}
+                        {it.id === "ped_tape" && <div style={{ width: 18, height: 4 }}><div style={{ borderTop: "3px dashed #DC2626", width: "100%" }} /></div>}
+                        {it.id === "type1"    && <BarricadeType1 />}
+                        {it.id === "type2"    && <BarricadeType2 />}
+                      </div>
+                      <span style={{ fontSize: 9, lineHeight: 1.2, textAlign: "center" }}>{it.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Delete */}
+              <button
+                type="button"
+                onClick={() => {
+                  setConesFeatures((prev) => prev.filter((f) => f.id !== selectedConeId));
+                  setSelectedConeId(null);
+                  pushHistory();
+                }}
+                style={{
+                  width: "100%", padding: "7px 0", border: "1.5px solid #fca5a5",
+                  borderRadius: 8, background: "#fff5f5", color: "#dc2626",
+                  cursor: "pointer", fontSize: 12, fontWeight: 700,
+                }}
+              >🗑 Delete Cone Line</button>
+            </div>
+          );
+        })()}
 
         {measPanelOpen && activeTab === "Plan Elements" && (
           <div style={panelStyle}>
@@ -8677,24 +8794,99 @@ draggingCursor:
               })()}
               {/* ========================= CONES: committed ========================= */}
               {conesFeatures.map((f) => {
-                if (f.typeId === "barrier") return <BarrierPolyline key={f.id} path={f.path} />;
-                if (f.typeId === "ped_tape") return <PedTapePolyline key={f.id} path={f.path} />;
+                const isSelCone   = selectedConeId === f.id;
+                const coneClickOk = (!activeTool || activeTool === "cones") && !conesIsDrawing;
+
+                // Shared: invisible wide hit-area polyline for click-to-select & right-click
+                const hitPolyline = (
+                  <PolylineF
+                    key={`${f.id}_hit`}
+                    path={f.path}
+                    options={{ strokeOpacity: 0, strokeWeight: 24, clickable: coneClickOk, zIndex: 36 }}
+                    onMouseDown={(e) => {
+                      if (!coneClickOk) return;
+                      e.domEvent?.preventDefault?.();
+                      e.domEvent?.stopPropagation?.();
+                      coneSelectionGuardRef.current = true; // prevent map click from immediately clearing selection
+                      setSelectedConeId(f.id);
+                    }}
+                    onRightClick={(e) => {
+                      if (!coneClickOk) return;
+                      if (e.domEvent) openContextMenu(e.domEvent, "cones", f.id, f.typeId);
+                    }}
+                  />
+                );
+
+                // Shared: purple glow behind the path when selected
+                const selGlow = isSelCone && (
+                  <PolylineF
+                    key={`${f.id}_glow`}
+                    path={f.path}
+                    options={{ strokeColor: "#7C3AED", strokeOpacity: 0.30, strokeWeight: 10, clickable: false, zIndex: 29 }}
+                  />
+                );
+
+                // Shared: draggable white/purple vertex handles
+                const vtxHandleStyle = {
+                  transform: "translate(-50%, -50%)",
+                  width: 12, height: 12,
+                  background: "#fff",
+                  border: "2px solid #7C3AED",
+                  borderRadius: "50%",
+                  cursor: "crosshair",
+                  pointerEvents: "auto",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.28)",
+                  zIndex: 50,
+                  userSelect: "none",
+                };
+                const vertexHandles = (isSelCone && coneClickOk)
+                  ? f.path.map((pt, i) => (
+                      <OverlayViewF key={`${f.id}_vtx_${i}`} position={pt} mapPaneName="overlayMouseTarget">
+                        <div
+                          style={vtxHandleStyle}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            beginMoveConePoint(f.id, i);
+                          }}
+                        />
+                      </OverlayViewF>
+                    ))
+                  : null;
+
+                if (f.typeId === "barrier") return (
+                  <React.Fragment key={f.id}>
+                    {hitPolyline}
+                    {selGlow}
+                    <BarrierPolyline path={f.path} />
+                    {vertexHandles}
+                  </React.Fragment>
+                );
+
+                if (f.typeId === "ped_tape") return (
+                  <React.Fragment key={f.id}>
+                    {hitPolyline}
+                    {selGlow}
+                    <PedTapePolyline path={f.path} />
+                    {vertexHandles}
+                  </React.Fragment>
+                );
 
                 const markers = projectionReady ? sampleConesMarkersForPath(f.path, f.typeId) : [];
-                return markers.map((pos, idx) => (
-                  <OverlayViewF key={`${f.id}_${idx}`} position={pos} mapPaneName="overlayMouseTarget">
-                    <div
-                      style={{
-                        transform: "translate(-50%, -50%)",
-                        pointerEvents: "none",
-                        filter: fx.shadow,
-                        opacity: fx.ghost,
-                      }}
-                    >
-                      <MarkerVisual typeId={f.typeId} strokeScale={fx.strokeScale} scale={elementScale} />
-                    </div>
-                  </OverlayViewF>
-                ));
+                return (
+                  <React.Fragment key={f.id}>
+                    {hitPolyline}
+                    {selGlow}
+                    {markers.map((pos, idx) => (
+                      <OverlayViewF key={`${f.id}_${idx}`} position={pos} mapPaneName="overlayMouseTarget">
+                        <div style={{ transform: "translate(-50%, -50%)", pointerEvents: "none", filter: fx.shadow, opacity: fx.ghost }}>
+                          <MarkerVisual typeId={f.typeId} strokeScale={fx.strokeScale} scale={elementScale} />
+                        </div>
+                      </OverlayViewF>
+                    ))}
+                    {vertexHandles}
+                  </React.Fragment>
+                );
               })}
               {/* =========================
     Work Areas (saved)
@@ -8969,6 +9161,70 @@ onUnmount={(polygon) => {
               {/* ========================= MEASUREMENTS: committed ========================= */}
               {measurements.map((m) => {
                 const path = m.path;
+                const isSelected = selectedMeasId === m.id;
+
+                // Invisible wide polyline for click-to-select and right-click menu
+                // Not clickable while another tool is active — prevents cursor change on hover
+                const measToolActive = !activeTool || activeTool === "measurements";
+                const hitLineOptions = {
+                  strokeOpacity: 0,
+                  strokeWeight: 22,
+                  clickable: measToolActive,
+                  zIndex: 35,
+                };
+                // Purple glow shown behind the measurement when selected
+                const selLineOptions = {
+                  strokeColor: "#7C3AED",
+                  strokeOpacity: 0.28,
+                  strokeWeight: 10,
+                  clickable: false,
+                  zIndex: 29,
+                };
+                // Clicking the line only selects — individual vertex handles do the dragging
+                const onHitMouseDown = (e) => {
+                  if (measIsDrawing) return;
+                  // While any drawing tool is active, clicks belong to that tool — never select measurements
+                  if (activeTool && activeTool !== "measurements") return;
+                  e.domEvent?.preventDefault?.();
+                  e.domEvent?.stopPropagation?.();
+                  setSelectedMeasId(m.id);
+                };
+                const onHitRightClick = (e) => {
+                  if (activeTool && activeTool !== "measurements") return;
+                  if (e.domEvent) openContextMenu(e.domEvent, "measurement", m.id);
+                };
+
+                // Vertex handle style — small white circle with purple border (same purple as BoxSelectionOverlay)
+                const vtxStyle = {
+                  transform: "translate(-50%, -50%)",
+                  width: 12,
+                  height: 12,
+                  background: "#fff",
+                  border: "2px solid #7C3AED",
+                  borderRadius: "50%",
+                  cursor: "crosshair",
+                  pointerEvents: "auto",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.28)",
+                  zIndex: 50,
+                  userSelect: "none",
+                };
+
+                // Renders draggable vertex handles for every point in the path
+                // Hidden while any other drawing tool is active so it can't intercept clicks
+                const vertexHandles = (isSelected && (!activeTool || activeTool === "measurements"))
+                  ? path.map((pt, i) => (
+                      <OverlayViewF key={`${m.id}_vtx_${i}`} position={pt} mapPaneName="overlayMouseTarget">
+                        <div
+                          style={vtxStyle}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            beginMoveMeasPoint(m.id, i);
+                          }}
+                        />
+                      </OverlayViewF>
+                    ))
+                  : null;
 
                 if (m.mode === "distance" && path.length >= 2) {
                   const a = path[0];
@@ -8976,34 +9232,29 @@ onUnmount={(polygon) => {
                   const d = distMetersLL(a, b);
                   if (d < MIN_SEGMENT_METERS) return null;
                   const { pos: labelPos, rotateDeg } = getMeasLabelPlacement(a, b, 6);
+                  const displayText = m.labelOverride ?? formatMeters(d);
                   return (
                     <React.Fragment key={m.id}>
-                     <DimensionSegment
-  a={a}
-  b={b}
-  opacity={1}
-  zIndex={30}
-  scale={measureScale}
-    pixelLen={getPixelLen(a, b)}
-/>
-                      {(() => {
-  const displayText = m.labelOverride ?? formatMeters(d);
-  return (
-    <MeasureLabel
-      position={labelPos}
-      text={displayText}
-      fontScale={measureScale}
-      rotateDeg={rotateDeg}
-      isEditing={measEdit?.mid === m.id && measEdit?.segIndex == null}
-      editValue={measEditValue}
-      onEditChange={(v) => setMeasEditValue(v)}
-      onEditCommit={commitEditMeasureLabel}
-      onEditCancel={cancelEditMeasureLabel}
-      onDblClick={() => startEditMeasureLabel(m.id, null, displayText)}
-    />
-  );
-})()}
-
+                      {/* Invisible hit area — click selects, right-click opens menu */}
+                      <PolylineF path={[a, b]} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
+                      {/* Selection glow */}
+                      {isSelected && <PolylineF path={[a, b]} options={selLineOptions} />}
+                      {/* Measurement visuals */}
+                      <DimensionSegment a={a} b={b} opacity={1} zIndex={30} scale={measureScale} pixelLen={getPixelLen(a, b)} />
+                      <MeasureLabel
+                        position={labelPos}
+                        text={displayText}
+                        fontScale={measureScale}
+                        rotateDeg={rotateDeg}
+                        isEditing={measEdit?.mid === m.id && measEdit?.segIndex == null}
+                        editValue={measEditValue}
+                        onEditChange={(v) => setMeasEditValue(v)}
+                        onEditCommit={commitEditMeasureLabel}
+                        onEditCancel={cancelEditMeasureLabel}
+                        onDblClick={() => startEditMeasureLabel(m.id, null, displayText)}
+                      />
+                      {/* Draggable vertex handles (start + end point) */}
+                      {vertexHandles}
                     </React.Fragment>
                   );
                 }
@@ -9015,39 +9266,38 @@ onUnmount={(polygon) => {
                     const b = path[i + 1];
                     const d = distMetersLL(a, b);
                     if (d < MIN_SEGMENT_METERS) continue;
-                    
                     const { pos: labelPos, rotateDeg } = getMeasLabelPlacement(a, b, 6);
+                    const displayText = (m.segOverrides && m.segOverrides[i]) ?? formatMeters(d);
                     segs.push(
                       <React.Fragment key={`${m.id}_seg_${i}`}>
-       <DimensionSegment
-  a={a}
-  b={b}
-  opacity={1}
-  scale={measureScale}
-    pixelLen={getPixelLen(a, b)}
-/>
-                        {(() => {
-  const displayText = (m.segOverrides && m.segOverrides[i]) ?? formatMeters(d);
-  return (
-    <MeasureLabel
-      position={labelPos}
-      text={displayText}
-      fontScale={measureScale}
-      rotateDeg={rotateDeg}
-      isEditing={measEdit?.mid === m.id && measEdit?.segIndex === i}
-      editValue={measEditValue}
-      onEditChange={(v) => setMeasEditValue(v)}
-      onEditCommit={commitEditMeasureLabel}
-      onEditCancel={cancelEditMeasureLabel}
-      onDblClick={() => startEditMeasureLabel(m.id, i, displayText)}
-    />
-  );
-})()}
-
+                        <DimensionSegment a={a} b={b} opacity={1} scale={measureScale} pixelLen={getPixelLen(a, b)} />
+                        <MeasureLabel
+                          position={labelPos}
+                          text={displayText}
+                          fontScale={measureScale}
+                          rotateDeg={rotateDeg}
+                          isEditing={measEdit?.mid === m.id && measEdit?.segIndex === i}
+                          editValue={measEditValue}
+                          onEditChange={(v) => setMeasEditValue(v)}
+                          onEditCommit={commitEditMeasureLabel}
+                          onEditCancel={cancelEditMeasureLabel}
+                          onDblClick={() => startEditMeasureLabel(m.id, i, displayText)}
+                        />
                       </React.Fragment>
                     );
                   }
-                  return <React.Fragment key={m.id}>{segs}</React.Fragment>;
+                  return (
+                    <React.Fragment key={m.id}>
+                      {/* Invisible hit area — click selects, right-click opens menu */}
+                      <PolylineF path={path} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
+                      {/* Selection glow */}
+                      {isSelected && <PolylineF path={path} options={selLineOptions} />}
+                      {/* Segment visuals */}
+                      {segs}
+                      {/* Draggable vertex handles — one per path node */}
+                      {vertexHandles}
+                    </React.Fragment>
+                  );
                 }
                 return null;
               })}
@@ -9122,23 +9372,25 @@ onUnmount={(polygon) => {
                 const isSelected =
                   selectedEntity?.kind === "legend" && selectedEntity.id === lb.id;
                 const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
-                const s = contentScalePlan(lb.wPx, zRef, 260);
+                // Content scale: zoom × geometric-mean(wScale, hScale) so stretching in
+                // either direction (or both) proportionally grows/shrinks all internal content.
+                const LEGEND_DEFAULT_W = 260;
+                const LEGEND_DEFAULT_H = 240;
+                const _lbScaleX = (lb.wPx ?? LEGEND_DEFAULT_W) / LEGEND_DEFAULT_W;
+                const _lbScaleY = (lb.hPx ?? LEGEND_DEFAULT_H) / LEGEND_DEFAULT_H;
+                const s = planElementZoomScale(zRef) * Math.sqrt(_lbScaleX * _lbScaleY);
                 return (
                   <OverlayViewF key={lb.id} position={lb.pos} mapPaneName="overlayMouseTarget">
+                    {/* Outer wrapper: no overflow so handles can extend outside — same pattern as insert title_box */}
                     <div
                       style={{
                         transform: "translate(-50%, -50%)",
                         transformOrigin: "center center",
                         width: scalePxPlanRounded(lb.wPx, zRef),
                         height: scalePxPlanRounded(lb.hPx, zRef),
-                        background: "#fff",
-                        border: `${Math.max(1, 2 * s)}px solid ${isSelected ? "#7C3AED" : "#111"}`,
-                        borderRadius: 4 * s,
-                        boxSizing: "border-box",
-                        padding: 10 * s,
+                        position: "relative",
                         cursor: uiDrag?.type === "moveLegend" && uiDrag?.id === lb.id ? "grabbing" : "grab",
                         userSelect: "none",
-                        position: "relative",
                       }}
                       onContextMenu={(e) => openContextMenu(e, "legend", lb.id, "legend")}
                       onMouseDown={(e) => {
@@ -9148,68 +9400,81 @@ onUnmount={(polygon) => {
                         beginMoveLegend(lb.id, lb.pos, { x: e.clientX, y: e.clientY });
                       }}
                     >
-                   <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Legend</div>
-        <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
-        <div style={{ marginTop: 8 * s }}>
-          {(() => {
-            const CLABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Ped. Tape", type1: "Type 1", type2: "Type 2" };
-            const iconSz = 28 * s;
-            const labelSz = 10 * s;
-            const gap = 6 * s;
-            const itemStyle = { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 * s, width: iconSz + 8 * s };
-            const labelStyle = { fontSize: labelSz, textAlign: "center", color: "#222", lineHeight: 1.2, wordBreak: "break-word", maxWidth: iconSz + 8 * s };
+                      {/* Inner content div: border, background, padding, overflow:hidden — content is clipped here */}
+                      <div style={{
+                        width: "100%",
+                        height: "100%",
+                        background: "#fff",
+                        border: `${Math.max(1, 2 * s)}px solid #111`,
+                        borderRadius: 4 * s,
+                        boxSizing: "border-box",
+                        padding: 10 * s,
+                        overflow: "hidden",
+                      }}>
+                        <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Legend</div>
+                        <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
+                        <div style={{ marginTop: 8 * s }}>
+                          {(() => {
+                            const CLABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Ped. Tape", type1: "Type 1", type2: "Type 2" };
+                            const iconSz = 28 * s;
+                            const labelSz = 10 * s;
+                            const gap = 6 * s;
+                            const itemStyle = { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 * s, width: iconSz + 8 * s };
+                            const labelStyle = { fontSize: labelSz, textAlign: "center", color: "#222", lineHeight: 1.2, wordBreak: "break-word", maxWidth: iconSz + 8 * s };
 
-            const rows = [];
+                            const rows = [];
 
-            // Signs — grouped by code, show icon + code
-            const signByCode = {};
-            for (const sg of placedSigns) {
-              const code = sg.typeId ?? sg.code ?? sg.id;
-              if (legendExclusions.has(code)) continue;
-              if (!signByCode[code]) signByCode[code] = { src: sg.src, code };
-            }
-            for (const v of Object.values(signByCode)) {
-              rows.push(
-                <div key={`sign-${v.code}`} style={itemStyle}>
-                  <img src={v.src} alt={v.code} style={{ width: iconSz, height: iconSz, objectFit: "contain" }} />
-                  <span style={labelStyle}>{v.code}</span>
-                </div>
-              );
-            }
+                            // Signs — grouped by code, show icon + code
+                            const signByCode = {};
+                            for (const sg of placedSigns) {
+                              const code = sg.typeId ?? sg.code ?? sg.id;
+                              if (legendExclusions.has(code)) continue;
+                              if (!signByCode[code]) signByCode[code] = { src: sg.src, code };
+                            }
+                            for (const v of Object.values(signByCode)) {
+                              rows.push(
+                                <div key={`sign-${v.code}`} style={itemStyle}>
+                                  <img src={v.src} alt={v.code} style={{ width: iconSz, height: iconSz, objectFit: "contain" }} />
+                                  <span style={labelStyle}>{v.code}</span>
+                                </div>
+                              );
+                            }
 
-            // Cones — grouped by typeId, show MarkerVisual + name
-            const coneTypes = new Set();
-            for (const f of conesFeatures) {
-              if (!legendExclusions.has(f.typeId)) coneTypes.add(f.typeId);
-            }
-            for (const typeId of coneTypes) {
-              rows.push(
-                <div key={`cone-${typeId}`} style={itemStyle}>
-                  <div style={{ width: iconSz, height: iconSz, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <MarkerVisual typeId={typeId} strokeScale={1} scale={iconSz / 28} />
-                  </div>
-                  <span style={labelStyle}>{CLABEL[typeId] || typeId}</span>
-                </div>
-              );
-            }
+                            // Cones — grouped by typeId, show MarkerVisual + name
+                            const coneTypes = new Set();
+                            for (const f of conesFeatures) {
+                              if (!legendExclusions.has(f.typeId)) coneTypes.add(f.typeId);
+                            }
+                            for (const typeId of coneTypes) {
+                              rows.push(
+                                <div key={`cone-${typeId}`} style={itemStyle}>
+                                  <div style={{ width: iconSz, height: iconSz, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <MarkerVisual typeId={typeId} strokeScale={1} scale={iconSz / 28} />
+                                  </div>
+                                  <span style={labelStyle}>{CLABEL[typeId] || typeId}</span>
+                                </div>
+                              );
+                            }
 
-            // Work areas — show green swatch + label
-            if (workAreas.length > 0 && !legendExclusions.has("workArea")) {
-              rows.push(
-                <div key="workArea" style={itemStyle}>
-                  <div style={{ width: iconSz, height: iconSz, background: "rgba(0,200,83,0.18)", border: "2px solid #00c853", borderRadius: 3, boxSizing: "border-box" }} />
-                  <span style={labelStyle}>Work Area</span>
-                </div>
-              );
-            }
+                            // Work areas — show green swatch + label
+                            if (workAreas.length > 0 && !legendExclusions.has("workArea")) {
+                              rows.push(
+                                <div key="workArea" style={itemStyle}>
+                                  <div style={{ width: iconSz, height: iconSz, background: "rgba(0,200,83,0.18)", border: "2px solid #00c853", borderRadius: 3, boxSizing: "border-box" }} />
+                                  <span style={labelStyle}>Work Area</span>
+                                </div>
+                              );
+                            }
 
-            if (rows.length === 0) return (
-              <div style={{ fontSize: 11 * s, color: "#999", fontStyle: "italic" }}>No items</div>
-            );
-            return <div style={{ display: "flex", flexWrap: "wrap", gap }}>{rows}</div>;
-          })()}
-        </div>
+                            if (rows.length === 0) return (
+                              <div style={{ fontSize: 11 * s, color: "#999", fontStyle: "italic" }}>No items</div>
+                            );
+                            return <div style={{ display: "flex", flexWrap: "wrap", gap }}>{rows}</div>;
+                          })()}
+                        </div>
+                      </div>
 
+                      {/* BoxSelectionOverlay is OUTSIDE the overflow:hidden div so handles extend freely */}
                       {isSelected && (
                         <BoxSelectionOverlay
                           w={scalePxPlanRounded(lb.wPx, zRef)}
@@ -9233,24 +9498,26 @@ onUnmount={(polygon) => {
                 const isSelected =
                   selectedEntity?.kind === "manifest" && selectedEntity.id === mb.id;
                 const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
-                const s = contentScalePlan(mb.wPx, zRef, 240);
+                // Content scale: zoom × geometric-mean(wScale, hScale) so stretching in
+                // either direction (or both) proportionally grows/shrinks all internal content.
+                const MANIFEST_DEFAULT_W = 240;
+                const MANIFEST_DEFAULT_H = 220;
+                const _mbScaleX = (mb.wPx ?? MANIFEST_DEFAULT_W) / MANIFEST_DEFAULT_W;
+                const _mbScaleY = (mb.hPx ?? MANIFEST_DEFAULT_H) / MANIFEST_DEFAULT_H;
+                const s = planElementZoomScale(zRef) * Math.sqrt(_mbScaleX * _mbScaleY);
 
                 return (
                   <OverlayViewF key={mb.id} position={mb.pos} mapPaneName="overlayMouseTarget">
+                    {/* Outer wrapper: no overflow so handles can extend outside — same pattern as insert title_box */}
                     <div
                       style={{
                         transform: "translate(-50%, -50%)",
                         transformOrigin: "center center",
                         width: scalePxPlanRounded(mb.wPx, zRef),
                         height: scalePxPlanRounded(mb.hPx, zRef),
-                        background: "#fff",
-                        border: `${Math.max(1, 2 * s)}px solid ${isSelected ? "#7C3AED" : "#111"}`,
-                        borderRadius: 4 * s,
-                        boxSizing: "border-box",
-                        padding: 10 * s,
+                        position: "relative",
                         cursor: uiDrag?.type === "moveManifest" && uiDrag?.id === mb.id ? "grabbing" : "grab",
                         userSelect: "none",
-                        position: "relative",
                       }}
                       onContextMenu={(e) => openContextMenu(e, "manifest", mb.id, "manifest")}
                       onMouseDown={(e) => {
@@ -9260,21 +9527,34 @@ onUnmount={(polygon) => {
                         beginMoveManifest(mb.id, mb.pos, { x: e.clientX, y: e.clientY });
                       }}
                     >
-                      <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Manifest</div>
-                      <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
+                      {/* Inner content div: border, background, padding, overflow:hidden */}
+                      <div style={{
+                        width: "100%",
+                        height: "100%",
+                        background: "#fff",
+                        border: `${Math.max(1, 2 * s)}px solid #111`,
+                        borderRadius: 4 * s,
+                        boxSizing: "border-box",
+                        padding: 10 * s,
+                        overflow: "hidden",
+                      }}>
+                        <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Manifest</div>
+                        <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
 
-                      <div style={{ marginTop: 8 * s, fontSize: 16 * s, fontWeight: 900, lineHeight: 1.25 }}>
-                        {manifestRows.length === 0 ? (
-                          <div style={{ fontSize: 13 * s, fontWeight: 700 }}>(no items yet)</div>
-                        ) : (
-                          manifestRows.map((r) => (
-                            <div key={r.label}>
-                              {r.count} x {r.label}
-                            </div>
-                          ))
-                        )}
+                        <div style={{ marginTop: 8 * s, fontSize: 16 * s, fontWeight: 900, lineHeight: 1.25 }}>
+                          {manifestRows.length === 0 ? (
+                            <div style={{ fontSize: 13 * s, fontWeight: 700 }}>(no items yet)</div>
+                          ) : (
+                            manifestRows.map((r) => (
+                              <div key={r.label}>
+                                {r.count} x {r.label}
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
 
+                      {/* BoxSelectionOverlay is OUTSIDE the overflow:hidden div so handles extend freely */}
                       {isSelected && (
                         <BoxSelectionOverlay
                           w={scalePxPlanRounded(mb.wPx, zRef)}
@@ -9298,7 +9578,11 @@ onUnmount={(polygon) => {
   const isSelected = selectedInsertId === obj.id;
   const zRef = obj.zRef ?? ELEMENT_BASE_ZOOM;
   const baseW = obj.kind === "title_box" ? 360 : obj.kind === "table" ? 360 : obj.kind === "textbox" ? 260 : 200;
-  const s = contentScalePlan(obj.wPx, zRef, baseW);
+  // Title box: typography scales with map zoom only (like Legend/Manifest), not box width — avoids "blown up text" when widening.
+  const s =
+    obj.kind === "title_box"
+      ? planElementZoomScale(zRef)
+      : contentScalePlan(obj.wPx, zRef, baseW);
   const w = scalePxPlanRounded(obj.wPx, zRef);
   const h = scalePxPlanRounded(obj.hPx, zRef);
 
@@ -9338,8 +9622,6 @@ onUnmount={(polygon) => {
           transform: "translate(-50%, -50%)",
           width: w,
           height: h,
-          minWidth: obj.kind === "title_box" ? scalePxPlanRounded(360, zRef) : undefined,
-          minHeight: obj.kind === "title_box" ? scalePxPlanRounded(120, zRef) : undefined,
           position: "relative",
           boxSizing: "border-box",
           cursor: "pointer",
@@ -9357,7 +9639,7 @@ onUnmount={(polygon) => {
           beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
         }}
       >
-      {obj.kind === "title_box" && <TitleBoxContent data={obj.data} scale={s} />}
+      {obj.kind === "title_box" && <TitleBoxContent data={obj.data} scale={planElementZoomScale(zRef)} />}
         {/* ---------- TABLE ---------- */}
         {obj.kind === "table" && (() => {
           const rows = obj.rows ?? (obj.rowHeights?.length ?? 2);
@@ -9538,6 +9820,7 @@ onUnmount={(polygon) => {
                         startPointerPx,
                         startCols: [...colWidths],
                         startRows: [...rowHeights],
+                        startPos: obj.pos,  // for edge-anchored resize center shift
                       });
                     }}
                   />
@@ -9888,6 +10171,7 @@ height: pendingPictureTool.hPx * elementScale,
                   wPx: na.wPx,
                   hPx: na.hPx,
                   zRef: na.zRef ?? ELEMENT_BASE_ZOOM,
+                  pos: na.pos,  // for edge-anchored resize center shift
                 })
               }
             />
@@ -9999,7 +10283,7 @@ height: pendingPictureTool.hPx * elementScale,
     w={scaleW}
     h={scaleH}
     onBeginResize={(corner, clientPt) =>
-      beginResizeScale(scale.id, corner, clientPt, { wPx: scale.wPx, hPx: scale.hPx, zRef: scale.zRef ?? ELEMENT_BASE_ZOOM })
+      beginResizeScale(scale.id, corner, clientPt, { wPx: scale.wPx, hPx: scale.hPx, zRef: scale.zRef ?? ELEMENT_BASE_ZOOM, pos: scale.pos })
     }
     onBeginRotate={null}
     rotateGapPx={22}
@@ -10825,13 +11109,14 @@ height: pendingPictureTool.hPx * elementScale,
                       );
                     })()}
 
-                    {/* ── Placed tripod points: tripod icon + dotted connector + drag + delete ── */}
+                    {/* ── Placed tripod points: tripod icon + dotted connector + drag + rotate + delete ── */}
                     {arrowPoints.map((pt) => {
                       const ptPos = pt.dLat !== undefined
                         ? { lat: arrow.pos.lat + pt.dLat, lng: arrow.pos.lng + pt.dLng }
                         : (pt.pos ?? null);
                       if (!ptPos || !projectionReady) return null;
                       const isDraggingThis = uiDrag?.type === "moveArrowPoint" && uiDrag.arrowId === arrow.id && uiDrag.pointId === pt.id;
+                      const isRotatingThisPt = uiDrag?.type === "rotateArrowPoint" && uiDrag.arrowId === arrow.id && uiDrag.pointId === pt.id;
                       const ptScale = Math.max(0.35, Math.min(2, Math.pow(2, (mapRef.current?.getZoom?.() ?? zoomNow) - (arrow.zRef ?? ELEMENT_BASE_ZOOM))));
                       const arrowCenterPx = latLngToPx(arrow.pos);
                       const ptPx = latLngToPx(ptPos);
@@ -10856,43 +11141,50 @@ height: pendingPictureTool.hPx * elementScale,
                               </OverlayViewF>
                             );
                           })()}
-                          {/* Tripod marker — drag to move, hidden while dragging (shows ghost instead) */}
+                          {/* Tripod marker — drag to move, rotates, hidden while dragging (shows ghost instead) */}
                           <OverlayViewF position={ptPos} mapPaneName="overlayMouseTarget" zIndex={96000}>
                             <div
                               data-arrow-interactive="1"
                               style={{
                                 transform: "translate(-50%, -50%)",
-                                cursor: isDraggingThis ? "grabbing" : "grab",
-                                pointerEvents: "auto",
                                 userSelect: "none",
                                 visibility: isDraggingThis ? "hidden" : "visible",
                                 position: "relative",
                               }}
-                              onPointerDown={(e) => {
-                                e.preventDefault(); e.stopPropagation();
-                                e.currentTarget.setPointerCapture?.(e.pointerId);
-                                if (!projectionReady) return;
-                                const curPtPx = latLngToPx(ptPos);
-                                if (!curPtPx) return;
-                                const grabPx = clientToDivPx(e.clientX, e.clientY);
-                                if (!grabPx) return;
-                                lockMapInteractions(true);
-                                setUiDrag({
-                                  type: "moveArrowPoint",
-                                  arrowId: arrow.id,
-                                  pointId: pt.id,
-                                  offsetPx: { x: grabPx.x - curPtPx.x, y: grabPx.y - curPtPx.y },
-                                });
-                              }}
                             >
-                              {/* Tripod SVG (filled, same as SignSupportItem TripodStandSVG) */}
-                              <svg viewBox="0 0 64 64" width={28 * ptScale} height={28 * ptScale}>
-                                <rect x="10" y="10" width="44" height="10" rx="1.5" fill="#000"/>
-                                <rect x="30" y="20" width="4"  height="30" fill="#000"/>
-                                {isSelected && (
-                                  <rect x="9" y="9" width="46" height="48" rx="3" fill="transparent" stroke="#2563EB" strokeWidth="2" opacity="0.9"/>
-                                )}
-                              </svg>
+                              {/* Rotatable tripod (drag = move, rotation applied via CSS) */}
+                              <div
+                                style={{
+                                  transform: `rotate(${pt.rotDeg ?? 0}deg)`,
+                                  cursor: isDraggingThis ? "grabbing" : "grab",
+                                  pointerEvents: "auto",
+                                  display: "inline-block",
+                                }}
+                                onPointerDown={(e) => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                                  if (!projectionReady) return;
+                                  const curPtPx = latLngToPx(ptPos);
+                                  if (!curPtPx) return;
+                                  const grabPx = clientToDivPx(e.clientX, e.clientY);
+                                  if (!grabPx) return;
+                                  lockMapInteractions(true);
+                                  setUiDrag({
+                                    type: "moveArrowPoint",
+                                    arrowId: arrow.id,
+                                    pointId: pt.id,
+                                    offsetPx: { x: grabPx.x - curPtPx.x, y: grabPx.y - curPtPx.y },
+                                  });
+                                }}
+                              >
+                                <svg viewBox="0 0 64 64" width={28 * ptScale} height={28 * ptScale}>
+                                  <rect x="10" y="10" width="44" height="10" rx="1.5" fill="#000"/>
+                                  <rect x="30" y="20" width="4"  height="30" fill="#000"/>
+                                  {isSelected && (
+                                    <rect x="9" y="9" width="46" height="48" rx="3" fill="transparent" stroke="#2563EB" strokeWidth="2" opacity="0.9"/>
+                                  )}
+                                </svg>
+                              </div>
                               {/* Delete × — only when arrow selected */}
                               {isSelected && (
                                 <div
@@ -10921,6 +11213,61 @@ height: pendingPictureTool.hPx * elementScale,
                               )}
                             </div>
                           </OverlayViewF>
+
+                          {/* Rotate handle — same pattern as sign stand rotation (separate OverlayViewF) */}
+                          {isSelected && projectionReady && (
+                            <OverlayViewF
+                              position={ptPos}
+                              mapPaneName="overlayMouseTarget"
+                              zIndex={96200}
+                            >
+                              <div style={{ position: "relative", pointerEvents: "none" }}>
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    left: "50%",
+                                    bottom: -28 * ptScale,
+                                    transform: "translateX(-50%)",
+                                    width: 18 * ptScale,
+                                    height: 18 * ptScale,
+                                    borderRadius: "999px",
+                                    background: "#fff",
+                                    border: isRotatingThisPt ? "2px solid #2563EB" : "2px solid #111",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    cursor: isRotatingThisPt ? "grabbing" : "grab",
+                                    pointerEvents: "auto",
+                                  }}
+                                  onMouseDown={(ev) => {
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    rotateStandGuardRef.current = true;
+                                    if (!projectionReady) return;
+                                    const centerPx = latLngToPx(ptPos);
+                                    if (!centerPx) return;
+                                    const startPointerPx = clientToDivPx(ev.clientX, ev.clientY);
+                                    if (!startPointerPx) return;
+                                    const pointerAngleDeg = (Math.atan2(startPointerPx.y - centerPx.y, startPointerPx.x - centerPx.x) * 180) / Math.PI;
+                                    lockMapInteractions(true);
+                                    setUiDrag({
+                                      type: "rotateArrowPoint",
+                                      arrowId: arrow.id,
+                                      pointId: pt.id,
+                                      centerPx,
+                                      startAngleDeg: pt.rotDeg ?? 0,
+                                      startPointerAngleDeg: pointerAngleDeg,
+                                    });
+                                  }}
+                                >
+                                  <RotateIcon
+                                    active={isRotatingThisPt}
+                                    style={{ width: 14 * ptScale, height: 14 * ptScale }}
+                                  />
+                                </div>
+                              </div>
+                            </OverlayViewF>
+                          )}
                         </React.Fragment>
                       );
                     })}
@@ -10931,7 +11278,7 @@ height: pendingPictureTool.hPx * elementScale,
             </GoogleMap>
 
               {/* Export area overlay: dim outside + blue resizable/movable box */}
-              {exportMode && printAreaBounds && projectionReady && !exportCaptureInProgress && (() => {
+              {exportMode && printAreaBounds && projectionReady && (() => {
                 const isExportDragging = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
                 const r = isExportDragging
                   ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
@@ -10997,28 +11344,8 @@ height: pendingPictureTool.hPx * elementScale,
                           pointerEvents: "none",
                         }}
                       />
-                      {/* Aerial preview fills the blue box exactly */}
-                      {exportPreviewUrl && (
-                        <img
-                          src={exportPreviewUrl}
-                          alt="Aerial preview"
-                          draggable={false}
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "fill",
-                            borderRadius: 2,
-                            zIndex: 1,
-                            pointerEvents: "none",
-                            userSelect: "none",
-                            display: "block",
-                          }}
-                        />
-                      )}
-                      {/* Thin border strips for moving the box (only when no preview) */}
-                      {!exportPreviewUrl && (["top","bottom","left","right"]).map((side) => {
+                      {/* Thin border strips for moving the box */}
+                      {(["top","bottom","left","right"]).map((side) => {
                         const STRIP = 8;
                         const style = {
                           position: "absolute",
@@ -11042,8 +11369,8 @@ height: pendingPictureTool.hPx * elementScale,
                           />
                         );
                       })}
-                      {/* Resize handles — hidden while aerial preview is showing */}
-                      {!exportPreviewUrl && handles.map((hnd) => (
+                      {/* Resize handles */}
+                      {handles.map((hnd) => (
                         <div
                           key={hnd.key}
                           style={{
@@ -11075,8 +11402,8 @@ height: pendingPictureTool.hPx * elementScale,
 
            {mapReady && <MapScrollbars mapRef={mapRef} />}
 
-              {/* ── Export Panel: two buttons from the start ── */}
-              {exportMode && printAreaBounds && !exportCaptureInProgress && (
+              {/* ── Export PDF (high-resolution tiled map + crisp overlays) ── */}
+              {exportMode && printAreaBounds && (
                 <div
                   className="no-print"
                   style={{
@@ -11088,114 +11415,45 @@ height: pendingPictureTool.hPx * elementScale,
                     fontFamily: "system-ui, sans-serif", minWidth: 210,
                   }}
                 >
-                  {exportPreviewUrl ? (
-                    /* ── Aerial preview loaded: confirm or go back ── */
-                    <>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
-                        🛰 Aerial Preview Ready
-                      </div>
-                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, lineHeight: 1.5 }}>
-                        High-resolution imagery has been stitched for the selected region.
-                        Resize the blue box to adjust, then generate.
-                      </div>
-                      <button
-                        onClick={() => {
-                          // Size check only (pixel rect used for validation, not projection)
-                          const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
-                          const rect = isD
-                            ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
-                            : boundsToRectPx(printAreaBounds);
-                          if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
-                          setExportPreviewUrl(null);
-                          // Use exportBoundsForPdfRef (accurate lat/lng) — avoids linear lat
-                          // interpolation error that occurs when deriving bounds from screen pixels.
-                          exportSelectionToPdf(null, null);
-                        }}
-                        style={{
-                          padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
-                          background: "#15803d", color: "#fff", border: "none",
-                          borderRadius: 7, cursor: "pointer", lineHeight: 1.3,
-                        }}
-                      >
-                        ✅ Generate Aerial PDF
-                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
-                          Export high-resolution aerial imagery PDF
-                        </div>
-                      </button>
-                      <button
-                        onClick={() => setExportPreviewUrl(null)}
-                        style={{
-                          padding: "8px 14px", fontSize: 12, fontWeight: 600, textAlign: "left",
-                          background: "#f3f4f6", color: "#374151",
-                          border: "1px solid #d1d5db", borderRadius: 7, cursor: "pointer",
-                        }}
-                      >
-                        ← Back to options
-                      </button>
-                      <button
-                        onClick={cancelExportToPdf}
-                        style={{
-                          padding: "6px 8px", fontSize: 11,
-                          background: "#fff", color: "#6b7280",
-                          border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
-                        }}
-                      >Cancel</button>
-                    </>
-                  ) : (
-                    /* ── Default: two export options ── */
                     <>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 6 }}>
-                        Resize the blue box, then choose export type:
+                        Resize the blue box, then export:
                       </div>
 
-                      {/* ── Option 1: Standard PDF ──────────────────────────────────────────
-                          Captures the map exactly as displayed on screen (screenshot-based).
-                          Keeps all visible overlays, current zoom, and active map layer.     */}
                       <button
+                        type="button"
+                        disabled={exportCaptureInProgress}
                         onClick={() => {
                           const isD = uiDrag?.type === "resizeExportArea" || uiDrag?.type === "moveExportArea";
                           const rect = isD
                             ? (exportResizeRef.current?.lastRect ?? exportLiveRect ?? boundsToRectPx(printAreaBounds))
                             : boundsToRectPx(printAreaBounds);
-                          if (!rect || rect.w < 10 || rect.h < 10) { alert("Export area is too small."); return; }
-                          runExportToPdf(rect);
+                          if (!rect || rect.w < 10 || rect.h < 10) {
+                            alert("Export area is too small.");
+                            return;
+                          }
+                          void exportSelectionToPdf(null, rect);
                         }}
                         style={{
-                          padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
-                          background: "#1e3a8a", color: "#fff", border: "none",
-                          borderRadius: 7, cursor: "pointer", lineHeight: 1.3,
+                          padding: "10px 14px",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          textAlign: "left",
+                          background: exportCaptureInProgress ? "#9ca3af" : "#15803d",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: 7,
+                          cursor: exportCaptureInProgress ? "not-allowed" : "pointer",
+                          lineHeight: 1.3,
                         }}
                       >
-                        🗺 Standard PDF
-                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.8, marginTop: 3 }}>
-                          Keeps current map appearance and on-screen layout
-                        </div>
-                      </button>
-
-                      {/* ── Option 2: Aerial PDF ────────────────────────────────────────────
-                          Implementation: tile stitching (Method 1).
-                          Downloads multiple imagery tiles covering the selected region,
-                          then stitches them into a single high-resolution image aligned to
-                          the exact lat/lng bounds of the blue box.  This avoids the blur and
-                          misalignment that single-tile or screenshot-based approaches produce.
-                          The stitched canvas is previewed inside the blue box before export.  */}
-                      <button
-                        disabled={exportPreviewLoading}
-                        onClick={loadExportPreview}
-                        style={{
-                          padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "left",
-                          background: exportPreviewLoading ? "#9ca3af" : "#15803d", color: "#fff",
-                          border: "none", borderRadius: 7,
-                          cursor: exportPreviewLoading ? "not-allowed" : "pointer", lineHeight: 1.3,
-                        }}
-                      >
-                        {exportPreviewLoading ? (
-                          <>⏳ Building aerial imagery…</>
+                        {exportCaptureInProgress ? (
+                          <>⏳ Building PDF…</>
                         ) : (
                           <>
-                            🛰 Aerial PDF
-                            <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 3 }}>
-                              Rebuilds selected region using high-resolution aerial imagery
+                            Export PDF
+                            <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.9, marginTop: 3 }}>
+                              Sharp map and labels at your zoom — uses many Static Map tiles (may take a moment).
                             </div>
                           </>
                         )}
@@ -11220,7 +11478,6 @@ height: pendingPictureTool.hPx * elementScale,
                         >Cancel</button>
                       </div>
                     </>
-                  )}
                 </div>
               )}
 
@@ -11719,17 +11976,22 @@ function ContextMenu({ menu, onCut, onCopy, onToggleLegend, legendExclusions }) 
     >
       <button style={base} onClick={onCut} onMouseEnter={hl} onMouseLeave={ul}>Cut</button>
       <button style={base} onClick={onCopy} onMouseEnter={hl} onMouseLeave={ul}>Copy</button>
-      <div style={{ height: 1, background: "#e0e0e0", margin: "3px 0" }} />
-      <button
-        style={{ ...base, gap: 6 }}
-        onClick={() => onToggleLegend(menu.typeId)}
-        onMouseEnter={hl} onMouseLeave={ul}
-      >
-        <span style={{ width: 13, fontSize: 12, color: "#1a73e8", fontWeight: 700, flexShrink: 0 }}>
-          {isIncluded ? "✓" : ""}
-        </span>
-        Include in Legend
-      </button>
+      {/* "Include in Legend" is only relevant for sign-type objects, not measurements */}
+      {menu.entityType !== "measurement" && (
+        <>
+          <div style={{ height: 1, background: "#e0e0e0", margin: "3px 0" }} />
+          <button
+            style={{ ...base, gap: 6 }}
+            onClick={() => onToggleLegend(menu.typeId)}
+            onMouseEnter={hl} onMouseLeave={ul}
+          >
+            <span style={{ width: 13, fontSize: 12, color: "#1a73e8", fontWeight: 700, flexShrink: 0 }}>
+              {isIncluded ? "✓" : ""}
+            </span>
+            Include in Legend
+          </button>
+        </>
+      )}
     </div>
   );
 }
