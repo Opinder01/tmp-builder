@@ -3054,79 +3054,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     }
   }
 
-  // Cones / barriers / ped_tape: line + triangle markers for cones
-  const drawConeTriangle = (centerPx, size = 8) => {
-    const c = toCanvas(centerPx);
-    if (!c) return;
-    const s = size * exportCanvasScale;
-    ctx.fillStyle = "#F59E0B";
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(c.x, c.y - s / 2);
-    ctx.lineTo(c.x + s / 4, c.y + s / 2);
-    ctx.lineTo(c.x - s / 4, c.y + s / 2);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  };
-  const drawDotCircle = (centerPx, size, fillColor = "#F59E0B") => {
-    const c = toCanvas(centerPx);
-    if (!c) return;
-    const r = (size * exportCanvasScale) / 2;
-    ctx.fillStyle = fillColor;
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  };
-  const drawBarricade = (centerPx, size = 10) => {
-    const c = toCanvas(centerPx);
-    if (!c) return;
-    const s = size * exportCanvasScale;
-    const w = s * 0.6;
-    const h = s * 0.35;
-    ctx.fillStyle = "#FFFFFF";
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect?.(c.x - w / 2, c.y - h / 2, w, h, 2) ?? ctx.rect(c.x - w / 2, c.y - h / 2, w, h);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = "#F59E0B";
-    ctx.lineWidth = Math.max(1, 2 * exportCanvasScale * 0.3);
-    ctx.beginPath();
-    ctx.moveTo(c.x - w / 2 + w * 0.15, c.y - h / 2 + h * 0.3);
-    ctx.lineTo(c.x - w / 2 + w * 0.5, c.y - h / 2 + h * 0.1);
-    ctx.moveTo(c.x - w / 2 + w * 0.35, c.y);
-    ctx.lineTo(c.x - w / 2 + w * 0.85, c.y - h / 2 + h * 0.5);
-    ctx.moveTo(c.x - w / 2 + w * 0.1, c.y + h / 2 - h * 0.2);
-    ctx.lineTo(c.x - w / 2 + w * 0.75, c.y - h / 2 + h * 0.7);
-    ctx.stroke();
-  };
-  for (const f of conesFeatures || []) {
-    const path = f?.path || [];
-    const verts = path.map(project).filter(Boolean);
-    if (verts.length < 2) continue;
-    if (f.typeId === "barrier") drawLine(verts, "#9CA3AF", 2.5);
-    else if (f.typeId === "ped_tape") drawLine(verts, "#DC2626", 2.5);
-    else {
-      const markers = sampleConesMarkersForPath(
-        path.map((p) => toPlainLL(p)).filter(Boolean),
-        f.typeId
-      );
-      for (const pos of markers) {
-        const px = project(pos);
-        if (!px || !inBounds(px)) continue;
-        if (f.typeId === "barrel") drawDotCircle(px, 8, "#F97316");
-        else if (f.typeId === "bollard") drawDotCircle(px, 5, "#374151");
-        else if (f.typeId === "type1" || f.typeId === "type2") drawBarricade(px, 9);
-        else drawConeTriangle(px, 7);
-      }
-    }
-  }
+  // Cones / barriers / ped_tape rendered as PDF vectors below (Step 10)
 
   // Placed signs: load images and draw with rotation; fallback to placeholder on load failure
   const loadSignImage = (url) => {
@@ -3989,6 +3917,87 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   // Map image (aerial + all overlays composited on canvas)
   const mapRect = { x: MARGIN, y: HDR_H, w: mapW_mm, h: mapH_mm };
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", mapRect.x, mapRect.y, mapRect.w, mapRect.h, undefined, "NONE");
+
+  // ── Cone features: vector paths drawn over raster map for PDF sharpness ──
+  {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return {
+        x: mapRect.x + (px.x / imgW) * mapRect.w,
+        y: mapRect.y + (px.y / imgH) * mapRect.h,
+      };
+    };
+    const inMapRect = (mm) =>
+      mm &&
+      mm.x >= mapRect.x && mm.x <= mapRect.x + mapRect.w &&
+      mm.y >= mapRect.y && mm.y <= mapRect.y + mapRect.h;
+
+    for (const f of conesFeatures || []) {
+      const path = f?.path || [];
+      if (path.length < 2) continue;
+      const verts = path.map(project).filter(Boolean);
+      if (verts.length < 2) continue;
+
+      if (f.typeId === "barrier") {
+        pdf.setDrawColor(156, 163, 175);
+        pdf.setLineWidth(0.35);
+        pdf.setLineDashPattern([1.2, 0.8], 0);
+        for (let i = 0; i < verts.length - 1; i++) {
+          const a = toPdf(verts[i]), b = toPdf(verts[i + 1]);
+          if (a && b) pdf.line(a.x, a.y, b.x, b.y);
+        }
+        pdf.setLineDashPattern([], 0);
+      } else if (f.typeId === "ped_tape") {
+        pdf.setDrawColor(220, 38, 38);
+        pdf.setLineWidth(0.35);
+        for (let i = 0; i < verts.length - 1; i++) {
+          const a = toPdf(verts[i]), b = toPdf(verts[i + 1]);
+          if (a && b) pdf.line(a.x, a.y, b.x, b.y);
+        }
+      } else {
+        const markers = sampleConesMarkersForPath(
+          path.map((p) => toPlainLL(p)).filter(Boolean),
+          f.typeId
+        );
+        for (const pos of markers) {
+          const mm = toPdf(project(pos));
+          if (!inMapRect(mm)) continue;
+          pdf.setLineWidth(0.15);
+          if (f.typeId === "barrel") {
+            pdf.setFillColor(249, 115, 22);
+            pdf.setDrawColor(17, 17, 17);
+            pdf.circle(mm.x, mm.y, 1.0, "FD");
+          } else if (f.typeId === "bollard") {
+            pdf.setFillColor(55, 65, 81);
+            pdf.setDrawColor(17, 17, 17);
+            pdf.circle(mm.x, mm.y, 0.7, "FD");
+          } else if (f.typeId === "type1" || f.typeId === "type2") {
+            const bw = 4.0, bh = 2.0;
+            const sx = mm.x - bw / 2, sy = mm.y - bh / 2;
+            pdf.setFillColor(255, 255, 255);
+            pdf.setDrawColor(17, 17, 17);
+            pdf.rect(sx, sy, bw, bh, "FD");
+            pdf.setDrawColor(245, 158, 11);
+            pdf.setLineWidth(0.4);
+            pdf.line(sx + bw * 0.15, sy + bh * 0.3,  sx + bw * 0.5,  sy + bh * 0.1);
+            pdf.line(sx + bw * 0.35, sy + bh * 0.5,  sx + bw * 0.85, sy + bh * 0.1);
+            pdf.line(sx + bw * 0.1,  sy + bh * 0.8,  sx + bw * 0.75, sy + bh * 0.5);
+          } else {
+            // Default cone: amber triangle pointing up
+            const th = 2.5, tw = 1.5;
+            pdf.setFillColor(245, 158, 11);
+            pdf.setDrawColor(17, 17, 17);
+            pdf.lines([[tw / 2, th], [-tw, 0]], mm.x - tw / 4, mm.y - th / 2, [1, 1], "FD", true);
+          }
+        }
+      }
+    }
+    // Reset PDF draw state
+    pdf.setLineDashPattern([], 0);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
 
   // Border around map
   pdf.setDrawColor(0, 0, 0); pdf.setLineWidth(1.5);
