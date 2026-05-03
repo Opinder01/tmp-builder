@@ -3958,10 +3958,12 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         }
         pdf.setLineDashPattern([], 0);
       } else {
-        // Scale marker size to match editor's elementScale at the export tile zoom
+        // markerSize (screen px at zoom 18) → physical PDF mm.
+        // Using Math.pow(2, zoom-18) without clamping cancels imgW shrinkage at lower
+        // export zooms, so barrel/bollard/cone always render at a consistent real-world size.
         const cfg = CONE_VISUAL[f.typeId] || CONE_VISUAL.default;
-        const exportElementScale = Math.max(0.35, Math.min(1.2, Math.pow(2, zoom - 18)));
-        const markerSizeMm = Math.max(0.4, cfg.markerSize * exportElementScale * (mapW_mm / imgW));
+        const zoomScale = Math.pow(2, zoom - 18);
+        const markerSizeMm = Math.max(0.4, cfg.markerSize * zoomScale * (mapW_mm / imgW));
 
         const markers = sampleConesMarkersForPath(
           path.map((p) => toPlainLL(p)).filter(Boolean),
