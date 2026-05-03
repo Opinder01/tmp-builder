@@ -2940,17 +2940,6 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   };
   const scaleBarRaster = await loadRasterForExport("/scale-bar.svg");
 
-  const drawLine = (pts, color, lineWidth) => {
-    const c = pts.map(toCanvas).filter(Boolean);
-    if (c.length < 2) return;
-    ctx.strokeStyle = color || "#111111";
-    ctx.lineWidth = (lineWidth ?? 2) * exportCanvasScale * measureScaleExport;
-    ctx.beginPath();
-    ctx.moveTo(c[0].x, c[0].y);
-    for (let i = 1; i < c.length; i++) ctx.lineTo(c[i].x, c[i].y);
-    ctx.stroke();
-  };
-
   const drawPolygon = (pts, strokeColor, fillColor, lineWidth) => {
     const c = pts.map(toCanvas).filter(Boolean);
     if (c.length < 3) return;
@@ -2970,84 +2959,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     if (pts.length >= 3) drawPolygon(pts, "#00c853", "rgba(0,200,83,0.12)", 2.5);
   }
 
-  // Measurements: line + distance label
-  const drawLabel = (centerPx, text) => {
-    if (!centerPx || !text) return;
-    const c = toCanvas(centerPx);
-    const relaxedTol = 24;
-    if (c.x < -relaxedTol || c.x > outW + relaxedTol || c.y < -relaxedTol || c.y > outH + relaxedTol) return;
-    ctx.font = `bold ${Math.max(10, 13 * exportCanvasScale * measureScaleExport)}px sans-serif`;
-    ctx.fillStyle = "#111";
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = Math.max(1, 2.5 * exportCanvasScale * measureScaleExport);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.strokeText(text, c.x, c.y);
-    ctx.fillText(text, c.x, c.y);
-  };
-  // Closed filled arrowhead at both ends of a segment (A→B, B→A)
-  const drawMeasArrowhead = (ax, ay, bx, by) => {
-    const dx = bx - ax; const dy = by - ay;
-    const len = Math.hypot(dx, dy);
-    if (len < 6) return;
-    const ux = dx / len; const uy = dy / len;
-    const sz = Math.max(6, 9 * exportCanvasScale * measureScaleExport);
-    const hw = sz * 0.42;
-    ctx.fillStyle = "#111111";
-    // Arrow pointing toward B
-    ctx.beginPath();
-    ctx.moveTo(bx, by);
-    ctx.lineTo(bx - ux * sz + uy * hw, by - uy * sz - ux * hw);
-    ctx.lineTo(bx - ux * sz - uy * hw, by - uy * sz + ux * hw);
-    ctx.closePath(); ctx.fill();
-    // Arrow pointing toward A
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(ax + ux * sz - uy * hw, ay + uy * sz + ux * hw);
-    ctx.lineTo(ax + ux * sz + uy * hw, ay + uy * sz - ux * hw);
-    ctx.closePath(); ctx.fill();
-  };
-  for (const m of measurements || []) {
-    const path = m?.path || [];
-    const pts = path.map(project).filter(Boolean);
-    if (pts.length >= 2) {
-      drawLine(pts, "#111111", 2);
-      // Arrowheads at both ends of every segment
-      for (let i = 0; i < pts.length - 1; i++) {
-        const cA = toCanvas(pts[i]);
-        const cB = toCanvas(pts[i + 1]);
-        if (cA && cB) drawMeasArrowhead(cA.x, cA.y, cB.x, cB.y);
-      }
-    }
-    if (m.mode === "distance" && path.length >= 2) {
-      const a = toPlainLL(path[0]);
-      const b = toPlainLL(path[path.length - 1]);
-      if (a && b) {
-        const d = distMetersLL(a, b);
-        if (d >= 0.1) {
-          const mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
-          const labelPos = project(mid);
-          const text = m.labelOverride ?? formatMeters(d);
-          drawLabel(labelPos, text);
-        }
-      }
-    }
-    if (m.mode === "combined" && path.length >= 2) {
-      for (let i = 0; i < path.length - 1; i++) {
-        const a = toPlainLL(path[i]);
-        const b = toPlainLL(path[i + 1]);
-        if (!a || !b) continue;
-        const d = distMetersLL(a, b);
-        if (d < 0.1) continue;
-        const mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
-        const labelPos = project(mid);
-        const text = (m.segOverrides && m.segOverrides[i]) ?? formatMeters(d);
-        drawLabel(labelPos, text);
-      }
-    }
-  }
-
-  // Cones / barriers / ped_tape rendered as PDF vectors below (Step 10)
+  // Cones / barriers / ped_tape and measurements rendered as PDF vectors below (Step 10)
 
   // Placed signs: load images and draw with rotation; fallback to placeholder on load failure
   const loadSignImage = (url) => {
@@ -4041,6 +3953,94 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     }
     // Reset PDF draw state
     pdf.setLineDashPattern([], 0);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
+
+  // ── Measurement features: vector primitives for crisp PDF output ──
+  {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return {
+        x: mapRect.x + (px.x / imgW) * mapRect.w,
+        y: mapRect.y + (px.y / imgH) * mapRect.h,
+      };
+    };
+
+    const lineW_mm  = 0.2;   // dimension line weight
+    const arrowL_mm = 1.5;   // arrowhead length
+    const arrowH_mm = 0.63;  // arrowhead half-width (≈0.42 × length)
+
+    const drawMeasSegmentPdf = (aLL, bLL, text) => {
+      const aMm = toPdf(project(aLL));
+      const bMm = toPdf(project(bLL));
+      if (!aMm || !bMm) return;
+
+      const dx = bMm.x - aMm.x, dy = bMm.y - aMm.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.8) return;
+
+      const ux = dx / len, uy = dy / len;
+      const L = arrowL_mm, H = arrowH_mm;
+
+      // Dimension line trimmed so endpoints meet arrowhead tips
+      pdf.setDrawColor(17, 17, 17);
+      pdf.setLineWidth(lineW_mm);
+      pdf.setLineDashPattern([], 0);
+      pdf.line(aMm.x + ux * L, aMm.y + uy * L, bMm.x - ux * L, bMm.y - uy * L);
+
+      // Arrowhead at B — tip at bMm, base extends toward A
+      pdf.setFillColor(17, 17, 17);
+      pdf.lines([[-ux * L - uy * H, -uy * L + ux * H], [2 * uy * H, -2 * ux * H]], bMm.x, bMm.y, [1, 1], "F", true);
+      // Arrowhead at A — tip at aMm, base extends toward B
+      pdf.lines([[ux * L + uy * H, uy * L - ux * H], [-2 * uy * H, 2 * ux * H]], aMm.x, aMm.y, [1, 1], "F", true);
+
+      // Label: horizontal white box at midpoint
+      if (!text) return;
+      const midMm = { x: (aMm.x + bMm.x) / 2, y: (aMm.y + bMm.y) / 2 };
+      const fontSize = 7;
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(fontSize);
+      const sf = pdf.internal.scaleFactor;
+      const textW = pdf.getStringUnitWidth(text) * fontSize / sf;
+      const padX = 0.7, padY = 0.4;
+      const boxW = textW + padX * 2;
+      const boxH = fontSize / sf + padY * 2;
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(119, 119, 119);
+      pdf.setLineWidth(0.12);
+      pdf.rect(midMm.x - boxW / 2, midMm.y - boxH / 2, boxW, boxH, "FD");
+      pdf.setTextColor(17, 17, 17);
+      pdf.text(text, midMm.x, midMm.y, { align: "center", baseline: "middle" });
+      pdf.setTextColor(0, 0, 0);
+    };
+
+    for (const m of measurements || []) {
+      const path = m?.path || [];
+      if (path.length < 2) continue;
+
+      if (m.mode === "distance") {
+        const aLL = toPlainLL(path[0]);
+        const bLL = toPlainLL(path[path.length - 1]);
+        if (!aLL || !bLL) continue;
+        const d = distMetersLL(aLL, bLL);
+        if (d < 0.1) continue;
+        drawMeasSegmentPdf(aLL, bLL, m.labelOverride ?? formatMeters(d));
+      } else if (m.mode === "combined") {
+        for (let i = 0; i < path.length - 1; i++) {
+          const aLL = toPlainLL(path[i]);
+          const bLL = toPlainLL(path[i + 1]);
+          if (!aLL || !bLL) continue;
+          const d = distMetersLL(aLL, bLL);
+          if (d < 0.1) continue;
+          drawMeasSegmentPdf(aLL, bLL, (m.segOverrides?.[i]) ?? formatMeters(d));
+        }
+      }
+    }
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
     pdf.setDrawColor(0, 0, 0);
     pdf.setFillColor(0, 0, 0);
     pdf.setLineWidth(0.5);
