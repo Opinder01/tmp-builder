@@ -2940,26 +2940,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   };
   const scaleBarRaster = await loadRasterForExport("/scale-bar.svg");
 
-  const drawPolygon = (pts, strokeColor, fillColor, lineWidth) => {
-    const c = pts.map(toCanvas).filter(Boolean);
-    if (c.length < 3) return;
-    ctx.strokeStyle = strokeColor || "#111111";
-    ctx.lineWidth = (lineWidth ?? 2) * exportCanvasScale * measureScaleExport;
-    ctx.beginPath();
-    ctx.moveTo(c[0].x, c[0].y);
-    for (let i = 1; i < c.length; i++) ctx.lineTo(c[i].x, c[i].y);
-    ctx.closePath();
-    if (fillColor) { ctx.fillStyle = fillColor; ctx.fill(); }
-    ctx.stroke();
-  };
-
-  // Work areas — match editor: strokeColor #00c853, fillOpacity 0.12, strokeWeight 2-3
-  for (const wa of workAreas || []) {
-    const pts = (wa?.path || []).map(project).filter(Boolean);
-    if (pts.length >= 3) drawPolygon(pts, "#00c853", "rgba(0,200,83,0.12)", 2.5);
-  }
-
-  // Cones / barriers / ped_tape and measurements rendered as PDF vectors below (Step 10)
+  // Cones / barriers / ped_tape, work areas and measurements rendered as PDF vectors below (Step 10)
 
   // Placed signs: load images and draw with rotation; fallback to placeholder on load failure
   const loadSignImage = (url) => {
@@ -3822,6 +3803,38 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   // Map image (aerial + all overlays composited on canvas)
   const mapRect = { x: MARGIN, y: HDR_H, w: mapW_mm, h: mapH_mm };
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", mapRect.x, mapRect.y, mapRect.w, mapRect.h, undefined, "NONE");
+
+  // ── Work areas: vector polygons for PDF sharpness ──
+  {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return {
+        x: mapRect.x + (px.x / imgW) * mapRect.w,
+        y: mapRect.y + (px.y / imgH) * mapRect.h,
+      };
+    };
+
+    for (const wa of workAreas || []) {
+      const pts = (wa?.path || [])
+        .map((ll) => toPdf(project(toPlainLL(ll))))
+        .filter(Boolean);
+      if (pts.length < 3) continue;
+
+      // Fill: rgba(0,200,83,0.12) pre-multiplied over white → rgb(224,248,234)
+      pdf.setFillColor(224, 248, 234);
+      pdf.setDrawColor(0, 200, 83);
+      pdf.setLineWidth(0.3);
+      const deltas = [];
+      for (let i = 1; i < pts.length; i++) {
+        deltas.push([pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y]);
+      }
+      pdf.lines(deltas, pts[0].x, pts[0].y, [1, 1], "FD", true);
+    }
+
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
 
   // ── Cone features: vector paths drawn over raster map for PDF sharpness ──
   {
