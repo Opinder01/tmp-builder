@@ -3352,320 +3352,26 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     ctx.restore();
   }
 
-  // Line insert objects
+  // Line insert objects — drawn directly on canvas since they are polylines, not UI panels
   for (const obj of (insertObjects || []).filter((o) => o.kind === "line")) {
     const path = obj?.path || [];
     const pts = path.map(project).filter(Boolean);
-    if (pts.length >= 2) drawLine(pts, obj.stroke || "#111111", obj.strokeWidth ?? 2);
+    if (pts.length < 2) continue;
+    ctx.save();
+    ctx.strokeStyle = obj.stroke || "#111111";
+    ctx.lineWidth = (obj.strokeWidth ?? 2) * exportCanvasScale;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // Legend / Manifest / Title / North / Scale (if enabled) — match editor CSS sizing (scalePxPlan + contentScalePlan)
   const LEGEND_CLABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Ped. Tape", type1: "Type 1", type2: "Type 2" };
-  if (exportIncludeLegend) {
-    for (const lb of legendBoxes || []) {
-      const p = project(lb?.pos);
-      if (!inBounds(p)) continue;
-      const sc = toCanvas(p);
-      const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
-      // Geometric-mean scale: matches editor (zoom × sqrt(wScale × hScale)) so internal
-      // content (title, icons, labels) grows/shrinks proportionally with box resize.
-      const LEGEND_DEFAULT_W = 260;
-      const LEGEND_DEFAULT_H = 240;
-      const _lbScaleX = (lb.wPx ?? LEGEND_DEFAULT_W) / LEGEND_DEFAULT_W;
-      const _lbScaleY = (lb.hPx ?? LEGEND_DEFAULT_H) / LEGEND_DEFAULT_H;
-      const sCss = planElementZoomForExport(zRef) * Math.sqrt(_lbScaleX * _lbScaleY);
-      const w = cssToCanvas(cssPlanPxRounded(lb.wPx || LEGEND_DEFAULT_W, zRef));
-      const h = cssToCanvas(cssPlanPxRounded(lb.hPx || LEGEND_DEFAULT_H, zRef));
-      const left = sc.x - w / 2;
-      const top = sc.y - h / 2;
-      const pad = cssToCanvas(10 * sCss);
-      const borderW = Math.max(0.5, cssToCanvas(1 * sCss));
-      const radius = cssToCanvas(4 * sCss);
-
-      // Build a unified legend item list (signs → cones → work area), same order as on-screen flex layout.
-      const legendItems = [];
-
-      const signByCode = {};
-      for (let si = 0; si < (placedSigns || []).length; si++) {
-        const sg = placedSigns[si];
-        const code = sg.typeId ?? sg.code ?? sg.id;
-        if (legendExclusionsForExport.has(code)) continue;
-        if (!signByCode[code]) signByCode[code] = { si, code };
-      }
-      for (const { si, code } of Object.values(signByCode)) {
-        legendItems.push({ type: "sign", si, code });
-      }
-
-      const coneTypes = new Set();
-      for (const f of conesFeatures || []) {
-        if (f?.typeId && !legendExclusionsForExport.has(f.typeId)) coneTypes.add(f.typeId);
-      }
-      for (const typeId of coneTypes) {
-        legendItems.push({ type: "cone", typeId });
-      }
-
-      if ((workAreas || []).length > 0 && !legendExclusionsForExport.has("workArea")) {
-        legendItems.push({ type: "workArea" });
-      }
-
-      drawScaledPanelBlit(ctx, left, top, w, h, (sx, pw, ph) => {
-        sx.fillStyle = "#FFFFFF";
-        sx.beginPath();
-        if (sx.roundRect) sx.roundRect(0, 0, pw, ph, radius);
-        else sx.rect(0, 0, pw, ph);
-        sx.fill();
-        sx.strokeStyle = "#111111";
-        sx.lineWidth = borderW;
-        sx.stroke();
-
-        let y = pad;
-        sx.fillStyle = "#111";
-        sx.textAlign = "left";
-        sx.textBaseline = "top";
-        sx.font = `700 ${Math.max(8, cssToCanvas(18 * sCss))}px system-ui, sans-serif`;
-        sx.fillText("Legend", pad, y);
-        y += cssToCanvas(18 * sCss) + cssToCanvas(6 * sCss);
-        sx.fillRect(pad, y, pw - 2 * pad, Math.max(1, cssToCanvas(2 * sCss)));
-        y += cssToCanvas(8 * sCss) + Math.max(1, cssToCanvas(2 * sCss));
-
-        const iconSz = cssToCanvas(28 * sCss);
-        const labelF = Math.max(7, cssToCanvas(10 * sCss));
-        const gap = cssToCanvas(6 * sCss);
-        const itemW = iconSz + cssToCanvas(8 * sCss);
-        let x = pad;
-        let rowH = 0;
-
-        for (const item of legendItems) {
-          if (x + itemW > pw - pad) {
-            x = pad;
-            y += rowH + gap;
-            rowH = 0;
-          }
-
-          if (item.type === "sign") {
-            const simg = signImages[item.si];
-            if (simg) sx.drawImage(simg, x, y, iconSz, iconSz);
-            else sx.strokeRect(x, y, iconSz, iconSz);
-            sx.font = `${labelF}px system-ui, sans-serif`;
-            sx.fillStyle = "#222";
-            sx.textAlign = "center";
-            const tw = sx.measureText(item.code).width;
-            sx.fillText(tw > itemW - 2 ? String(item.code).slice(0, 12) : item.code, x + iconSz / 2, y + iconSz + 2);
-            sx.textAlign = "left";
-          } else if (item.type === "cone") {
-            sx.fillStyle = "#F59E0B";
-            sx.beginPath();
-            sx.moveTo(x + iconSz / 2, y);
-            sx.lineTo(x + iconSz / 2 + iconSz / 4, y + iconSz);
-            sx.lineTo(x + iconSz / 2 - iconSz / 4, y + iconSz);
-            sx.closePath();
-            sx.fill();
-            sx.strokeStyle = "#111";
-            sx.lineWidth = Math.max(1, exportCanvasScale);
-            sx.stroke();
-            sx.font = `${labelF}px system-ui, sans-serif`;
-            sx.fillStyle = "#222";
-            sx.textAlign = "center";
-            sx.fillText(LEGEND_CLABEL[item.typeId] || item.typeId, x + iconSz / 2, y + iconSz + 2);
-            sx.textAlign = "left";
-          } else if (item.type === "workArea") {
-            sx.fillStyle = "rgba(0,200,83,0.18)";
-            sx.fillRect(x, y, iconSz, iconSz);
-            sx.strokeStyle = "#00c853";
-            sx.lineWidth = Math.max(1, 2 * exportCanvasScale);
-            sx.strokeRect(x, y, iconSz, iconSz);
-            sx.font = `${labelF}px system-ui, sans-serif`;
-            sx.fillStyle = "#222";
-            sx.textAlign = "center";
-            sx.fillText("Work Area", x + iconSz / 2, y + iconSz + 2);
-            sx.textAlign = "left";
-          }
-
-          rowH = Math.max(rowH, iconSz + labelF + cssToCanvas(4 * sCss));
-          x += itemW + gap;
-        }
-      });
-    }
-  }
-  if (exportIncludeNotes) {
-    const EXPORT_CONE_LABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Pedestrian Tape", type1: "Type 1 Barricade", type2: "Type 2 Barricade" };
-    const exportManifestRows = () => {
-      const rows = [];
-      const signCounts = {};
-      for (const s of placedSigns || []) signCounts[s.code] = (signCounts[s.code] || 0) + 1;
-      const coneCounts = {};
-      for (const f of conesFeatures || []) {
-        if (f.typeId === "barrier" || f.typeId === "ped_tape") {
-          coneCounts[f.typeId] = (coneCounts[f.typeId] || 0) + 1;
-        } else {
-          const path = (f.path || []).map(toPlainLL).filter(Boolean);
-          const spacingM = path.length >= 2 ? getConeSpacingMeters(f.typeId) : 999;
-          const markers = resamplePolylineMetersLL(path, spacingM);
-          coneCounts[f.typeId] = (coneCounts[f.typeId] || 0) + markers.length;
-        }
-      }
-      Object.keys(coneCounts).forEach((k) => rows.push({ label: EXPORT_CONE_LABEL[k] || k, count: coneCounts[k] }));
-      Object.keys(signCounts).forEach((code) => rows.push({ label: code, count: signCounts[code] }));
-      return rows.filter((r) => r.count > 0);
-    };
-    const manifestRows = exportManifestRows();
-    for (const mb of manifestBoxes || []) {
-      const p = project(mb?.pos);
-      if (!inBounds(p)) continue;
-      const sc = toCanvas(p);
-      const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
-      // Geometric-mean scale: matches editor (zoom × sqrt(wScale × hScale)) so internal
-      // content (title, rows, labels) grows/shrinks proportionally with box resize.
-      const MANIFEST_DEFAULT_W = 240;
-      const MANIFEST_DEFAULT_H = 220;
-      const _mbScaleX = (mb.wPx ?? MANIFEST_DEFAULT_W) / MANIFEST_DEFAULT_W;
-      const _mbScaleY = (mb.hPx ?? MANIFEST_DEFAULT_H) / MANIFEST_DEFAULT_H;
-      const sCss = planElementZoomForExport(zRef) * Math.sqrt(_mbScaleX * _mbScaleY);
-      const w = cssToCanvas(cssPlanPxRounded(mb.wPx || MANIFEST_DEFAULT_W, zRef));
-      const h = cssToCanvas(cssPlanPxRounded(mb.hPx || MANIFEST_DEFAULT_H, zRef));
-      const left = sc.x - w / 2;
-      const top = sc.y - h / 2;
-      const pad = cssToCanvas(10 * sCss);
-      const borderW = Math.max(0.5, cssToCanvas(1 * sCss));
-      const radius = cssToCanvas(4 * sCss);
-
-      drawScaledPanelBlit(ctx, left, top, w, h, (sx, pw, ph) => {
-        sx.fillStyle = "#FFFFFF";
-        sx.beginPath();
-        if (sx.roundRect) sx.roundRect(0, 0, pw, ph, radius);
-        else sx.rect(0, 0, pw, ph);
-        sx.fill();
-        sx.strokeStyle = "#111111";
-        sx.lineWidth = borderW;
-        sx.stroke();
-        sx.fillStyle = "#111";
-        sx.textAlign = "left";
-        sx.textBaseline = "top";
-        sx.font = `700 ${Math.max(8, cssToCanvas(18 * sCss))}px system-ui, sans-serif`;
-        sx.fillText("Manifest", pad, pad);
-        let my = pad + cssToCanvas(18 * sCss) + cssToCanvas(6 * sCss);
-        sx.fillRect(pad, my, pw - 2 * pad, Math.max(1, cssToCanvas(2 * sCss)));
-        my += cssToCanvas(8 * sCss) + Math.max(1, cssToCanvas(2 * sCss));
-        const rowFont = Math.max(8, cssToCanvas(16 * sCss));
-        sx.font = `400 ${rowFont}px system-ui, sans-serif`;
-        if (manifestRows.length > 0) {
-          manifestRows.forEach((r, i) => {
-            sx.fillText(`${r.count} x ${r.label}`, pad, my + i * (rowFont * 1.35));
-          });
-        } else {
-          sx.font = `400 ${Math.max(8, cssToCanvas(13 * sCss))}px system-ui, sans-serif`;
-          sx.fillText("(no items yet)", pad, my);
-        }
-      });
-    }
-  }
-  if (exportIncludeTitle) {
-    for (const tb of titleBoxes || []) {
-      const p = project(tb?.pos);
-      if (!inBounds(p)) continue;
-      const sc = toCanvas(p);
-      const zRef = tb.zRef ?? ELEMENT_BASE_ZOOM;
-      const sCss = planElementZoomForExport(zRef);
-      const w = cssToCanvas(cssPlanPxRounded(tb.wPx || 360, zRef));
-      const h = cssToCanvas(cssPlanPxRounded(tb.hPx || 120, zRef));
-      const data = titleBoxDataById?.[tb.id] || {};
-      const left = sc.x - w / 2;
-      const top  = sc.y - h / 2;
-
-      const tPad   = cssToCanvas(cssPlanPx(10, zRef));
-      const gap    = cssToCanvas(cssPlanPx(6,  zRef));
-      const gap12  = cssToCanvas(cssPlanPx(12, zRef));
-      const logoW  = cssToCanvas(cssPlanPx(90, zRef));
-      const logoH  = cssToCanvas(cssPlanPx(70, zRef));
-      const borderW = Math.max(0.5, cssToCanvas(cssPlanPx(2, zRef)));
-
-      drawScaledPanelBlit(ctx, left, top, w, h, (sx, pw, ph) => {
-        sx.fillStyle = "#FFFFFF";
-        sx.fillRect(0, 0, pw, ph);
-        sx.strokeStyle = "#111111";
-        sx.lineWidth = borderW;
-        sx.strokeRect(0, 0, pw, ph);
-
-        const textX = tPad + logoW + gap12;
-        let ty = tPad;
-
-        sx.fillStyle = "#111111";
-        sx.textAlign = "left";
-        sx.textBaseline = "top";
-
-        const projFs    = cssToCanvas(cssPlanPx(14, zRef));
-        const fieldFs   = cssToCanvas(cssPlanPx(12, zRef));
-        const logoLblFs = cssToCanvas(cssPlanPx(11, zRef));
-
-        const tbDrawLV = (label, value, x0, y0, fs) => {
-          sx.font = `700 ${fs}px system-ui, sans-serif`;
-          sx.fillStyle = "#111111";
-          sx.fillText(label, x0, y0);
-          const labelW = sx.measureText(label).width;
-          sx.font = `${fs}px system-ui, sans-serif`;
-          sx.fillText(value, x0 + labelW, y0);
-          return x0 + labelW + sx.measureText(value).width;
-        };
-
-        sx.strokeStyle = "#dddddd";
-        sx.lineWidth = Math.max(1, cssToCanvas(cssPlanPx(1, zRef)));
-        sx.strokeRect(tPad, tPad, logoW, logoH);
-        sx.font = `${logoLblFs}px system-ui, sans-serif`;
-        sx.fillStyle = "#666666";
-        sx.textAlign = "center";
-        sx.textBaseline = "middle";
-        sx.fillText("Logo", tPad + logoW / 2, tPad + logoH / 2);
-        sx.textAlign = "left";
-        sx.textBaseline = "top";
-        sx.fillStyle = "#111111";
-
-        sx.font = `900 ${projFs}px system-ui, sans-serif`;
-        sx.fillText("Project:", textX, ty);
-        const projLabelW = sx.measureText("Project: ").width;
-        sx.font = `800 ${projFs}px system-ui, sans-serif`;
-        sx.fillText(data.project || "", textX + projLabelW, ty);
-        ty += projFs + cssToCanvas(cssPlanPx(4, zRef));
-
-        let fx = textX;
-        fx = tbDrawLV("Date:", ` ${data.date || ""}`, fx, ty, fieldFs);
-        fx += sx.measureText("   ").width;
-        tbDrawLV("Author:", ` ${data.author || ""}`, fx, ty, fieldFs);
-        ty += fieldFs * 1.3;
-
-        tbDrawLV("Job Location:", ` ${data.jobLocation || ""}`, textX, ty, fieldFs);
-        ty += fieldFs * 1.3;
-
-        const rowBottom = Math.max(tPad + logoH, ty);
-        const divY = rowBottom + gap;
-        const divH = Math.max(1, cssToCanvas(cssPlanPx(1, zRef)));
-        sx.globalAlpha = 0.2;
-        sx.fillStyle = "#111111";
-        sx.fillRect(tPad, divY, pw - 2 * tPad, divH);
-        sx.globalAlpha = 1;
-
-        const cmtY = divY + divH + gap;
-        sx.textAlign    = "left";
-        sx.textBaseline = "top";
-        sx.font = `700 ${fieldFs}px system-ui, sans-serif`;
-        sx.fillStyle = "#111111";
-        sx.fillText("Comments:", tPad, cmtY);
-        const cmtLabelW = sx.measureText("Comments: ").width;
-        sx.font = `${fieldFs}px system-ui, sans-serif`;
-        sx.fillStyle = "#111111";
-        sx.textBaseline = "top";
-        sx.textAlign    = "left";
-        {
-          const cmtRaw = normalizeCommentLineBreaks(data.comments || "");
-          const cmtMaxY = ph - tPad;
-          const maxTextW = pw - 2 * tPad;
-          const cmtLineH = fieldFs * 1.35;
-          if (cmtRaw) {
-            wrapCanvasTextNL(sx, cmtRaw, maxTextW, cmtLineH, tPad, cmtY, cmtMaxY, cmtLabelW);
-          }
-        }
-      });
-    }
-  }
+  // Legend rendered as PDF vector (Step 10)
+  // Manifest rendered as PDF vector (Step 10)
+  // Title box rendered as PDF vector (Step 10)
   // North arrow rendered as PDF vector (Step 10)
   // Scale bar rendered as PDF vector (Step 10)
 
@@ -3997,6 +3703,348 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(10);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
+
+  // ── Legend box: PDF vector ──
+  if (exportIncludeLegend) {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    const planPxMm = (wPx, zRef) =>
+      cssPlanPxRounded(wPx || 60, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
+    const mmToPt = (mm) => mm * 72 / 25.4;
+
+    for (const lb of legendBoxes || []) {
+      const center = toPdf(project(toPlainLL(lb.pos)));
+      if (!center) continue;
+      const LEGEND_DEFAULT_W = 260;
+      const LEGEND_DEFAULT_H = 240;
+      const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
+      const boxW = planPxMm(lb.wPx ?? LEGEND_DEFAULT_W, zRef);
+      const boxH = planPxMm(lb.hPx ?? LEGEND_DEFAULT_H, zRef);
+      const unit = boxW / (lb.wPx ?? LEGEND_DEFAULT_W);
+      const cMm  = (px) => px * unit;
+
+      const left = center.x - boxW / 2;
+      const top  = center.y - boxH / 2;
+      const pad  = cMm(10);
+
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(17, 17, 17);
+      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.rect(left, top, boxW, boxH, "FD");
+
+      const titleFsMm = cMm(18);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(mmToPt(titleFsMm));
+      pdf.setTextColor(17, 17, 17);
+      pdf.text("Legend", left + pad, top + pad + titleFsMm * 0.85, { baseline: "bottom" });
+
+      const divY = top + pad + titleFsMm + cMm(6);
+      pdf.setDrawColor(17, 17, 17);
+      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.line(left + pad, divY, left + boxW - pad, divY);
+
+      const rowH    = cMm(14);
+      const labelFs = cMm(10);
+      const iconSz  = cMm(8);
+      const iconPad = cMm(3);
+      let rowY = divY + cMm(8) + rowH * 0.85;
+      const maxY = top + boxH - pad;
+      const textX = left + pad + iconSz + iconPad;
+
+      // Signs
+      const drawnSignCodes = new Set();
+      for (const sg of placedSigns || []) {
+        const code = sg.typeId ?? sg.code ?? sg.id;
+        if (legendExclusionsForExport.has(code) || drawnSignCodes.has(code)) continue;
+        drawnSignCodes.add(code);
+        if (rowY > maxY) break;
+        pdf.setFillColor(229, 231, 235);
+        pdf.setDrawColor(17, 17, 17);
+        pdf.setLineWidth(0.1);
+        pdf.rect(left + pad, rowY - iconSz * 0.85, iconSz, iconSz, "FD");
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(mmToPt(labelFs));
+        pdf.setTextColor(34, 34, 34);
+        pdf.text(code, textX, rowY, { baseline: "bottom" });
+        rowY += rowH;
+      }
+
+      // Cone / barrier / ped-tape types
+      const drawnConeTypes = new Set();
+      for (const f of conesFeatures || []) {
+        if (legendExclusionsForExport.has(f.typeId) || drawnConeTypes.has(f.typeId)) continue;
+        drawnConeTypes.add(f.typeId);
+        if (rowY > maxY) break;
+        const r = iconSz / 2;
+        const cx = left + pad + r;
+        const cy = rowY - r * 0.85;
+        if (f.typeId === "barrel") {
+          pdf.setFillColor(249, 115, 22);
+          pdf.circle(cx, cy, r, "F");
+        } else if (f.typeId === "bollard") {
+          pdf.setFillColor(252, 211, 77);
+          pdf.circle(cx, cy, r, "F");
+        } else if (f.typeId === "cone") {
+          pdf.setFillColor(245, 158, 11);
+          pdf.lines([[r, iconSz], [-iconSz, 0]], cx, cy - r, [1, 1], "F", true);
+        } else if (f.typeId === "barrier") {
+          pdf.setDrawColor(156, 163, 175);
+          pdf.setLineWidth(cMm(1.5));
+          pdf.setLineDashPattern([cMm(2), cMm(1)], 0);
+          pdf.line(left + pad, cy, left + pad + iconSz, cy);
+          pdf.setLineDashPattern([], 0);
+        } else if (f.typeId === "ped_tape") {
+          pdf.setDrawColor(220, 38, 38);
+          pdf.setLineWidth(cMm(1.5));
+          pdf.setLineDashPattern([cMm(2), cMm(1)], 0);
+          pdf.line(left + pad, cy, left + pad + iconSz, cy);
+          pdf.setLineDashPattern([], 0);
+        } else {
+          pdf.setFillColor(245, 158, 11);
+          pdf.circle(cx, cy, r, "F");
+        }
+        const label = LEGEND_CLABEL[f.typeId] || f.typeId;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(mmToPt(labelFs));
+        pdf.setTextColor(34, 34, 34);
+        pdf.text(label, textX, rowY, { baseline: "bottom" });
+        rowY += rowH;
+      }
+
+      // Work areas swatch
+      if ((workAreas || []).length > 0 && !legendExclusionsForExport.has("workArea") && rowY <= maxY) {
+        pdf.setFillColor(224, 248, 234);
+        pdf.setDrawColor(0, 200, 83);
+        pdf.setLineWidth(0.1);
+        pdf.rect(left + pad, rowY - iconSz * 0.85, iconSz, iconSz, "FD");
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(mmToPt(labelFs));
+        pdf.setTextColor(34, 34, 34);
+        pdf.text("Work Area", textX, rowY, { baseline: "bottom" });
+      }
+    }
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(0, 0, 0);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
+
+  // ── Manifest box: PDF vector ──
+  if (exportIncludeNotes) {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    const planPxMm = (wPx, zRef) =>
+      cssPlanPxRounded(wPx || 60, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
+    const mmToPt = (mm) => mm * 72 / 25.4;
+
+    for (const mb of manifestBoxes || []) {
+      const center = toPdf(project(toPlainLL(mb.pos)));
+      if (!center) continue;
+      const MANIFEST_DEFAULT_W = 240;
+      const MANIFEST_DEFAULT_H = 220;
+      const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
+      const boxW = planPxMm(mb.wPx ?? MANIFEST_DEFAULT_W, zRef);
+      const boxH = planPxMm(mb.hPx ?? MANIFEST_DEFAULT_H, zRef);
+      const unit = boxW / (mb.wPx ?? MANIFEST_DEFAULT_W);
+      const cMm  = (px) => px * unit;
+
+      const left = center.x - boxW / 2;
+      const top  = center.y - boxH / 2;
+      const pad  = cMm(10);
+
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(17, 17, 17);
+      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.rect(left, top, boxW, boxH, "FD");
+
+      const titleFsMm = cMm(18);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(mmToPt(titleFsMm));
+      pdf.setTextColor(17, 17, 17);
+      pdf.text("Manifest", left + pad, top + pad + titleFsMm * 0.85, { baseline: "bottom" });
+
+      const divY = top + pad + titleFsMm + cMm(6);
+      pdf.setDrawColor(17, 17, 17);
+      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.line(left + pad, divY, left + boxW - pad, divY);
+
+      const rowFsMm = cMm(16);
+      const rowH    = rowFsMm * 1.4;
+      let rowY = divY + cMm(8) + rowFsMm * 0.85;
+      const maxY = top + boxH - pad;
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(mmToPt(rowFsMm));
+      pdf.setTextColor(17, 17, 17);
+
+      if (manifestRows.length === 0) {
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(mmToPt(cMm(13)));
+        pdf.text("(no items yet)", left + pad, rowY, { baseline: "bottom" });
+      } else {
+        for (const r of manifestRows) {
+          if (rowY > maxY) break;
+          pdf.text(`${r.count} x ${r.label}`, left + pad, rowY, { baseline: "bottom" });
+          rowY += rowH;
+        }
+      }
+    }
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(0, 0, 0);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
+
+  // ── Title box: PDF vector (insertObjects kind="title_box") ──
+  if (exportIncludeTitle) {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    const planPxMm = (wPx, zRef) =>
+      cssPlanPxRounded(wPx || 60, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
+    const mmToPt = (mm) => mm * 72 / 25.4;
+    const sf = pdf.internal.scaleFactor;
+
+    for (const obj of (insertObjects || []).filter((o) => o.kind === "title_box")) {
+      const center = toPdf(project(toPlainLL(obj.pos)));
+      if (!center) continue;
+      const zRef = obj.zRef ?? ELEMENT_BASE_ZOOM;
+      const boxW = planPxMm(obj.wPx ?? 360, zRef);
+      const boxH = planPxMm(obj.hPx ?? 180, zRef);
+      const unit = boxW / (obj.wPx ?? 360);
+      const cMm  = (px) => px * unit;
+
+      const d    = obj.data || {};
+      const left = center.x - boxW / 2;
+      const top  = center.y - boxH / 2;
+      const pad  = cMm(10);
+
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(17, 17, 17);
+      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.rect(left, top, boxW, boxH, "FD");
+
+      const logoAreaW = cMm(90);
+      const logoAreaH = cMm(70);
+      const logoLeft  = left + pad;
+      const logoTop   = top  + pad;
+
+      // Logo area border
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(221, 221, 221);
+      pdf.setLineWidth(Math.max(0.05, cMm(1)));
+      pdf.rect(logoLeft, logoTop, logoAreaW, logoAreaH, "FD");
+
+      // Logo image or placeholder text
+      const logoImg = titleBoxLogoById.get(obj.id);
+      if (logoImg && d.logoDataUrl) {
+        try {
+          const logoScale = Number(d.logoScale) || 1;
+          const ar = (logoImg.naturalWidth || 1) / (logoImg.naturalHeight || 1);
+          let lw = Math.min(logoAreaW, logoAreaH * ar) * logoScale;
+          let lh = lw / ar;
+          if (lh > logoAreaH) { lh = logoAreaH * logoScale; lw = lh * ar; }
+          pdf.addImage(
+            d.logoDataUrl, "PNG",
+            logoLeft + (logoAreaW - lw) / 2, logoTop + (logoAreaH - lh) / 2, lw, lh,
+            undefined, "NONE"
+          );
+        } catch (_) { /* logo decode failed — leave blank */ }
+      } else {
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(mmToPt(cMm(11)));
+        pdf.setTextColor(102, 102, 102);
+        pdf.text("Logo", logoLeft + logoAreaW / 2, logoTop + logoAreaH / 2, { align: "center", baseline: "middle" });
+      }
+
+      // Right-side text
+      const textX  = logoLeft + logoAreaW + cMm(12);
+      const textMaxW = left + boxW - pad - textX;
+      const projFsMm  = cMm(14);
+      const fieldFsMm = cMm(12);
+      let ty = top + pad;
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(mmToPt(projFsMm));
+      pdf.setTextColor(17, 17, 17);
+      const projLabel = "Project: ";
+      const projLabelW = pdf.getStringUnitWidth(projLabel) * projFsMm / sf;
+      pdf.text(projLabel, textX, ty + projFsMm * 0.85, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal");
+      pdf.text(String(d.project || ""), textX + projLabelW, ty + projFsMm * 0.85, { baseline: "bottom" });
+      ty += projFsMm + cMm(4);
+
+      pdf.setFontSize(mmToPt(fieldFsMm));
+      pdf.setFont("helvetica", "bold");
+      const dateLabelW = pdf.getStringUnitWidth("Date: ") * fieldFsMm / sf;
+      pdf.text("Date: ", textX, ty + fieldFsMm * 0.85, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal");
+      pdf.text(String(d.date || ""), textX + dateLabelW, ty + fieldFsMm * 0.85, { baseline: "bottom" });
+      const authorX = textX + dateLabelW + pdf.getStringUnitWidth(String(d.date || "")) * fieldFsMm / sf + cMm(6);
+      pdf.setFont("helvetica", "bold");
+      const authLabelW = pdf.getStringUnitWidth("Author: ") * fieldFsMm / sf;
+      pdf.text("Author: ", authorX, ty + fieldFsMm * 0.85, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal");
+      pdf.text(String(d.author || ""), authorX + authLabelW, ty + fieldFsMm * 0.85, { baseline: "bottom" });
+      ty += fieldFsMm * 1.3;
+
+      pdf.setFont("helvetica", "bold");
+      const jobLabelW = pdf.getStringUnitWidth("Job Location: ") * fieldFsMm / sf;
+      pdf.text("Job Location: ", textX, ty + fieldFsMm * 0.85, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal");
+      pdf.text(String(d.jobLocation || ""), textX + jobLabelW, ty + fieldFsMm * 0.85, { baseline: "bottom" });
+      ty += fieldFsMm * 1.3;
+
+      // Divider
+      const rowBottom = Math.max(top + pad + logoAreaH, ty);
+      const divY = rowBottom + cMm(6);
+      // 20% black over white → rgb(204,204,204)
+      pdf.setDrawColor(204, 204, 204);
+      pdf.setLineWidth(Math.max(0.05, cMm(1)));
+      pdf.line(left + pad, divY, left + boxW - pad, divY);
+
+      // Comments
+      const cmtY = divY + cMm(6);
+      const cmtFsMm = fieldFsMm;
+      const cmtLineH = cmtFsMm * 1.35;
+      pdf.setFontSize(mmToPt(cmtFsMm));
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(17, 17, 17);
+      const cmtLabel = "Comments: ";
+      const cmtLabelW = pdf.getStringUnitWidth(cmtLabel) * cmtFsMm / sf;
+      pdf.text(cmtLabel, left + pad, cmtY + cmtFsMm * 0.85, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal");
+      const maxCmtY = top + boxH - pad;
+      const cmtLines = normalizeCommentLineBreaks(d.comments || "").split("\n");
+      let ly = cmtY;
+      let firstLine = true;
+      for (const line of cmtLines) {
+        if (ly + cmtFsMm > maxCmtY) break;
+        const lineX = firstLine ? left + pad + cmtLabelW : left + pad;
+        pdf.text(line, lineX, ly + cmtFsMm * 0.85, { baseline: "bottom" });
+        ly += cmtLineH;
+        firstLine = false;
+      }
+    }
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(0, 0, 0);
     pdf.setDrawColor(0, 0, 0);
     pdf.setFillColor(0, 0, 0);
     pdf.setLineWidth(0.5);
