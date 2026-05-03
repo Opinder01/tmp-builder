@@ -2938,9 +2938,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       img.src = url;
     });
   };
-  const scaleBarRaster = await loadRasterForExport("/scale-bar.svg");
-
-  // Cones / barriers / ped_tape, work areas and measurements rendered as PDF vectors below (Step 10)
+  // Cones / barriers / ped_tape, work areas, measurements, north arrow, scale bar and attribution rendered as PDF vectors below (Step 10)
 
   // Placed signs: load images and draw with rotation; fallback to placeholder on load failure
   const loadSignImage = (url) => {
@@ -3668,72 +3666,11 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       });
     }
   }
-  if (exportIncludeNorthArrow) {
-    for (const na of northArrows || []) {
-      const p = project(na?.pos);
-      if (!inBounds(p)) continue;
-      const sc = toCanvas(p);
-      const zRef = na.zRef ?? ELEMENT_BASE_ZOOM;
-      const size = cssToCanvas(cssPlanPxRounded(na.wPx || 70, zRef));
-      ctx.save();
-      ctx.translate(sc.x, sc.y);
-      ctx.rotate(((na.rotDeg ?? 0) * Math.PI) / 180);
-      // Replicate NorthArrowSVG: viewBox "23 8 54 54", path "M50 10 L75 60 L50 48 L25 60 Z"
-      // Points converted to centre-relative fractions of the element's bounding box (size × size):
-      //   (50,10) → centre dx=0,   dy=-0.463  (tip)
-      //   (75,60) → centre dx=+0.463, dy=+0.463  (bottom-right)
-      //   (50,48) → centre dx=0,   dy=+0.241  (waist)
-      //   (25,60) → centre dx=-0.463, dy=+0.463  (bottom-left)
-      ctx.fillStyle = "#000000";
-      ctx.beginPath();
-      ctx.moveTo(0,                    -size * 0.463); // tip
-      ctx.lineTo(+size * 0.463,        +size * 0.463); // bottom-right
-      ctx.lineTo(0,                    +size * 0.241); // waist
-      ctx.lineTo(-size * 0.463,        +size * 0.463); // bottom-left
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-  if (exportIncludeScaleBar) {
-    for (const sc of scales || []) {
-      const p = project(sc?.pos);
-      if (!inBounds(p)) continue;
-      const c = toCanvas(p);
-      const zRef = sc.zRef ?? ELEMENT_BASE_ZOOM;
-      const w = cssToCanvas(cssPlanPxRounded(sc.wPx || 120, zRef));
-      const h = cssToCanvas(cssPlanPxRounded(sc.hPx || 60, zRef));
-      const left = c.x - w / 2;
-      const top = c.y - h / 2;
-      if (scaleBarRaster) {
-        ctx.drawImage(scaleBarRaster, left, top, w, h);
-      } else {
-        ctx.strokeStyle = "#111111";
-        ctx.lineWidth = Math.max(1, exportCanvasScale);
-        ctx.strokeRect(left, top, w, h);
-        ctx.font = `${Math.max(8, 10 * exportCanvasScale)}px sans-serif`;
-        ctx.fillStyle = "#111";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText("Plan scale", left + cssToCanvas(4), c.y);
-      }
-    }
-  }
+  // North arrow rendered as PDF vector (Step 10)
+  // Scale bar rendered as PDF vector (Step 10)
 
   // ── STEP 9: attribution bar (Google requirement) ─────────────────────────
   ctx.restore(); // end clip
-  {
-    const ATTRIB = "Map data \u00A9 Google";
-    const BAR_H  = Math.max(18, Math.round(outH * 0.018));
-    ctx.fillStyle = "rgba(255,255,255,0.82)";
-    ctx.fillRect(0, outH - BAR_H, outW, BAR_H);
-    ctx.fillStyle = "#444";
-    ctx.font = `${Math.max(10, BAR_H * 0.65)}px Arial, sans-serif`;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    ctx.fillText(ATTRIB, outW - 8, outH - BAR_H / 2);
-  }
-
   // ── STEP 10: PDF output (full stitched pixel dimensions embedded for print clarity) ──
   const MARGIN   = 2;    // mm — left/right margin
   const HDR_H    = 9;    // mm — branding header height
@@ -4063,6 +4000,109 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     pdf.setDrawColor(0, 0, 0);
     pdf.setFillColor(0, 0, 0);
     pdf.setLineWidth(0.5);
+  }
+
+  // ── North arrow: PDF vector ──
+  if (exportIncludeNorthArrow) {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    // plan-element CSS px → PDF mm: same scale used by canvas version
+    const planPxMm = (wPx, zRef) =>
+      cssPlanPxRounded(wPx || 70, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
+
+    for (const na of northArrows || []) {
+      const center = toPdf(project(toPlainLL(na.pos)));
+      if (!center) continue;
+      const s = planPxMm(na.wPx || 70, na.zRef);
+      const rotRad = ((na.rotDeg ?? 0) * Math.PI) / 180;
+      const cos = Math.cos(rotRad), sin = Math.sin(rotRad);
+      const rot = (dx, dy) => ({ x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos });
+      // NorthArrowSVG path "M50 10 L75 60 L50 48 L25 60 Z" in viewBox "23 8 54 54"
+      // fraction offsets from centre: tip(0,-0.463) br(+0.463,+0.463) waist(0,+0.241) bl(-0.463,+0.463)
+      const tip   = rot(0,           -s * 0.463);
+      const br    = rot(+s * 0.463,  +s * 0.463);
+      const waist = rot(0,           +s * 0.241);
+      const bl    = rot(-s * 0.463,  +s * 0.463);
+      pdf.setFillColor(0, 0, 0);
+      pdf.lines(
+        [[br.x - tip.x, br.y - tip.y], [waist.x - br.x, waist.y - br.y], [bl.x - waist.x, bl.y - waist.y]],
+        tip.x, tip.y, [1, 1], "F", true
+      );
+    }
+    pdf.setFillColor(0, 0, 0);
+  }
+
+  // ── Scale bar: PDF vector ──
+  if (exportIncludeScaleBar) {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    const planPxMm = (wPx, zRef) =>
+      cssPlanPxRounded(wPx || 120, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
+
+    for (const sc of scales || []) {
+      const center = toPdf(project(toPlainLL(sc.pos)));
+      if (!center) continue;
+
+      const barW = Math.max(8, planPxMm(sc.wPx || 120, sc.zRef));
+      const barH = 3.5; // fixed mm height — clean and legible
+      const lat  = toPlainLL(sc.pos)?.lat ?? 49;
+      const mppAtExport = metersPerPixelAtLat(lat, zoom);  // metres / world-px
+      const metersPerMm = mppAtExport * (imgW / mapW_mm);  // metres / PDF mm
+      const totalMeters = barW * metersPerMm;
+      const niceMax = pickNiceMeters(totalMeters * 0.9);   // snap to 1/2/5/10…
+      const usedW   = (niceMax / totalMeters) * barW;      // mm for niceMax metres
+      const halfW   = usedW / 2;
+      const left    = center.x - usedW / 2;
+      const top     = center.y - barH / 2;
+
+      // White base + black border
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(0, 0, 0);
+      pdf.setLineWidth(0.2);
+      pdf.rect(left, top, usedW, barH, "FD");
+      // Left half: filled black
+      pdf.setFillColor(0, 0, 0);
+      pdf.setDrawColor(0, 0, 0);
+      pdf.rect(left, top, halfW, barH, "F");
+      // Divider between halves
+      pdf.setLineWidth(0.2);
+      pdf.line(left + halfW, top, left + halfW, top + barH);
+
+      // Distance labels
+      const fmtDist = (m) => m >= 1000 ? `${+(m / 1000).toPrecision(3).replace(/\.?0+$/, "")} km` : `${Math.round(m)} m`;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(5.5);
+      pdf.setTextColor(0, 0, 0);
+      const lblY = top + barH + 2;
+      pdf.text("0", left, lblY, { align: "center" });
+      pdf.text(fmtDist(niceMax / 2), left + halfW, lblY, { align: "center" });
+      pdf.text(fmtDist(niceMax), left + usedW, lblY, { align: "center" });
+    }
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(0, 0, 0);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
+
+  // ── Attribution bar: PDF vector (Google Maps requirement) ──
+  {
+    const ATTRIB_TEXT = "Map data © Google";
+    const attribH = 4.5;
+    const attribY = mapRect.y + mapRect.h - attribH;
+    pdf.setFillColor(255, 255, 255);
+    pdf.rect(mapRect.x, attribY, mapRect.w, attribH, "F");
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(5);
+    pdf.setTextColor(68, 68, 68);
+    pdf.text(ATTRIB_TEXT, mapRect.x + mapRect.w - 2, attribY + attribH * 0.55, { align: "right" });
+    pdf.setTextColor(0, 0, 0);
   }
 
   // Border around map
