@@ -939,18 +939,11 @@ function BarricadeType2({ strokeScale = 1 }) {
     </svg>
   );
 }
-function Dot({ size = 8, strokeScale = 1 }) {
+function Dot({ size = 8, strokeScale = 1, fillColor = "#F97316" }) {
   return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 999,
-        background: "#F97316",
-        border: `${1.4 * strokeScale}px solid #111`,
-        boxSizing: "border-box",
-      }}
-    />
+    <svg width={size} height={size} viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10.5" fill={fillColor} stroke="#111111" strokeWidth={1.4 * strokeScale} />
+    </svg>
   );
 }
 function MarkerVisual({ typeId, strokeScale = 1, scale = 1 }) {
@@ -959,8 +952,8 @@ function MarkerVisual({ typeId, strokeScale = 1, scale = 1 }) {
   // resolution instead of being CSS-scaled from a cached small bitmap.
   const sz = Math.max(2, Math.round(cfg.markerSize * scale));
 
-  if (typeId === "barrel") return <Dot size={sz} strokeScale={strokeScale} />;
-  if (typeId === "bollard") return <Dot size={sz} strokeScale={strokeScale} />;
+  if (typeId === "barrel") return <Dot size={sz} strokeScale={strokeScale} fillColor="#F97316" />;
+  if (typeId === "bollard") return <Dot size={sz} strokeScale={strokeScale} fillColor="#FCD34D" />;
   if (typeId === "cone") {
     return (
       <div style={{ width: sz, height: sz }}>
@@ -3948,22 +3941,28 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         }
         pdf.setLineDashPattern([], 0);
       } else if (f.typeId === "ped_tape") {
-        pdf.setDrawColor(220, 38, 38);
-        pdf.setLineWidth(0.35);
+        // White base + red dashes — matches editor's dual-layer PedTapePolyline
+        pdf.setLineDashPattern([], 0);
+        pdf.setDrawColor(255, 254, 254);
+        pdf.setLineWidth(0.55);
         for (let i = 0; i < verts.length - 1; i++) {
           const a = toPdf(verts[i]), b = toPdf(verts[i + 1]);
           if (a && b) pdf.line(a.x, a.y, b.x, b.y);
         }
+        pdf.setDrawColor(220, 38, 38);
+        pdf.setLineWidth(0.4);
+        pdf.setLineDashPattern([1.5, 1.5], 0);
+        for (let i = 0; i < verts.length - 1; i++) {
+          const a = toPdf(verts[i]), b = toPdf(verts[i + 1]);
+          if (a && b) pdf.line(a.x, a.y, b.x, b.y);
+        }
+        pdf.setLineDashPattern([], 0);
       } else {
-        // Mirror the editor's elementScale formula exactly.
-        // imgW is in world-px at the export tile zoom (same coordinate space as project()).
-        // At zoom Z, elementScale = pow(2, Z-18), so cfg.markerSize * elementScale world-px
-        // is the same physical size as the editor renders the icon at that zoom.
+        // Scale marker size to match editor's elementScale at the export tile zoom
         const cfg = CONE_VISUAL[f.typeId] || CONE_VISUAL.default;
         const exportElementScale = Math.max(0.35, Math.min(1.2, Math.pow(2, zoom - 18)));
         const markerSizeMm = Math.max(0.4, cfg.markerSize * exportElementScale * (mapW_mm / imgW));
 
-        // Same lat/lng positions as the editor — no resampling difference
         const markers = sampleConesMarkersForPath(
           path.map((p) => toPlainLL(p)).filter(Boolean),
           f.typeId
@@ -3974,30 +3973,64 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
           if (!inMapRect(mm)) continue;
 
           if (f.typeId === "barrel") {
-            // Orange circle — fill only (no stroke) to stay in DeviceRGB at all zoom levels
+            // Orange circle — matches Dot fillColor="#F97316" in editor
             pdf.setFillColor(249, 115, 22);
             pdf.circle(mm.x, mm.y, markerSizeMm / 2, "F");
           } else if (f.typeId === "bollard") {
-            // Dark circle — fill only
-            pdf.setFillColor(55, 65, 81);
+            // Yellow circle — matches Dot fillColor="#FCD34D" in editor
+            pdf.setFillColor(252, 211, 77);
             pdf.circle(mm.x, mm.y, markerSizeMm / 2, "F");
           } else if (f.typeId === "type1" || f.typeId === "type2") {
-            const bw = markerSizeMm * 1.5, bh = markerSizeMm * 0.7;
-            const sx = mm.x - bw / 2, sy = mm.y - bh / 2;
-            // White rect with near-black border — use non-equal R/G/B to force DeviceRGB
-            pdf.setFillColor(255, 254, 255);
-            pdf.setDrawColor(18, 17, 17);
-            pdf.setLineWidth(Math.max(0.08, bh * 0.08));
-            pdf.rect(sx, sy, bw, bh, "FD");
-            // Orange diagonal stripes — non-equal values → DeviceRGB stroke
-            pdf.setDrawColor(245, 158, 11);
-            pdf.setLineWidth(Math.max(0.1, bh * 0.2));
-            pdf.line(sx + bw * 0.15, sy + bh * 0.3,  sx + bw * 0.5,  sy + bh * 0.1);
-            pdf.line(sx + bw * 0.35, sy + bh * 0.5,  sx + bw * 0.85, sy + bh * 0.1);
-            pdf.line(sx + bw * 0.1,  sy + bh * 0.8,  sx + bw * 0.75, sy + bh * 0.5);
+            // Barricade drawn from the same SVG coords as BarricadeType1/2 (32×32 viewbox)
+            const s = markerSizeMm / 32;
+            const X = (vx) => mm.x + (vx - 16) * s;
+            const Y = (vy) => mm.y + (vy - 16) * s;
+            const sw = (w) => Math.max(0.05, w * s);
+
+            if (f.typeId === "type1") {
+              // Rect body: (7,12) w=18 h=10 rx=2
+              pdf.setFillColor(255, 254, 255);
+              pdf.setDrawColor(18, 17, 17);
+              pdf.setLineWidth(sw(1.1));
+              pdf.rect(X(7), Y(12), 18 * s, 10 * s, "FD");
+              // Legs
+              pdf.setDrawColor(18, 17, 17);
+              pdf.setLineWidth(sw(1.8));
+              pdf.line(X(11), Y(22), X(9),  Y(28));
+              pdf.line(X(21), Y(22), X(23), Y(28));
+              // Orange diagonal stripes
+              pdf.setDrawColor(245, 158, 11);
+              pdf.setLineWidth(sw(2.6));
+              pdf.line(X(10), Y(14), X(14), Y(12));
+              pdf.line(X(16), Y(16), X(22), Y(13));
+              pdf.line(X(10), Y(20), X(22), Y(14));
+            } else {
+              // type2 — wider rect with top rail
+              pdf.setFillColor(255, 254, 255);
+              pdf.setDrawColor(18, 17, 17);
+              pdf.setLineWidth(sw(1.2));
+              pdf.rect(X(6), Y(12), 20 * s, 10 * s, "FD");
+              // Top rail: (8,10) w=16 h=3
+              pdf.setFillColor(229, 231, 235);
+              pdf.setDrawColor(18, 17, 17);
+              pdf.setLineWidth(sw(1.0));
+              pdf.rect(X(8), Y(10), 16 * s, 3 * s, "FD");
+              // Legs
+              pdf.setDrawColor(18, 17, 17);
+              pdf.setLineWidth(sw(1.8));
+              pdf.line(X(11), Y(22), X(9),  Y(28));
+              pdf.line(X(21), Y(22), X(23), Y(28));
+              // Orange diagonal stripes
+              pdf.setDrawColor(245, 158, 11);
+              pdf.setLineWidth(sw(2.6));
+              pdf.line(X(9),  Y(16), X(15), Y(13));
+              pdf.line(X(13), Y(20), X(23), Y(14));
+              pdf.line(X(8),  Y(18), X(12), Y(16));
+            }
           } else {
-            // Cone: amber triangle pointing up — fill only, centered on marker position
-            const th = markerSizeMm, tw = markerSizeMm * 0.5;
+            // Cone: amber triangle — proportions match TriangleCone SVG (16×16 in 24×24 viewbox)
+            const th = markerSizeMm * (16 / 24);
+            const tw = th;
             pdf.setFillColor(245, 158, 11);
             pdf.lines([[tw / 2, th], [-tw, 0]], mm.x, mm.y - th / 2, [1, 1], "F", true);
           }
