@@ -584,7 +584,7 @@ const DEFAULT_CONE_SPACING_M = 2.9;
 const CONE_SPACING_MULTIPLIER = {
   cone: 1,        // 2.9 m
   bollard: 1,     // 2.9 m
-  barrel: 1,      // 2.9 m
+  barrel: 5 / DEFAULT_CONE_SPACING_M,  // 5 m
   type1: 2.0,     // barricades spaced wider
   type2: 2.2,
   default: 1,
