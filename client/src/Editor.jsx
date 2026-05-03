@@ -2955,8 +2955,8 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   };
   const signImages = await Promise.all((placedSigns || []).map((s) => loadSignImage(s?.src)));
 
-  // Stand connectors + tripods first so dashed lines are not painted on top of sign artwork.
-  // Stand connector lines (dashed) + stand icons (tripod / windmaster)
+  // Stand connectors rendered as PDF vectors below (Step 10). Tripods still on canvas.
+  // Stand icons (tripod / windmaster) — canvas only
   for (const s of placedSigns || []) {
     const signZRef = s?.zRef ?? ELEMENT_BASE_ZOOM;
     // sc = canvas px per 1 CSS px of the stand icon (tracks sign zoom scale)
@@ -2967,16 +2967,6 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       if (!inBounds(p1) || !inBounds(p2)) continue;
       const c1 = toCanvas(p1);
       const c2 = toCanvas(p2);
-      // Dashed connector line — dash/gap and line-width scale with sign zoom (sc already tracks signZRef)
-      const dashLen = Math.max(2, 4 * sc);
-      ctx.setLineDash([dashLen, dashLen]);
-      ctx.strokeStyle = "#666666";
-      ctx.lineWidth = Math.max(1, 1 * sc);
-      ctx.beginPath();
-      ctx.moveTo(c1.x, c1.y);
-      ctx.lineTo(c2.x, c2.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
       // Stand icon centered at st.pos
       const rotDeg = st?.rotDeg ?? st?.rotationDeg ?? 0;
       ctx.save();
@@ -3047,35 +3037,8 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const zRef = a?.zRef ?? ELEMENT_BASE_ZOOM;
     const w = cssToCanvas(cssSignPx(a?.wPx || DEFAULT_ARROW_WIDTH_PX, zRef));
     const h = cssToCanvas(cssSignPx(a?.hPx || DEFAULT_ARROW_HEIGHT_PX, zRef));
-    const exportPts = a.points ?? (a.point ? [a.point] : []);
-    for (const pt of exportPts) {
-      const ptLatLng = (pt.dLat !== undefined)
-        ? { lat: a.pos.lat + pt.dLat, lng: a.pos.lng + pt.dLng }
-        : (pt.pos ?? null);
-      if (!ptLatLng) continue;
-      const pp = project(ptLatLng);
-      if (!pp) continue;
-      const cp = toCanvas(pp);
-      ctx.save();
-      const arrowSc = cssToCanvas(cssSignPx(1, zRef));
-      ctx.setLineDash([Math.max(2, 2 * arrowSc), Math.max(4, 6 * arrowSc)]);
-      ctx.strokeStyle = "#111";
-      ctx.lineWidth = Math.max(1, 1.5 * arrowSc);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(sc.x + w / 2, sc.y);
-      ctx.lineTo(cp.x, cp.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      const TW = 18 * arrowSc, TH = 5 * arrowSc, STEM_W = 3 * arrowSc, STEM_H = 12 * arrowSc;
-      const ptRotRad = ((pt.rotDeg ?? 0) * Math.PI) / 180;
-      ctx.translate(cp.x, cp.y);
-      ctx.rotate(ptRotRad);
-      ctx.fillStyle = "#000";
-      ctx.fillRect(-TW / 2, -TH - STEM_H, TW, TH);
-      ctx.fillRect(-STEM_W / 2, -STEM_H, STEM_W, STEM_H);
-      ctx.restore();
-    }
+    // Arrow board connector lines rendered as PDF vectors below (Step 10).
+    // Tripod icon + arrow artwork remain on canvas.
   }
   for (let i = 0; i < placedArrows.length; i++) {
     const a = placedArrows[i];
@@ -3833,6 +3796,49 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
     pdf.setDrawColor(0, 0, 0);
     pdf.setFillColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
+
+  // ── Sign / arrow-board stand connector lines: dashed vector ──
+  {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return {
+        x: mapRect.x + (px.x / imgW) * mapRect.w,
+        y: mapRect.y + (px.y / imgH) * mapRect.h,
+      };
+    };
+
+    pdf.setDrawColor(102, 102, 102);
+    pdf.setLineWidth(0.18);
+    pdf.setLineDashPattern([1.5, 1.5], 0);
+
+    for (const s of placedSigns || []) {
+      for (const st of s?.stands || []) {
+        const aMm = toPdf(project(toPlainLL(s.pos)));
+        const bMm = toPdf(project(toPlainLL(st?.pos)));
+        if (!aMm || !bMm) continue;
+        pdf.line(aMm.x, aMm.y, bMm.x, bMm.y);
+      }
+    }
+
+    for (const a of placedArrows || []) {
+      const aCenter = toPdf(project(toPlainLL(a?.pos)));
+      if (!aCenter) continue;
+      const exportPts = a.points ?? (a.point ? [a.point] : []);
+      for (const pt of exportPts) {
+        const ptLL = (pt.dLat !== undefined)
+          ? { lat: a.pos.lat + pt.dLat, lng: a.pos.lng + pt.dLng }
+          : (pt.pos ?? null);
+        if (!ptLL) continue;
+        const bMm = toPdf(project(ptLL));
+        if (!bMm) continue;
+        pdf.line(aCenter.x, aCenter.y, bMm.x, bMm.y);
+      }
+    }
+
+    pdf.setLineDashPattern([], 0);
+    pdf.setDrawColor(0, 0, 0);
     pdf.setLineWidth(0.5);
   }
 
