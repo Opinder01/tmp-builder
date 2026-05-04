@@ -3725,27 +3725,28 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const LEGEND_DEFAULT_W = 260;
       const LEGEND_DEFAULT_H = 240;
       const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
-      const boxW = planPxMm(lb.wPx ?? LEGEND_DEFAULT_W, zRef);
-      const boxH = planPxMm(lb.hPx ?? LEGEND_DEFAULT_H, zRef);
-      const rawUnit = boxW / (lb.wPx ?? LEGEND_DEFAULT_W);
-      // Floor: content must always be legible — min ~1mm per 5 design-px (gives ≥6pt title)
-      const unit = Math.max(rawUnit, 0.14);
-      const cMm  = (px) => px * unit;
 
-      const pad      = Math.max(1.5, cMm(10));
-      const titleFs  = Math.max(2.5, cMm(18));   // ≥7pt
-      const labelFs  = Math.max(1.8, cMm(10));   // ≥5pt
-      const iconSz   = Math.max(2.5, cMm(8));
-      const iconPad  = Math.max(0.8, cMm(3));
-      const gapAfterDiv = Math.max(1.0, cMm(6));
-      const rowH     = Math.max(3.5, cMm(14));
+      // Fixed readable content sizes — independent of export zoom
+      const pad      = 2.0;    // mm
+      const titleFs  = 3.0;    // mm  (≈8.5pt)
+      const labelFs  = 2.2;    // mm  (≈6.2pt)
+      const iconSz   = 3.0;    // mm
+      const iconPad  = 1.0;    // mm
+      const divGap   = 1.0;    // mm gap above/below divider
+      const rowH     = 4.5;    // mm per row
+
+      // Box size: plan-proportional but guaranteed large enough for header + at least 3 rows
+      const minBoxH = pad + titleFs + divGap * 2 + rowH * 3 + pad;  // ~24mm
+      const minBoxW = pad + iconSz + iconPad + 28 + pad;             // ~36mm
+      const boxW = Math.max(minBoxW, planPxMm(lb.wPx ?? LEGEND_DEFAULT_W, zRef));
+      const boxH = Math.max(minBoxH, planPxMm(lb.hPx ?? LEGEND_DEFAULT_H, zRef));
 
       const left = center.x - boxW / 2;
       const top  = center.y - boxH / 2;
 
       pdf.setFillColor(255, 255, 255);
       pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.setLineWidth(0.3);
       pdf.rect(left, top, boxW, boxH, "FD");
 
       pdf.setFont("helvetica", "bold");
@@ -3753,12 +3754,13 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       pdf.setTextColor(17, 17, 17);
       pdf.text("Legend", left + pad, top + pad + titleFs, { baseline: "bottom" });
 
-      const divY = top + pad + titleFs + Math.max(0.8, cMm(4));
+      const divY = top + pad + titleFs + divGap;
       pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(Math.max(0.15, cMm(2)));
+      pdf.setLineWidth(0.3);
       pdf.line(left + pad, divY, left + boxW - pad, divY);
 
-      let rowY = divY + gapAfterDiv + rowH;
+      // rowY = text baseline of first item, one full rowH below the divider
+      let rowY = divY + divGap + rowH;
       const maxY = top + boxH - pad;
       const textX = left + pad + iconSz + iconPad;
 
@@ -3791,26 +3793,26 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         const cy = rowY - r;
         pdf.setLineDashPattern([], 0);
         if (f.typeId === "barrel") {
-          pdf.setFillColor(249, 115, 22); pdf.circle(cx, cy, r, "F");
+          pdf.setFillColor(249, 115, 22); pdf.setDrawColor(249, 115, 22); pdf.circle(cx, cy, r, "F");
         } else if (f.typeId === "bollard") {
-          pdf.setFillColor(252, 211, 77); pdf.circle(cx, cy, r, "F");
+          pdf.setFillColor(252, 211, 77); pdf.setDrawColor(252, 211, 77); pdf.circle(cx, cy, r, "F");
         } else if (f.typeId === "cone") {
-          pdf.setFillColor(245, 158, 11);
+          pdf.setFillColor(245, 158, 11); pdf.setDrawColor(245, 158, 11);
           pdf.lines([[r, iconSz], [-iconSz, 0]], cx, cy - r, [1, 1], "F", true);
         } else if (f.typeId === "barrier") {
           pdf.setDrawColor(156, 163, 175);
-          pdf.setLineWidth(Math.max(0.2, cMm(1.5)));
-          pdf.setLineDashPattern([Math.max(0.5, cMm(2)), Math.max(0.3, cMm(1))], 0);
+          pdf.setLineWidth(0.5);
+          pdf.setLineDashPattern([1.2, 0.8], 0);
           pdf.line(left + pad, cy, left + pad + iconSz, cy);
           pdf.setLineDashPattern([], 0);
         } else if (f.typeId === "ped_tape") {
           pdf.setDrawColor(220, 38, 38);
-          pdf.setLineWidth(Math.max(0.2, cMm(1.5)));
-          pdf.setLineDashPattern([Math.max(0.5, cMm(2)), Math.max(0.3, cMm(1))], 0);
+          pdf.setLineWidth(0.5);
+          pdf.setLineDashPattern([1.2, 0.8], 0);
           pdf.line(left + pad, cy, left + pad + iconSz, cy);
           pdf.setLineDashPattern([], 0);
         } else {
-          pdf.setFillColor(245, 158, 11); pdf.circle(cx, cy, r, "F");
+          pdf.setFillColor(245, 158, 11); pdf.setDrawColor(245, 158, 11); pdf.circle(cx, cy, r, "F");
         }
         const label = LEGEND_CLABEL[f.typeId] || f.typeId;
         pdf.setFont("helvetica", "normal");
@@ -3825,7 +3827,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       if ((workAreas || []).length > 0 && !legendExclusionsForExport.has("workArea") && rowY <= maxY) {
         pdf.setFillColor(224, 248, 234);
         pdf.setDrawColor(0, 200, 83);
-        pdf.setLineWidth(0.1);
+        pdf.setLineWidth(0.15);
         pdf.rect(left + pad, rowY - iconSz, iconSz, iconSz, "FD");
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(mmToPt(labelFs));
@@ -3858,24 +3860,26 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const MANIFEST_DEFAULT_W = 240;
       const MANIFEST_DEFAULT_H = 220;
       const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
-      const boxW = planPxMm(mb.wPx ?? MANIFEST_DEFAULT_W, zRef);
-      const boxH = planPxMm(mb.hPx ?? MANIFEST_DEFAULT_H, zRef);
-      const rawUnit = boxW / (mb.wPx ?? MANIFEST_DEFAULT_W);
-      const unit = Math.max(rawUnit, 0.14);
-      const cMm  = (px) => px * unit;
 
-      const pad     = Math.max(1.5, cMm(10));
-      const titleFs = Math.max(2.5, cMm(18));
-      const rowFs   = Math.max(2.1, cMm(16));
-      const rowH    = rowFs * 1.4;
-      const gapDiv  = Math.max(0.8, cMm(4));
+      // Fixed readable sizes — independent of export zoom
+      const pad     = 2.0;   // mm
+      const titleFs = 3.0;   // mm (≈8.5pt)
+      const rowFs   = 2.6;   // mm (≈7.4pt)
+      const rowH    = rowFs * 1.5;
+      const divGap  = 1.0;   // mm
+
+      // Minimum box: enough for header + at least 4 rows
+      const minBoxH = pad + titleFs + divGap * 2 + rowH * 4 + pad;
+      const minBoxW = pad + 38 + pad;
+      const boxW = Math.max(minBoxW, planPxMm(mb.wPx ?? MANIFEST_DEFAULT_W, zRef));
+      const boxH = Math.max(minBoxH, planPxMm(mb.hPx ?? MANIFEST_DEFAULT_H, zRef));
 
       const left = center.x - boxW / 2;
       const top  = center.y - boxH / 2;
 
       pdf.setFillColor(255, 255, 255);
       pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(Math.max(0.1, cMm(2)));
+      pdf.setLineWidth(0.3);
       pdf.rect(left, top, boxW, boxH, "FD");
 
       pdf.setFont("helvetica", "bold");
@@ -3883,12 +3887,12 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       pdf.setTextColor(17, 17, 17);
       pdf.text("Manifest", left + pad, top + pad + titleFs, { baseline: "bottom" });
 
-      const divY = top + pad + titleFs + gapDiv;
+      const divY = top + pad + titleFs + divGap;
       pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(Math.max(0.15, cMm(2)));
+      pdf.setLineWidth(0.3);
       pdf.line(left + pad, divY, left + boxW - pad, divY);
 
-      let rowY = divY + gapDiv + rowH;
+      let rowY = divY + divGap + rowH;
       const maxY = top + boxH - pad;
 
       pdf.setFont("helvetica", "bold");
