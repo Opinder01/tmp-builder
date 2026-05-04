@@ -3735,9 +3735,11 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const divGap   = 1.0;    // mm gap above/below divider
       const rowH     = 4.5;    // mm per row
 
-      // Box size: plan-proportional but guaranteed large enough for header + at least 3 rows
-      const minBoxH = pad + titleFs + divGap * 2 + rowH * 3 + pad;  // ~24mm
-      const minBoxW = pad + iconSz + iconPad + 28 + pad;             // ~36mm
+      // Box size: plan-proportional but guaranteed large enough for header + at least 5 rows.
+      // Use 5 rows + 2mm float-precision buffer so cone/work-area entries never get clipped
+      // by floating-point rounding on rowY vs maxY.
+      const minBoxH = pad + titleFs + divGap * 2 + rowH * 5 + pad + 2;  // ~38mm
+      const minBoxW = pad + iconSz + iconPad + 30 + pad;                 // ~38mm
       const boxW = Math.max(minBoxW, planPxMm(lb.wPx ?? LEGEND_DEFAULT_W, zRef));
       const boxH = Math.max(minBoxH, planPxMm(lb.hPx ?? LEGEND_DEFAULT_H, zRef));
 
