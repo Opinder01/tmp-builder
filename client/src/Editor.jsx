@@ -1651,13 +1651,13 @@ useEffect(() => {
 
     try { window.google?.maps?.event?.trigger?.(map, "resize"); } catch {}
 
-    const c = mapView?.center || center;
+    const c = map.getCenter?.();
     if (c) map.panTo(c);
   });
 
   ro.observe(el);
   return () => ro.disconnect();
-}, [mapView?.center, center]);
+}, []);
 const [mapLayer, setMapLayer] = useState("roadmap"); // roadmap | satellite | hybrid | terrain
 
   // ================= Zoom scaling helpers (ground-anchored overlays) =================
@@ -8869,7 +8869,7 @@ const tileIconStyle = {
 // ===== Fix: map blank until reload (route navigation sizing issue) =====
 const kickResize = () => {
   try { window.google?.maps?.event?.trigger?.(map, "resize"); } catch {}
-  const c = mapView?.center || center;
+  const c = map.getCenter?.();
   if (c) map.panTo(c);
 };
 
@@ -8923,9 +8923,9 @@ setTimeout(() => {
   try {
     window.google?.maps?.event?.trigger?.(map, "resize");
   } catch {}
-  const c = mapView?.center || center;
+  const c = map.getCenter?.();
   if (c) map.panTo(c);
-  map.setZoom(mapView?.zoom ?? 18);
+  map.setZoom(map.getZoom?.() ?? 18);
 }, 50);
 
                 // Create default page frame when entering editor
@@ -8943,13 +8943,13 @@ try {
 } catch {}
 setTimeout(() => {
   try { window.google?.maps?.event?.trigger?.(map, "resize"); } catch {}
-  const c = mapView?.center || center;
+  const c = map.getCenter?.();
   if (c) map.panTo(c);
 }, 0);
 
 setTimeout(() => {
   try { window.google?.maps?.event?.trigger?.(map, "resize"); } catch {}
-  const c = mapView?.center || center;
+  const c = map.getCenter?.();
   if (c) map.panTo(c);
 }, 250);
 
