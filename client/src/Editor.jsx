@@ -9886,6 +9886,14 @@ onUnmount={(polygon) => {
       : contentScalePlan(obj.wPx, zRef, baseW);
   const w = scalePxPlanRounded(obj.wPx, zRef);
   const h = scalePxPlanRounded(obj.hPx, zRef);
+  const insertRotDeg = obj.rotDeg ?? obj.rotationDeg ?? 0;
+  const insertUsesRotateHandle =
+    obj.kind === "textbox" ||
+    obj.kind === "rect" ||
+    obj.kind === "text" ||
+    obj.kind === "picture" ||
+    obj.kind === "table" ||
+    obj.kind === "comment";
 
   // ---------- LINE ----------
   if (obj.kind === "line") {
@@ -9930,6 +9938,7 @@ onUnmount={(polygon) => {
           touchAction: "manipulation",
           outline: isSelected ? "2px solid #2563EB" : "none",
           outlineOffset: 2,
+          overflow: "visible",
         }}
         
         onContextMenu={(e) => openContextMenu(e, "insert", obj.id, obj.kind ?? "insert")}
@@ -9940,6 +9949,14 @@ onUnmount={(polygon) => {
           beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
         }}
       >
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            transform: `rotate(${insertRotDeg}deg)`,
+            transformOrigin: "center center",
+          }}
+        >
       {obj.kind === "title_box" && <TitleBoxContent data={obj.data} scale={planElementZoomScale(zRef)} />}
         {/* ---------- TABLE ---------- */}
         {obj.kind === "table" && (() => {
@@ -10124,6 +10141,11 @@ onUnmount={(polygon) => {
                         startPos: obj.pos,  // for edge-anchored resize center shift
                       });
                     }}
+                    onBeginRotate={
+                      insertUsesRotateHandle
+                        ? (clientPt) => beginRotateInsert(obj.id, clientPt)
+                        : undefined
+                    }
                   />
                 </>
               )}
@@ -10318,6 +10340,7 @@ onUnmount={(polygon) => {
             </div>
           </div>
         )}
+        </div>
        {/* Resize + Rotate handles (only when selected, and not for line) */}
 {isSelected && obj.kind !== "line" && (
   <>
@@ -10332,36 +10355,12 @@ onUnmount={(polygon) => {
             hPx: obj.hPx,
           })
         }
+        onBeginRotate={
+          insertUsesRotateHandle
+            ? (clientPt) => beginRotateInsert(obj.id, clientPt)
+            : undefined
+        }
       />
-    )}
-
-    {/* Rotate handle (not for title_box, textbox, rect, text, table, picture) */}
-    {!["title_box", "textbox", "rect", "text", "table", "picture"].includes(obj.kind) && (
-    <div
-      style={{
-        position: "absolute",
-        left: "50%",
-        top: h + 22,
-        transform: "translate(-50%, -50%)",
-        width: 34,
-        height: 34,
-        borderRadius: 999,
-        border: "1px solid rgba(17,24,39,0.25)",
-        background: "rgba(255,255,255,0.92)",
-        display: "grid",
-        placeItems: "center",
-        cursor: "grab",
-        pointerEvents: "auto",
-        boxShadow: "0 2px 10px rgba(0,0,0,0.10)",
-      }}
-      onMouseDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        beginRotateInsert(obj.id, { x: e.clientX, y: e.clientY });
-      }}
-    >
-      <RotateIcon active={false} />
-    </div>
     )}
   </>
 )}
