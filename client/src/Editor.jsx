@@ -9936,8 +9936,6 @@ onUnmount={(polygon) => {
           cursor: "pointer",
           userSelect: "none",
           touchAction: "manipulation",
-          outline: isSelected ? "2px solid #2563EB" : "none",
-          outlineOffset: 2,
           overflow: "visible",
         }}
         
@@ -9955,6 +9953,9 @@ onUnmount={(polygon) => {
             height: "100%",
             transform: `rotate(${insertRotDeg}deg)`,
             transformOrigin: "center center",
+            position: "relative",
+            outline: isSelected ? "2px solid #2563EB" : "none",
+            outlineOffset: 2,
           }}
         >
       {obj.kind === "title_box" && <TitleBoxContent data={obj.data} scale={planElementZoomScale(zRef)} />}
@@ -10340,30 +10341,29 @@ onUnmount={(polygon) => {
             </div>
           </div>
         )}
+       {/* Resize + rotate handles inside rotated frame so purple handles / chrome align with content */}
+        {isSelected && obj.kind !== "line" && (
+          <>
+            {obj.kind !== "table" && (
+              <BoxSelectionOverlay
+                w={w}
+                h={h}
+                onBeginResize={(corner, clientPt) =>
+                  beginResizeInsert(obj.id, corner, clientPt, {
+                    wPx: obj.wPx,
+                    hPx: obj.hPx,
+                  })
+                }
+                onBeginRotate={
+                  insertUsesRotateHandle
+                    ? (clientPt) => beginRotateInsert(obj.id, clientPt)
+                    : undefined
+                }
+              />
+            )}
+          </>
+        )}
         </div>
-       {/* Resize + Rotate handles (only when selected, and not for line) */}
-{isSelected && obj.kind !== "line" && (
-  <>
-    {/* Resize handles for these kinds */}
-    {obj.kind !== "table" && (
-      <BoxSelectionOverlay
-        w={w}
-        h={h}
-        onBeginResize={(corner, clientPt) =>
-          beginResizeInsert(obj.id, corner, clientPt, {
-            wPx: obj.wPx,
-            hPx: obj.hPx,
-          })
-        }
-        onBeginRotate={
-          insertUsesRotateHandle
-            ? (clientPt) => beginRotateInsert(obj.id, clientPt)
-            : undefined
-        }
-      />
-    )}
-  </>
-)}
 
 
 
