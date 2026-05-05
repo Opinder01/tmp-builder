@@ -2,7 +2,7 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { flushSync } from "react-dom";
 import { jsPDF } from "jspdf";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 
 
@@ -1391,6 +1391,7 @@ const { isLoaded, loadError } = useLoadScript({
 });
 
 const nav = useNavigate();
+const location = useLocation();
 
   // Key used to force a clean Google Map remount when the saved location changes.
   // Must be declared before any hooks that reference its setter.
@@ -1980,7 +1981,7 @@ useEffect(() => {
     localStorage.removeItem("currentProjectId");
     localStorage.removeItem("currentProjectSnapshot");
   }
-}, [projectionReady]);
+}, [projectionReady, location.key]);
 
   function ensureProjectionOverlay(map) {
     if (!window.google?.maps) return;
