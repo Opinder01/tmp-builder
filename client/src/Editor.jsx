@@ -35,6 +35,12 @@ import {
   computeExportTileSpec,
   stitchExportMapTiles,
 } from "./export/googleStaticMapStitch";
+import {
+  collectLegendItems,
+  measureLegendNaturalBase,
+  legendCanvasPixelHeight,
+  buildLegendCanvas,
+} from "./legend/legendShared";
 
 const GMAP_LIBRARIES = ["places", "geometry"];
 
@@ -1885,7 +1891,13 @@ function loadProjectsList() {
 }
 
 function writeProjectsList(arr) {
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(arr));
+  try {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(arr));
+  } catch (err) {
+    console.error("[TMP Save] localStorage write failed:", err);
+    alert("Save failed: storage quota exceeded. Try deleting old projects to free space.");
+    throw err;
+  }
 }
 
 function refreshProjectsList() {
@@ -1921,17 +1933,54 @@ useEffect(() => {
   if (!projectionReady) return;
   try {
     const raw = localStorage.getItem("currentProjectSnapshot");
-    const id = localStorage.getItem("currentProjectId");
-    if (!raw || !id) return;
-    const snap = JSON.parse(raw);
+    const id  = localStorage.getItem("currentProjectId");
+    if (!raw || !id) {
+      console.log("[TMP Load] No pending project snapshot to restore.");
+      return;
+    }
+    let snap;
+    try {
+      snap = JSON.parse(raw);
+    } catch (e) {
+      console.error("[TMP Load] Failed to parse snapshot JSON:", e);
+      return;
+    }
+
+    // Backward compat: very old saves stored only { center, zoom } at top level
+    // with no editorState or mapView wrapper.
+    if (snap && !snap.editorState && !snap.mapView) {
+      if (snap.center || snap.lat) {
+        snap = { mapView: { center: snap.center ?? { lat: snap.lat, lng: snap.lng }, zoom: snap.zoom ?? 14, mapTypeId: "roadmap" } };
+      }
+    }
+
     if (snap && (snap.editorState || snap.mapView)) {
+      console.log("[TMP Load] Restoring project id:", id, {
+        hasEditorState: !!snap.editorState,
+        workAreas:      snap.editorState?.workAreas?.length      ?? "—",
+        conesFeatures:  snap.editorState?.conesFeatures?.length  ?? "—",
+        measurements:   snap.editorState?.measurements?.length   ?? "—",
+        placedSigns:    snap.editorState?.placedSigns?.length    ?? "—",
+        placedArrows:   snap.editorState?.placedArrows?.length   ?? "—",
+        legendBoxes:    snap.editorState?.legendBoxes?.length    ?? "—",
+        manifestBoxes:  snap.editorState?.manifestBoxes?.length  ?? "—",
+        titleBoxes:     snap.editorState?.titleBoxes?.length     ?? "—",
+        northArrows:    snap.editorState?.northArrows?.length    ?? "—",
+        scales:         snap.editorState?.scales?.length         ?? "—",
+        insertObjects:  snap.editorState?.insertObjects?.length  ?? "—",
+        mapView:        snap.mapView,
+      });
+      // Clear stale "new TMP" location so it doesn't interfere with the restored map view
+      localStorage.removeItem("tmp_new_location");
       applyProjectSnapshot(snap);
+    } else {
+      console.warn("[TMP Load] Snapshot missing editorState and mapView — nothing to restore:", snap);
     }
   } finally {
     localStorage.removeItem("currentProjectId");
     localStorage.removeItem("currentProjectSnapshot");
   }
-}, [projectionReady]); 
+}, [projectionReady]);
 
   function ensureProjectionOverlay(map) {
     if (!window.google?.maps) return;
@@ -2233,6 +2282,9 @@ useEffect(() => {
   /* ================= Legend / Manifest / Title Boxes ================= */
   const [legendBoxes, setLegendBoxes] = useState([]);
   const [manifestBoxes, setManifestBoxes] = useState([]);
+  // Canvas-rendered legend images for editor (same pipeline as PDF)
+  const [_editorSignDataUrls, _setEditorSignDataUrls] = useState({});
+  const [_legendCanvasUrls, _setLegendCanvasUrls] = useState({});
 
 
   const [northArrows, setNorthArrows] = useState([]); // {id, pos:{lat,lng}, wPx, hPx, rotDeg}
@@ -2292,6 +2344,70 @@ useEffect(() => {
     legendExclusions: Array.from(legendExclusions ?? []),
   };
 }, [workAreas, conesFeatures, measurements, placedSigns, placedArrows, legendBoxes, manifestBoxes, titleBoxes, titleBoxDataById, northArrows, scales, insertObjects, legendExclusions]);
+
+const legendPlanItems = useMemo(
+  () => collectLegendItems(placedSigns, conesFeatures, workAreas, legendExclusions),
+  [placedSigns, conesFeatures, workAreas, legendExclusions]
+);
+const legendNaturalDims = useMemo(
+  () => measureLegendNaturalBase(legendPlanItems),
+  [legendPlanItems]
+);
+
+// Load sign images as data URLs for editor legend canvas rendering
+useEffect(() => {
+  const srcMap = {};
+  for (const sg of placedSigns) {
+    const code = sg.typeId ?? sg.code ?? sg.id;
+    if (srcMap[code]) continue;
+    srcMap[code] = sg.src || getSignById(code)?.src || null;
+  }
+  const newUrls = {};
+  Promise.allSettled(
+    Object.entries(srcMap).filter(([, src]) => !!src).map(([code, src]) =>
+      new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const sz = Math.max(img.naturalWidth || 64, img.naturalHeight || 64, 32);
+            const cv = document.createElement("canvas");
+            cv.width = sz; cv.height = sz;
+            cv.getContext("2d").drawImage(img, 0, 0, sz, sz);
+            newUrls[code] = cv.toDataURL("image/png");
+          } catch { }
+          resolve();
+        };
+        img.onerror = resolve;
+        img.crossOrigin = "anonymous";
+        img.src = src;
+      })
+    )
+  ).then(() => _setEditorSignDataUrls(newUrls));
+}, [placedSigns]);
+
+// Render legend canvases for editor (same buildLegendCanvas + sizing as PDF)
+useEffect(() => {
+  if (legendBoxes.length === 0) {
+    _setLegendCanvasUrls({});
+    return;
+  }
+  const allItems = legendPlanItems;
+  const naturalW0 = legendNaturalDims.naturalW0;
+  const newUrls = {};
+  Promise.allSettled(
+    legendBoxes.map(async (lb) => {
+      const wPx = lb.wPx ?? naturalW0;
+      const cv = await buildLegendCanvas(allItems, wPx, naturalW0, _editorSignDataUrls);
+      newUrls[lb.id] = cv.toDataURL("image/png");
+    })
+  ).then(() => _setLegendCanvasUrls({ ...newUrls }));
+}, [
+  legendBoxes,
+  legendPlanItems,
+  legendNaturalDims.naturalW0,
+  _editorSignDataUrls,
+]);
+
 // ================= PAGE FRAME (Permanent export boundary) =================
 // ✅ page frame stored in LAT/LNG (so it sticks to the map)
 const [pageFrameBounds, setPageFrameBounds] = useState(null); 
@@ -2506,23 +2622,24 @@ function makeProjectSnapshot() {
   const c = map?.getCenter?.();
   const z = map?.getZoom?.();
 
-  const plan = exportPlanDataRef.current;
+  // Read directly from React state (closure) — not from exportPlanDataRef which can
+  // lag one render behind if the user saves immediately after making a change.
   const es = {
-    workAreas: plan.workAreas ?? [],
-    conesFeatures: plan.conesFeatures ?? [],
-    measurements: plan.measurements ?? [],
-    placedSigns: plan.placedSigns ?? [],
-    placedArrows: plan.placedArrows ?? [],
-    legendBoxes: plan.legendBoxes ?? [],
-    manifestBoxes: plan.manifestBoxes ?? [],
-    titleBoxes: plan.titleBoxes ?? [],
-    titleBoxDataById: plan.titleBoxDataById ?? {},
-    northArrows: plan.northArrows ?? [],
-    scales: plan.scales ?? [],
-    insertObjects: plan.insertObjects ?? [],
+    workAreas,
+    conesFeatures,
+    measurements,
+    placedSigns,
+    placedArrows,
+    legendBoxes,
+    manifestBoxes,
+    titleBoxes,
+    titleBoxDataById,
+    northArrows,
+    scales,
+    insertObjects,
   };
 
-  return {
+  const snap = {
     version: 1,
     savedAt: Date.now(),
     mapView: {
@@ -2532,30 +2649,62 @@ function makeProjectSnapshot() {
     },
     pageFrameBounds: pageFrameBounds,
     editorState: es,
-
   };
+
+  console.log("[TMP Save] snapshot built:", {
+    workAreas: es.workAreas.length,
+    conesFeatures: es.conesFeatures.length,
+    measurements: es.measurements.length,
+    placedSigns: es.placedSigns.length,
+    placedArrows: es.placedArrows.length,
+    legendBoxes: es.legendBoxes.length,
+    manifestBoxes: es.manifestBoxes.length,
+    titleBoxes: es.titleBoxes.length,
+    northArrows: es.northArrows.length,
+    scales: es.scales.length,
+    insertObjects: es.insertObjects.length,
+    mapView: snap.mapView,
+  });
+
+  return snap;
 }
 
 function applyProjectSnapshot(snap) {
   if (!snap) return;
 
-  // Support both editorState and legacy top-level format
+  // Support both editorState and legacy top-level format (elements at root level)
   const es = snap.editorState ?? (snap.workAreas || snap.conesFeatures || snap.legendBoxes ? {
-    workAreas: snap.workAreas ?? [],
-    conesFeatures: snap.conesFeatures ?? [],
-    measurements: snap.measurements ?? [],
-    placedSigns: snap.placedSigns ?? [],
-    placedArrows: snap.placedArrows ?? [],
-    legendBoxes: snap.legendBoxes ?? [],
-    manifestBoxes: snap.manifestBoxes ?? [],
-    titleBoxes: snap.titleBoxes ?? [],
+    workAreas:        snap.workAreas        ?? [],
+    conesFeatures:    snap.conesFeatures    ?? [],
+    measurements:     snap.measurements     ?? [],
+    placedSigns:      snap.placedSigns      ?? [],
+    placedArrows:     snap.placedArrows     ?? [],
+    legendBoxes:      snap.legendBoxes      ?? [],
+    manifestBoxes:    snap.manifestBoxes    ?? [],
+    titleBoxes:       snap.titleBoxes       ?? [],
     titleBoxDataById: snap.titleBoxDataById ?? {},
-    northArrows: snap.northArrows ?? [],
-    scales: snap.scales ?? [],
-    insertObjects: snap.insertObjects ?? [],
+    northArrows:      snap.northArrows      ?? [],
+    scales:           snap.scales           ?? [],
+    insertObjects:    snap.insertObjects    ?? [],
   } : null);
   const mv = snap.mapView;
   const pf = snap.pageFrameBounds;
+
+  console.log("[TMP Load] applyProjectSnapshot:", {
+    hasEditorState: !!es,
+    workAreas:     es?.workAreas?.length      ?? 0,
+    conesFeatures: es?.conesFeatures?.length  ?? 0,
+    measurements:  es?.measurements?.length   ?? 0,
+    placedSigns:   es?.placedSigns?.length    ?? 0,
+    placedArrows:  es?.placedArrows?.length   ?? 0,
+    legendBoxes:   es?.legendBoxes?.length    ?? 0,
+    manifestBoxes: es?.manifestBoxes?.length  ?? 0,
+    titleBoxes:    es?.titleBoxes?.length     ?? 0,
+    northArrows:   es?.northArrows?.length    ?? 0,
+    scales:        es?.scales?.length         ?? 0,
+    insertObjects: es?.insertObjects?.length  ?? 0,
+    mapView: mv,
+  });
 
   // 1) Restore drawings AND zoom together in one flushSync commit.
   //    Restoring mapView.zoom here means zoomNow is already the saved value
@@ -3708,8 +3857,43 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     pdf.setLineWidth(0.5);
   }
 
-  // ── Legend box: PDF vector ──
-  // Content sizes use Math.max floors so text stays readable at any export zoom.
+  // ── Sign images for legend: reuse editor's pre-loaded data URLs (avoids CORS taint) ──
+  // _editorSignDataUrls is loaded in a useEffect via crossOrigin canvas, so it's always ready.
+  // Fall back to fresh load for any code missing from the editor cache.
+  const _legendSignDataUrls = { ..._editorSignDataUrls };
+  if (exportIncludeLegend && (legendBoxes || []).length > 0) {
+    const missing = [];
+    for (const sg of placedSigns || []) {
+      const code = sg.typeId ?? sg.code ?? sg.id;
+      if (legendExclusionsForExport.has(code) || _legendSignDataUrls[code]) continue;
+      const src = sg.src || getSignById(code)?.src || null;
+      if (src) missing.push({ code, src });
+    }
+    if (missing.length > 0) {
+      await Promise.allSettled(
+        missing.map(({ code, src }) =>
+          new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const sz = Math.max(img.naturalWidth || 64, img.naturalHeight || 64, 32);
+                const cv = document.createElement("canvas");
+                cv.width = sz; cv.height = sz;
+                cv.getContext("2d").drawImage(img, 0, 0, sz, sz);
+                _legendSignDataUrls[code] = cv.toDataURL("image/png");
+              } catch { }
+              resolve();
+            };
+            img.onerror = resolve;
+            img.crossOrigin = "anonymous";
+            img.src = src;
+          })
+        )
+      );
+    }
+  }
+
+  // ── Legend box: pixel image (canvas render matching editor layout) ──
   if (exportIncludeLegend) {
     const toPdf = (px) => {
       if (!px) return null;
@@ -3717,133 +3901,29 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     };
     const planPxMm = (wPx, zRef) =>
       cssPlanPxRounded(wPx || 60, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
-    const mmToPt = (mm) => mm * 72 / 25.4;
+
+    const _legItems = collectLegendItems(
+      placedSigns,
+      conesFeatures,
+      workAreas,
+      legendExclusionsForExport
+    );
+    const { naturalW0: _legendNaturalW0 } = measureLegendNaturalBase(_legItems);
 
     for (const lb of legendBoxes || []) {
       const center = toPdf(project(toPlainLL(lb.pos)));
       if (!center) continue;
-      const LEGEND_DEFAULT_W = 260;
-      const LEGEND_DEFAULT_H = 240;
-      const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
+      const zRef    = lb.zRef ?? ELEMENT_BASE_ZOOM;
+      const _wPxPdf = lb.wPx ?? _legendNaturalW0;
 
-      // Fixed readable content sizes — independent of export zoom
-      const pad      = 2.0;    // mm
-      const titleFs  = 3.0;    // mm  (≈8.5pt)
-      const labelFs  = 2.2;    // mm  (≈6.2pt)
-      const iconSz   = 3.0;    // mm
-      const iconPad  = 1.0;    // mm
-      const divGap   = 1.0;    // mm gap above/below divider
-      const rowH     = 4.5;    // mm per row
-
-      // Box size: plan-proportional but guaranteed large enough for header + at least 5 rows.
-      // Use 5 rows + 2mm float-precision buffer so cone/work-area entries never get clipped
-      // by floating-point rounding on rowY vs maxY.
-      const minBoxH = pad + titleFs + divGap * 2 + rowH * 5 + pad + 2;  // ~38mm
-      const minBoxW = pad + iconSz + iconPad + 30 + pad;                 // ~38mm
-      const boxW = Math.max(minBoxW, planPxMm(lb.wPx ?? LEGEND_DEFAULT_W, zRef));
-      const boxH = Math.max(minBoxH, planPxMm(lb.hPx ?? LEGEND_DEFAULT_H, zRef));
-
+      const _lc  = await buildLegendCanvas(_legItems, _wPxPdf, _legendNaturalW0, _legendSignDataUrls);
+      const boxW = planPxMm(_wPxPdf, zRef);
+      const boxH = boxW * (_lc.height / _lc.width);   // preserve canvas aspect ratio exactly
       const left = center.x - boxW / 2;
       const top  = center.y - boxH / 2;
 
-      pdf.setFillColor(255, 255, 255);
-      pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(0.3);
-      pdf.rect(left, top, boxW, boxH, "FD");
-
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(mmToPt(titleFs));
-      pdf.setTextColor(17, 17, 17);
-      pdf.text("Legend", left + pad, top + pad + titleFs, { baseline: "bottom" });
-
-      const divY = top + pad + titleFs + divGap;
-      pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(0.3);
-      pdf.line(left + pad, divY, left + boxW - pad, divY);
-
-      // rowY = text baseline of first item, one full rowH below the divider
-      let rowY = divY + divGap + rowH;
-      const maxY = top + boxH - pad;
-      const textX = left + pad + iconSz + iconPad;
-
-      // Signs — grey square icon + code label
-      const drawnSignCodes = new Set();
-      for (const sg of placedSigns || []) {
-        const code = sg.typeId ?? sg.code ?? sg.id;
-        if (legendExclusionsForExport.has(code) || drawnSignCodes.has(code)) continue;
-        drawnSignCodes.add(code);
-        if (rowY > maxY) break;
-        pdf.setFillColor(229, 231, 235);
-        pdf.setDrawColor(100, 100, 100);
-        pdf.setLineWidth(0.1);
-        pdf.rect(left + pad, rowY - iconSz, iconSz, iconSz, "FD");
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(mmToPt(labelFs));
-        pdf.setTextColor(34, 34, 34);
-        pdf.text(code, textX, rowY, { baseline: "bottom" });
-        rowY += rowH;
-      }
-
-      // Cone / barrier / ped-tape types — coloured icon + name
-      const drawnConeTypes = new Set();
-      for (const f of conesFeatures || []) {
-        if (legendExclusionsForExport.has(f.typeId) || drawnConeTypes.has(f.typeId)) continue;
-        drawnConeTypes.add(f.typeId);
-        if (rowY > maxY) break;
-        const r  = iconSz / 2;
-        const cx = left + pad + r;
-        const cy = rowY - r;
-        pdf.setLineDashPattern([], 0);
-        if (f.typeId === "barrel") {
-          pdf.setFillColor(249, 115, 22); pdf.setDrawColor(249, 115, 22); pdf.circle(cx, cy, r, "F");
-        } else if (f.typeId === "bollard") {
-          pdf.setFillColor(252, 211, 77); pdf.setDrawColor(252, 211, 77); pdf.circle(cx, cy, r, "F");
-        } else if (f.typeId === "cone") {
-          pdf.setFillColor(245, 158, 11); pdf.setDrawColor(245, 158, 11);
-          pdf.lines([[r, iconSz], [-iconSz, 0]], cx, cy - r, [1, 1], "F", true);
-        } else if (f.typeId === "barrier") {
-          pdf.setDrawColor(156, 163, 175);
-          pdf.setLineWidth(0.5);
-          pdf.setLineDashPattern([1.2, 0.8], 0);
-          pdf.line(left + pad, cy, left + pad + iconSz, cy);
-          pdf.setLineDashPattern([], 0);
-        } else if (f.typeId === "ped_tape") {
-          pdf.setDrawColor(220, 38, 38);
-          pdf.setLineWidth(0.5);
-          pdf.setLineDashPattern([1.2, 0.8], 0);
-          pdf.line(left + pad, cy, left + pad + iconSz, cy);
-          pdf.setLineDashPattern([], 0);
-        } else {
-          pdf.setFillColor(245, 158, 11); pdf.setDrawColor(245, 158, 11); pdf.circle(cx, cy, r, "F");
-        }
-        const label = LEGEND_CLABEL[f.typeId] || f.typeId;
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(mmToPt(labelFs));
-        pdf.setTextColor(34, 34, 34);
-        pdf.setDrawColor(17, 17, 17);
-        pdf.text(label, textX, rowY, { baseline: "bottom" });
-        rowY += rowH;
-      }
-
-      // Work areas — green swatch
-      if ((workAreas || []).length > 0 && !legendExclusionsForExport.has("workArea") && rowY <= maxY) {
-        pdf.setFillColor(224, 248, 234);
-        pdf.setDrawColor(0, 200, 83);
-        pdf.setLineWidth(0.15);
-        pdf.rect(left + pad, rowY - iconSz, iconSz, iconSz, "FD");
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(mmToPt(labelFs));
-        pdf.setTextColor(34, 34, 34);
-        pdf.text("Work Area", textX, rowY, { baseline: "bottom" });
-      }
+      pdf.addImage(_lc.toDataURL("image/png"), "PNG", left, top, boxW, boxH, undefined, "NONE");
     }
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-    pdf.setTextColor(0, 0, 0);
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setFillColor(0, 0, 0);
-    pdf.setLineWidth(0.5);
   }
 
   // ── Manifest box: PDF vector ──
@@ -3922,8 +4002,8 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   }
 
   // ── Title box: PDF vector (insertObjects kind="title_box") ──
-  // Width formula: getStringUnitWidth(text) * fontSizeMm  (jsPDF: widthMm = SUW * ptSize / scaleFactor
-  //   = SUW * (mm * sf) / sf = SUW * mm — so no division by scaleFactor needed)
+  // Matches TitleBoxContent: flex-column, padding=10*s, gap=6*s, logo 90×70*s, comments lineHeight 1.35.
+  // boxH expands to fit all comment lines so nothing is ever cut off.
   if (exportIncludeTitle) {
     const toPdf = (px) => {
       if (!px) return null;
@@ -3936,29 +4016,47 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     for (const obj of (insertObjects || []).filter((o) => o.kind === "title_box")) {
       const center = toPdf(project(toPlainLL(obj.pos)));
       if (!center) continue;
-      const zRef = obj.zRef ?? ELEMENT_BASE_ZOOM;
-      const boxW = planPxMm(obj.wPx ?? 360, zRef);
-      const boxH = planPxMm(obj.hPx ?? 180, zRef);
+      const zRef   = obj.zRef ?? ELEMENT_BASE_ZOOM;
+      const boxW   = planPxMm(obj.wPx ?? 360, zRef);
       const rawUnit = boxW / (obj.wPx ?? 360);
-      const unit = Math.max(rawUnit, 0.14);
-      const cMm  = (px) => px * unit;
+      const unit   = Math.max(rawUnit, 0.14);
+      const cMm    = (px) => px * unit;
+      const d      = obj.data || {};
 
-      const d    = obj.data || {};
+      // Pre-compute all sizes to determine final boxH before drawing anything
+      const pad       = Math.max(1.5, cMm(10));   // padding: 10*s
+      const gap6      = Math.max(0.5, cMm(6));    // flex column gap: 6*s
+      const logoAreaW = Math.max(12, cMm(90));
+      const logoAreaH = Math.max(9, cMm(70));
+      const projFs    = Math.max(2.12, cMm(14));  // fontSize: max(8, 14*s)
+      const fieldFs   = Math.max(1.94, cMm(12));  // fontSize: max(8, 12*s)
+      const cmtFs     = Math.max(1.94, cMm(12));  // fontSize: max(8, 12*s)
+      const cmtLH     = cmtFs * 1.35;             // lineHeight: 1.35
+
+      // Top-row inner height (text column vs logo area)
+      const textColH   = projFs + Math.max(0.5, cMm(4)) + fieldFs * 1.3 + fieldFs * 1.3;
+      const topRowH    = Math.max(logoAreaH, textColH);
+
+      // Comment lines — split by normalised newlines, preserving blank lines
+      const cmtLines = normalizeCommentLineBreaks(d.comments || "").split("\n");
+      const n        = cmtLines.length;
+
+      // Needed height: pad + topRow + gap6 + gap6 + cmtFs + (n-1)*cmtLH + pad
+      const neededH = 2 * pad + topRowH + 2 * gap6 + cmtFs + Math.max(0, n - 1) * cmtLH;
+      const boxH    = Math.max(planPxMm(obj.hPx ?? 180, zRef), neededH);
+
       const left = center.x - boxW / 2;
-      const top  = center.y - boxH / 2;
-      const pad  = Math.max(1.5, cMm(10));
+      const top  = center.y - boxH / 2;  // re-centre with expanded height
 
+      // Box
       pdf.setFillColor(255, 255, 255);
       pdf.setDrawColor(17, 17, 17);
       pdf.setLineWidth(Math.max(0.1, cMm(2)));
       pdf.rect(left, top, boxW, boxH, "FD");
 
-      const logoAreaW = Math.max(12, cMm(90));
-      const logoAreaH = Math.max(9,  cMm(70));
-      const logoLeft  = left + pad;
-      const logoTop   = top  + pad;
-
       // Logo area border
+      const logoLeft = left + pad;
+      const logoTop  = top + pad;
       pdf.setFillColor(255, 255, 255);
       pdf.setDrawColor(221, 221, 221);
       pdf.setLineWidth(Math.max(0.05, cMm(1)));
@@ -3986,12 +4084,11 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         pdf.text("Logo", logoLeft + logoAreaW / 2, logoTop + logoAreaH / 2, { align: "center", baseline: "middle" });
       }
 
-      // Right-side text — all label widths: SUW * fontSizeMm (no /scaleFactor)
-      const textX    = logoLeft + logoAreaW + Math.max(1.5, cMm(12));
-      const projFs   = Math.max(2.12, cMm(14));   // ≥6pt
-      const fieldFs  = Math.max(1.94, cMm(12));   // ≥5.5pt
+      // Right-side text column (label widths: SUW * fontSizeMm — no /scaleFactor)
+      const textX = logoLeft + logoAreaW + Math.max(1.5, cMm(12));
       let ty = top + pad;
 
+      // Project row
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(mmToPt(projFs));
       pdf.setTextColor(17, 17, 17);
@@ -4000,8 +4097,9 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       pdf.text(projLabel, textX, ty + projFs, { baseline: "bottom" });
       pdf.setFont("helvetica", "normal");
       pdf.text(String(d.project || ""), textX + projLabelW, ty + projFs, { baseline: "bottom" });
-      ty += projFs + Math.max(0.8, cMm(4));
+      ty += projFs + Math.max(0.5, cMm(4));  // marginBottom: 4*s
 
+      // Date + Author row
       pdf.setFontSize(mmToPt(fieldFs));
       pdf.setFont("helvetica", "bold");
       const dateLabelW = pdf.getStringUnitWidth("Date: ") * fieldFs;
@@ -4017,6 +4115,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       pdf.text(String(d.author || ""), authorX + authLabelW, ty + fieldFs, { baseline: "bottom" });
       ty += fieldFs * 1.3;
 
+      // Job Location row
       pdf.setFont("helvetica", "bold");
       const jobLabelW = pdf.getStringUnitWidth("Job Location: ") * fieldFs;
       pdf.text("Job Location: ", textX, ty + fieldFs, { baseline: "bottom" });
@@ -4024,17 +4123,15 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       pdf.text(String(d.jobLocation || ""), textX + jobLabelW, ty + fieldFs, { baseline: "bottom" });
       ty += fieldFs * 1.3;
 
-      // Divider — rgb(204,204,204) = 20% black over white
+      // Divider: gap6 below top-row (flex column gap), then grey line
       const rowBottom = Math.max(top + pad + logoAreaH, ty);
-      const divY = rowBottom + Math.max(0.8, cMm(4));
-      pdf.setDrawColor(204, 204, 204);
+      const divY      = rowBottom + gap6;
+      pdf.setDrawColor(204, 204, 204);  // opacity 0.2 #111 over white ≈ #ccc
       pdf.setLineWidth(Math.max(0.05, cMm(1)));
       pdf.line(left + pad, divY, left + boxW - pad, divY);
 
-      // Comments with line wrapping
-      const cmtY  = divY + Math.max(0.8, cMm(4));
-      const cmtFs = Math.max(1.94, cMm(12));
-      const cmtLH = cmtFs * 1.35;
+      // Comments: gap6 below divider (flex column gap), then lines at cmtLH spacing
+      const cmtY = divY + gap6;
       pdf.setFontSize(mmToPt(cmtFs));
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(17, 17, 17);
@@ -4042,13 +4139,17 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const cmtLabelW = pdf.getStringUnitWidth(cmtLabel) * cmtFs;
       pdf.text(cmtLabel, left + pad, cmtY + cmtFs, { baseline: "bottom" });
       pdf.setFont("helvetica", "normal");
-      const maxCmtY = top + boxH - pad;
-      const cmtLines = normalizeCommentLineBreaks(d.comments || "").split("\n");
-      let ly = cmtY;
+
+      // Draw all comment lines — boxH was expanded to fit, so no truncation
+      let ly        = cmtY;
       let firstLine = true;
       for (const line of cmtLines) {
-        if (ly + cmtFs > maxCmtY) break;
-        pdf.text(line, firstLine ? left + pad + cmtLabelW : left + pad, ly + cmtFs, { baseline: "bottom" });
+        pdf.text(
+          line,
+          firstLine ? left + pad + cmtLabelW : left + pad,
+          ly + cmtFs,
+          { baseline: "bottom" }
+        );
         ly += cmtLH;
         firstLine = false;
       }
@@ -4118,6 +4219,12 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       const halfW   = usedW / 2;
       const left    = center.x - usedW / 2;
       const top     = center.y - barH / 2;
+
+      // "Plan Scale" header above the bar
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(6.0);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text("Plan Scale", left + usedW / 2, top - 1.8, { align: "center", baseline: "bottom" });
 
       // White base + black border
       pdf.setFillColor(255, 255, 255);
@@ -4845,9 +4952,10 @@ if (activeTool === "insert:table") {
       // LEGEND placement
       if (activeTool === "legend") {
         const id = String(Date.now() + Math.random());
+        const nw = legendNaturalDims.naturalW0;
         setLegendBoxes((prev) => [
           ...prev,
-          { id, pos: p, wPx: 260, hPx: 240, zRef: ELEMENT_BASE_ZOOM, rotDeg: 0 },
+          { id, pos: p, wPx: nw, zRef: ELEMENT_BASE_ZOOM, rotDeg: 0 },
         ]);
         setSelectedEntity({ kind: "legend", id });
         setActiveTool(null);
@@ -6097,7 +6205,7 @@ useEffect(() => {
       const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
       if (!curPointerPx) return;
 
-      const { legendId, corner, startSize, startPointerPx, centerPx } = uiDrag;
+      const { legendId, corner, startSize, startPointerPx, centerPx, legendNaturalW0, legendNaturalH0 } = uiDrag;
       const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
       const kPlan = planElementZoomScale(zRef);
 
@@ -6107,27 +6215,32 @@ useEffect(() => {
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
 
-      // Work in screen pixels, same as resizeInsert
+      // Work in screen pixels; proportional legend keeps natural aspect ratio
       const startVisualW = scalePxPlan(startSize.wPx, zRef);
       const startVisualH = scalePxPlan(startSize.hPx, zRef);
-      let visualW = startVisualW;
-      let visualH = startVisualH;
+      const aspect =
+        legendNaturalW0 > 0 && legendNaturalH0 > 0
+          ? legendNaturalH0 / legendNaturalW0
+          : startVisualH / Math.max(startVisualW, 1e-6);
+      let vw = startVisualW;
+      let vh = startVisualH;
 
-      if      (corner === "se") { visualW += dx; visualH += dy; }
-      else if (corner === "sw") { visualW -= dx; visualH += dy; }
-      else if (corner === "ne") { visualW += dx; visualH -= dy; }
-      else if (corner === "nw") { visualW -= dx; visualH -= dy; }
-      else if (corner === "e")  { visualW += dx; }
-      else if (corner === "w")  { visualW -= dx; }
-      else if (corner === "s")  { visualH += dy; }
-      else if (corner === "n")  { visualH -= dy; }
+      if      (corner === "se") { vw += dx; vh += dy; }
+      else if (corner === "sw") { vw -= dx; vh += dy; }
+      else if (corner === "ne") { vw += dx; vh -= dy; }
+      else if (corner === "nw") { vw -= dx; vh -= dy; }
+      else if (corner === "e")  { vw += dx; }
+      else if (corner === "w")  { vw -= dx; }
+      else if (corner === "s")  { vh += dy; }
+      else if (corner === "n")  { vh -= dy; }
 
-      // Minimum size only — no maximum cap
-      visualW = Math.max(scalePxPlan(60, zRef), visualW);
-      visualH = Math.max(scalePxPlan(40, zRef), visualH);
+      const scaleRaw = Math.max(vw / startVisualW, vh / startVisualH, 1e-6);
+      const minPlanW = 60;
+      const minVisualW = scalePxPlan(minPlanW, zRef);
+      let visualW = Math.max(minVisualW, startVisualW * scaleRaw);
+      let visualH = visualW * aspect;
 
       const w = visualW / kPlan;
-      const h = visualH / kPlan;
 
       // Edge-anchored centre shift — same formula as resizeInsert
       const shiftDx = (visualW - startVisualW) / 2;
@@ -6149,7 +6262,7 @@ useEffect(() => {
       setLegendBoxes((prev) =>
         prev.map((lb) => {
           if (lb.id !== legendId) return lb;
-          return { ...lb, wPx: w, hPx: h, ...(nextPos ? { pos: nextPos } : {}) };
+          return { ...lb, wPx: w, ...(nextPos ? { pos: nextPos } : {}) };
         })
       );
     }
@@ -7247,6 +7360,8 @@ const handleLegendToggle = (typeId) => {
       type: "resizeLegend",
       legendId,
       corner,
+      legendNaturalW0: legendNaturalDims.naturalW0,
+      legendNaturalH0: legendNaturalDims.naturalH0,
       startSize: { ...startSize, zRef: legend.zRef ?? ELEMENT_BASE_ZOOM },
       startPointerPx,
       centerPx,
@@ -9631,24 +9746,22 @@ onUnmount={(polygon) => {
                 const isSelected =
                   selectedEntity?.kind === "legend" && selectedEntity.id === lb.id;
                 const zRef = lb.zRef ?? ELEMENT_BASE_ZOOM;
-                // Content scale: zoom × geometric-mean(wScale, hScale) so stretching in
-                // either direction (or both) proportionally grows/shrinks all internal content.
-                const LEGEND_DEFAULT_W = 260;
-                const LEGEND_DEFAULT_H = 240;
-                const _lbScaleX = (lb.wPx ?? LEGEND_DEFAULT_W) / LEGEND_DEFAULT_W;
-                const _lbScaleY = (lb.hPx ?? LEGEND_DEFAULT_H) / LEGEND_DEFAULT_H;
-                const s = planElementZoomScale(zRef) * Math.sqrt(_lbScaleX * _lbScaleY);
+                const _nw0 = legendNaturalDims.naturalW0;
+                const _wPxLeg = lb.wPx ?? _nw0;
+                const kPlan = planElementZoomScale(zRef);
+                const _legCssW = scalePxPlanRounded(_wPxLeg, zRef);
+                const _canvasH = legendCanvasPixelHeight(legendPlanItems, _wPxLeg, _nw0);
+                const _legCssH = Math.round(kPlan * _canvasH);
+                const _dataUrl = _legendCanvasUrls[lb.id];
                 return (
                   <OverlayViewF key={lb.id} position={lb.pos} mapPaneName="overlayMouseTarget">
-                    {/* Outer wrapper: no overflow so handles can extend outside — same pattern as insert title_box */}
                     <div
                       style={{
                         transform: "translate(-50%, -50%)",
-                        transformOrigin: "center center",
-                        width: scalePxPlanRounded(lb.wPx, zRef),
-                        height: scalePxPlanRounded(lb.hPx, zRef),
+                        width: _legCssW,
+                        height: _legCssH,
                         position: "relative",
-                        cursor: uiDrag?.type === "moveLegend" && uiDrag?.id === lb.id ? "grabbing" : "grab",
+                        cursor: uiDrag?.type === "moveLegend" && uiDrag?.legendId === lb.id ? "grabbing" : "grab",
                         userSelect: "none",
                       }}
                       onContextMenu={(e) => openContextMenu(e, "legend", lb.id, "legend")}
@@ -9659,89 +9772,18 @@ onUnmount={(polygon) => {
                         beginMoveLegend(lb.id, lb.pos, { x: e.clientX, y: e.clientY });
                       }}
                     >
-                      {/* Inner content div: border, background, padding, overflow:hidden — content is clipped here */}
-                      <div style={{
-                        width: "100%",
-                        height: "100%",
-                        background: "#fff",
-                        border: `${Math.max(1, 2 * s)}px solid #111`,
-                        borderRadius: 4 * s,
-                        boxSizing: "border-box",
-                        padding: 10 * s,
-                        overflow: "hidden",
-                      }}>
-                        <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Legend</div>
-                        <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
-                        <div style={{ marginTop: 8 * s }}>
-                          {(() => {
-                            const CLABEL = { barrel: "Barrel", barrier: "Barrier", bollard: "Bollard", cone: "Cone", ped_tape: "Ped. Tape", type1: "Type 1", type2: "Type 2" };
-                            const iconSz = 28 * s;
-                            const labelSz = 10 * s;
-                            const gap = 6 * s;
-                            const itemStyle = { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 * s, width: iconSz + 8 * s };
-                            const labelStyle = { fontSize: labelSz, textAlign: "center", color: "#222", lineHeight: 1.2, wordBreak: "break-word", maxWidth: iconSz + 8 * s };
-
-                            const rows = [];
-
-                            // Signs — grouped by code, show icon + code
-                            const signByCode = {};
-                            for (const sg of placedSigns) {
-                              const code = sg.typeId ?? sg.code ?? sg.id;
-                              if (legendExclusions.has(code)) continue;
-                              if (!signByCode[code]) signByCode[code] = { src: sg.src, code };
-                            }
-                            for (const v of Object.values(signByCode)) {
-                              rows.push(
-                                <div key={`sign-${v.code}`} style={itemStyle}>
-                                  <img src={v.src} alt={v.code} style={{ width: iconSz, height: iconSz, objectFit: "contain" }} />
-                                  <span style={labelStyle}>{v.code}</span>
-                                </div>
-                              );
-                            }
-
-                            // Cones — grouped by typeId, show MarkerVisual + name
-                            const coneTypes = new Set();
-                            for (const f of conesFeatures) {
-                              if (!legendExclusions.has(f.typeId)) coneTypes.add(f.typeId);
-                            }
-                            for (const typeId of coneTypes) {
-                              rows.push(
-                                <div key={`cone-${typeId}`} style={itemStyle}>
-                                  <div style={{ width: iconSz, height: iconSz, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <MarkerVisual typeId={typeId} strokeScale={1} scale={iconSz / 28} />
-                                  </div>
-                                  <span style={labelStyle}>{CLABEL[typeId] || typeId}</span>
-                                </div>
-                              );
-                            }
-
-                            // Work areas — show green swatch + label
-                            if (workAreas.length > 0 && !legendExclusions.has("workArea")) {
-                              rows.push(
-                                <div key="workArea" style={itemStyle}>
-                                  <div style={{ width: iconSz, height: iconSz, background: "rgba(0,200,83,0.18)", border: "2px solid #00c853", borderRadius: 3, boxSizing: "border-box" }} />
-                                  <span style={labelStyle}>Work Area</span>
-                                </div>
-                              );
-                            }
-
-                            if (rows.length === 0) return (
-                              <div style={{ fontSize: 11 * s, color: "#999", fontStyle: "italic" }}>No items</div>
-                            );
-                            return <div style={{ display: "flex", flexWrap: "wrap", gap }}>{rows}</div>;
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* BoxSelectionOverlay is OUTSIDE the overflow:hidden div so handles extend freely */}
+                      {_dataUrl
+                        ? <img src={_dataUrl} alt="Legend" style={{ width: "100%", height: "100%", display: "block", pointerEvents: "none", userSelect: "none" }} />
+                        : <div style={{ width: "100%", height: "100%", background: "#fff", border: "1px solid #111", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#999" }}>Legend</div>
+                      }
                       {isSelected && (
                         <BoxSelectionOverlay
-                          w={scalePxPlanRounded(lb.wPx, zRef)}
-                          h={scalePxPlanRounded(lb.hPx, zRef)}
+                          w={_legCssW}
+                          h={_legCssH}
                           onBeginResize={(corner, clientPt) =>
                             beginResizeLegend(lb.id, corner, clientPt, {
-                              wPx: lb.wPx,
-                              hPx: lb.hPx,
+                              wPx: _wPxLeg,
+                              hPx: _canvasH,
                               zRef: lb.zRef ?? ELEMENT_BASE_ZOOM,
                             })
                           }
