@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="black" rx="10"/>
+  <rect x="7" y="7" width="186" height="186" fill="none" stroke="white" stroke-width="3" rx="6"/>
+  <polygon points="100,32 178,168 22,168" fill="white" stroke="black" stroke-width="2"/>
+  <text x="100" y="107" text-anchor="middle" fill="black" font-family="Arial Black,Arial" font-weight="900" font-size="16">TO</text>
+  <text x="100" y="127" text-anchor="middle" fill="black" font-family="Arial Black,Arial" font-weight="900" font-size="12">ONCOMING</text>
+  <text x="100" y="145" text-anchor="middle" fill="black" font-family="Arial Black,Arial" font-weight="900" font-size="12">TRAFFIC</text>
+</svg>

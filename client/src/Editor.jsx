@@ -9901,7 +9901,7 @@ onUnmount={(polygon) => {
         onMouseDown={(e) => {
           e.domEvent?.preventDefault?.();
           e.domEvent?.stopPropagation?.();
-          setSelectedInsertId(obj.id);
+          if (!exportMode) setSelectedInsertId(obj.id);
         }}
       />
     );
@@ -9933,7 +9933,7 @@ onUnmount={(polygon) => {
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setSelectedInsertId(obj.id);
+          if (!exportMode) setSelectedInsertId(obj.id);
           beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
         }}
       >
@@ -10194,7 +10194,7 @@ onUnmount={(polygon) => {
             onDoubleClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setEditingInsertId(obj.id);
+              if (!exportMode) setEditingInsertId(obj.id);
             }}
           >
             {editingInsertId === obj.id ? (
@@ -10256,7 +10256,7 @@ onUnmount={(polygon) => {
             onDoubleClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setEditingInsertId(obj.id);
+              if (!exportMode) setEditingInsertId(obj.id);
             }}
           >
             {editingInsertId === obj.id ? (

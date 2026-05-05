@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <circle cx="100" cy="100" r="96" fill="white" stroke="red" stroke-width="12"/>
+  <!-- Rear wheel -->
+  <circle cx="62" cy="130" r="24" fill="none" stroke="#222" stroke-width="5"/>
+  <!-- Front wheel -->
+  <circle cx="138" cy="130" r="24" fill="none" stroke="#222" stroke-width="5"/>
+  <!-- Frame: rear axle → bottom bracket → front fork -->
+  <line x1="62" y1="130" x2="100" y2="95" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <line x1="100" y1="95" x2="138" y2="130" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <line x1="100" y1="95" x2="110" y2="130" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <!-- Seat tube + seat stays -->
+  <line x1="100" y1="95" x2="85" y2="130" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <!-- Top tube -->
+  <line x1="100" y1="95" x2="128" y2="82" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <!-- Handlebars -->
+  <line x1="128" y1="82" x2="118" y2="75" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <line x1="128" y1="82" x2="138" y2="75" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <!-- Seat -->
+  <line x1="90" y1="88" x2="106" y2="88" stroke="#222" stroke-width="5" stroke-linecap="round"/>
+  <!-- Red prohibition diagonal -->
+  <line x1="28" y1="28" x2="172" y2="172" stroke="red" stroke-width="14" stroke-linecap="round"/>
+</svg>
