@@ -103,7 +103,7 @@ useEffect(() => {
     const id = getProjectId(project);
     if (!id) return;
     localStorage.setItem("currentProjectId", String(id));
-    localStorage.setItem("currentProjectSnapshot", JSON.stringify(project.snapshot || {}));
+    localStorage.setItem("currentProjectSnapshot", JSON.stringify(project.snapshot ?? project));
     nav("/editor");
   };
 

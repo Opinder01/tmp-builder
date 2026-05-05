@@ -7882,7 +7882,7 @@ const tileIconStyle = {
               cursor: "pointer",
             }}
             onClick={() => {
-              applyProjectSnapshot(p.snapshot);
+              applyProjectSnapshot(p.snapshot ?? p);
               setOpenDialog(false);
             }}
           >
