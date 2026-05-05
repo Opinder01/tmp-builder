@@ -3077,6 +3077,26 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   ctx.rect(0, 0, outW, outH);
   ctx.clip();
 
+  // Work areas — raster on export canvas (matches editor PolygonF: #00c853, fill 0.12, stroke 2px @ ~0.9 opacity)
+  {
+    const waStrokeCanvas = Math.max(1, 2 * scaleToCanvas);
+    for (const wa of workAreas || []) {
+      const pts = (wa?.path || [])
+        .map((ll) => toCanvas(project(toPlainLL(ll))))
+        .filter(Boolean);
+      if (pts.length < 3) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(0, 200, 83, 0.12)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0, 200, 83, 0.9)";
+      ctx.lineWidth = waStrokeCanvas;
+      ctx.stroke();
+    }
+  }
+
   const loadRasterForExport = (url) => {
     if (!url || typeof url !== "string") return Promise.resolve(null);
     return new Promise((resolve) => {
@@ -3087,7 +3107,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       img.src = url;
     });
   };
-  // Cones / barriers / ped_tape, work areas, measurements, north arrow, scale bar and attribution rendered as PDF vectors below (Step 10)
+  // Cones / barriers / ped_tape, measurements, north arrow, scale bar and attribution rendered as PDF vectors below (Step 10)
 
   // Placed signs: load images and draw with rotation; fallback to placeholder on load failure
   const loadSignImage = (url) => {
@@ -3559,37 +3579,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const mapRect = { x: MARGIN, y: HDR_H, w: mapW_mm, h: mapH_mm };
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", mapRect.x, mapRect.y, mapRect.w, mapRect.h, undefined, "NONE");
 
-  // ── Work areas: vector polygons for PDF sharpness ──
-  {
-    const toPdf = (px) => {
-      if (!px) return null;
-      return {
-        x: mapRect.x + (px.x / imgW) * mapRect.w,
-        y: mapRect.y + (px.y / imgH) * mapRect.h,
-      };
-    };
-
-    for (const wa of workAreas || []) {
-      const pts = (wa?.path || [])
-        .map((ll) => toPdf(project(toPlainLL(ll))))
-        .filter(Boolean);
-      if (pts.length < 3) continue;
-
-      // Fill: rgba(0,200,83,0.12) pre-multiplied over white → rgb(224,248,234)
-      pdf.setFillColor(224, 248, 234);
-      pdf.setDrawColor(0, 200, 83);
-      pdf.setLineWidth(0.3);
-      const deltas = [];
-      for (let i = 1; i < pts.length; i++) {
-        deltas.push([pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y]);
-      }
-      pdf.lines(deltas, pts[0].x, pts[0].y, [1, 1], "FD", true);
-    }
-
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setFillColor(0, 0, 0);
-    pdf.setLineWidth(0.5);
-  }
+  // Work areas are baked into the map raster above (same styling as the editor).
 
   // ── Sign / arrow-board stand connector lines: dashed vector ──
   {
