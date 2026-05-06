@@ -3348,15 +3348,11 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const w = cssToCanvas(cssPlanPx(obj.wPx || 100, zRef));
     const h = cssToCanvas(cssPlanPx(obj.hPx || 60, zRef));
     const rotDeg = obj.rotDeg ?? obj.rotationDeg ?? 0;
-    const fontSize = Math.max(8, (obj.fontSize ?? 11) * exportCanvasScale);
     const fontFamily = obj.fontFamily || "Arial, sans-serif";
-    const pad = Math.max(4, w * 0.02);
     ctx.save();
     ctx.translate(sc.x, sc.y);
     ctx.rotate((rotDeg * Math.PI) / 180);
     ctx.translate(-w / 2, -h / 2);
-    ctx.strokeStyle = "#111111";
-    ctx.lineWidth = Math.max(1, 1.5 * exportCanvasScale);
 
     if (obj.kind === "title_box") {
       // Match TitleBoxContent exactly: padding/gap/fonts scale with map zoom only.
@@ -3476,14 +3472,20 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       });
 
     } else if (obj.kind === "table") {
+      // Editor uses contentScalePlan(wPx, zRef, 360) → font/pad/border scale = w/360
+      const tblFontSize = Math.max(6, (obj.fontSize || 14) * w / 360);
+      const tblPad     = Math.max(1, 6 * w / 360);
+      const tblBorder  = Math.max(0.5, 2 * w / 360);
       const rows = obj.rows ?? (obj.rowHeights?.length ?? obj.cells?.length ?? 2);
       const cols = obj.cols ?? (obj.colWidths?.length ?? obj.cells?.[0]?.length ?? 2);
       const rowHeights = Array.from({ length: rows }, (_, i) => obj.rowHeights?.[i] ?? 60);
-      const colWidths = Array.from({ length: cols }, (_, i) => obj.colWidths?.[i] ?? 120);
+      const colWidths  = Array.from({ length: cols }, (_, j) => obj.colWidths?.[j]  ?? 120);
       const sumRow = rowHeights.reduce((a, b) => a + b, 0) || 1;
       const sumCol = colWidths.reduce((a, b) => a + b, 0) || 1;
       const cells = obj.cells ?? Array.from({ length: rows }, () => Array(cols).fill(""));
-      ctx.fillStyle = "#FFFFFF";
+      ctx.strokeStyle = "#111111";
+      ctx.lineWidth   = tblBorder;
+      ctx.fillStyle   = "#FFFFFF";
       ctx.fillRect(0, 0, w, h);
       ctx.strokeRect(0, 0, w, h);
       const xPos = [0];
@@ -3496,7 +3498,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       for (let i = 1; i < rows; i++) {
         ctx.beginPath(); ctx.moveTo(0, yPos[i]); ctx.lineTo(w, yPos[i]); ctx.stroke();
       }
-      ctx.font = `${fontSize}px ${fontFamily}`;
+      ctx.font = `${tblFontSize}px ${fontFamily}`;
       ctx.fillStyle = "#111";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -3508,25 +3510,51 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const cellText = String(getCellText(cells, r, c) || "").slice(0, 40);
-          ctx.fillText(cellText, xPos[c] + 4, yPos[r] + 4);
+          ctx.fillText(cellText, xPos[c] + tblPad, yPos[r] + tblPad);
         }
       }
-    } else if ((obj.kind === "picture" || obj.kind === "rect") && obj.src) {
+    } else if (obj.kind === "picture") {
+      // Picture: no border — editor renders images without a surrounding stroke
       const img = pictureByIndex.get(obj.id);
       if (img) ctx.drawImage(img, 0, 0, w, h);
-      ctx.strokeRect(0, 0, w, h);
-    } else {
-      // textbox, text, rect without src
-      ctx.fillStyle = "#FFFFFF";
+    } else if (obj.kind === "rect") {
+      // Rectangle Box: use stored fill/stroke colours, not hardcoded white/black
+      // Editor uses contentScalePlan(wPx, zRef, 200) → stroke scale = w/200
+      const rectBorder = Math.max(0.5, (obj.strokeWidth || 2) * w / 200);
+      ctx.strokeStyle = obj.stroke || "#111111";
+      ctx.lineWidth   = rectBorder;
+      ctx.fillStyle   = obj.fill  || "rgba(0,0,0,0)";
       ctx.fillRect(0, 0, w, h);
+      ctx.strokeRect(0, 0, w, h);
+    } else if (obj.kind === "textbox") {
+      // Text Box: editor uses contentScalePlan(wPx, zRef, 260) → font/pad/border scale = w/260
+      const tbFontSize = Math.max(6, (obj.fontSize || 18) * w / 260);
+      const tbPad      = Math.max(2, 10 * w / 260);
+      const tbBorder   = Math.max(0.5, (obj.borderWidth || 1) * w / 260);
+      ctx.fillStyle   = obj.bg     || "#FFFFFF";
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = obj.border || "#111827";
+      ctx.lineWidth   = tbBorder;
       ctx.strokeRect(0, 0, w, h);
       const text = obj.text || "";
       if (text) {
-        ctx.font = `${fontSize}px ${fontFamily}`;
+        ctx.font = `${tbFontSize}px ${fontFamily}`;
         ctx.fillStyle = obj.color || "#111111";
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        wrapCanvasTextNL(ctx, text, w - pad * 2, fontSize + 3, pad, pad, h - pad);
+        wrapCanvasTextNL(ctx, text, w - tbPad * 2, tbFontSize + 3, tbPad, tbPad, h - tbPad);
+      }
+    } else if (obj.kind === "text") {
+      // Text label: transparent background, no border; editor uses contentScalePlan(wPx, zRef, 200)
+      const textFontSize = Math.max(6, (obj.fontSize || 22) * w / 200);
+      const textPad      = Math.max(1, 2 * w / 200);
+      const text = obj.text || "";
+      if (text) {
+        ctx.font = `${textFontSize}px ${fontFamily}`;
+        ctx.fillStyle = obj.color || "#111111";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        wrapCanvasTextNL(ctx, text, w - textPad * 2, textFontSize + 3, textPad, textPad, h - textPad);
       }
     }
     ctx.restore();
