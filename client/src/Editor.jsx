@@ -2885,10 +2885,20 @@ function promptEditInsertText(obj) {
   setExportLiveRect(null);
   exportBoundsForPdfRef.current = null;
   const tryInit = () => {
-    const b = initExportAreaFromViewport();
+    // Prefer the permanent page frame the user drew; fall back to 85% of current viewport.
+    const b = pageFrameBounds ?? initExportAreaFromViewport();
     if (b) {
       exportBoundsForPdfRef.current = b;
       setPrintAreaBounds(b);
+      // Pan the map to show the export area so the user can see and adjust the selection box.
+      if (pageFrameBounds) {
+        const map = mapRef.current;
+        if (map) {
+          const centerLat = (pageFrameBounds.nw.lat + pageFrameBounds.se.lat) / 2;
+          const centerLng = (pageFrameBounds.nw.lng + pageFrameBounds.se.lng) / 2;
+          map.panTo({ lat: centerLat, lng: centerLng });
+        }
+      }
     } else setTimeout(tryInit, 50);
   };
   requestAnimationFrame(() => {
