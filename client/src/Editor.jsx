@@ -9068,6 +9068,7 @@ setTimeout(() => {
                 gestureHandling: "none",       // ✅ no trackpad/gesture pan/zoom
                 minZoom: 10,
                 maxZoom: 22,
+                isFractionalZoomEnabled: true,
                 disableDoubleClickZoom: true,
 
                 
