@@ -1644,12 +1644,12 @@ const uploadInsertTitleLogo = (insertId, file) => {
   const zoomIn = () => {
     const map = mapRef.current;
     if (!map) return;
-    map.setZoom(Math.round(((map.getZoom() ?? 18) + 0.1) * 10) / 10);
+    map.setZoom((map.getZoom() ?? 18) + 1);
   };
   const zoomOut = () => {
     const map = mapRef.current;
     if (!map) return;
-    map.setZoom(Math.round(((map.getZoom() ?? 18) - 0.1) * 10) / 10);
+    map.setZoom((map.getZoom() ?? 18) - 1);
   };
   const userDidManualResetRef = useRef(false);
   const resetToLocation = () => {
