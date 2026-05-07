@@ -72,6 +72,54 @@ button:focus-visible {
   }
 }
 
+/* Zoom slider — arrow-shaped thumb */
+.zoom-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  background: linear-gradient(to right, #2563eb var(--zoom-pct, 50%), #dde1e7 var(--zoom-pct, 50%));
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #2563eb;
+  border-radius: 50%;
+  cursor: pointer;
+  margin-top: -5px;
+  transition: transform 0.1s;
+}
+.zoom-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+.zoom-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #2563eb;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.zoom-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+}
+.zoom-slider::-moz-range-track {
+  height: 5px;
+  background: #dde1e7;
+  border-radius: 3px;
+}
+.zoom-slider::-moz-range-progress {
+  height: 5px;
+  background: #2563eb;
+  border-radius: 3px;
+}
+
 /* Print: hide editor UI, show only TMP drawing output */
 @media print {
   .no-print {

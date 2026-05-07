@@ -3339,6 +3339,9 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
   for (const obj of insertObjects || []) {
     if (obj.kind === "line") continue;
+    // title_box is handled exclusively by the jsPDF vector renderer below; skip here
+    // to avoid a double-render (canvas raster + vector layer) that causes misalignment.
+    if (obj.kind === "title_box") continue;
     const pos = obj.pos || obj.position;
     if (!pos) continue;
     const p = project(pos);
@@ -8072,8 +8075,39 @@ const tileIconStyle = {
 
           <div style={{ flex: 1 }} />
 
-          <button title="Zoom In" style={iconBtn} onClick={zoomIn}>＋</button>
-          <button title="Zoom Out" style={iconBtn} onClick={zoomOut}>－</button>
+          {/* Zoom slider */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "#333", fontWeight: 600, whiteSpace: "nowrap" }}>Zoom</span>
+            <button
+              title="Zoom Out"
+              onClick={() => { const map = mapRef.current; if (map) map.setZoom(Math.max(10, (map.getZoom() ?? 18) - 0.5)); }}
+              style={{ ...iconBtn, padding: "4px 8px", fontWeight: 700, fontSize: 14, lineHeight: 1 }}
+            >−</button>
+            <input
+              type="range"
+              className="zoom-slider"
+              min={10}
+              max={22}
+              step={0.1}
+              value={mapView.zoom ?? 18}
+              onChange={(e) => {
+                const map = mapRef.current;
+                if (map) map.setZoom(Number(e.target.value));
+              }}
+              style={{
+                width: 130,
+                "--zoom-pct": `${((( mapView.zoom ?? 18) - 10) / 12) * 100}%`,
+              }}
+            />
+            <button
+              title="Zoom In"
+              onClick={() => { const map = mapRef.current; if (map) map.setZoom(Math.min(22, (map.getZoom() ?? 18) + 0.5)); }}
+              style={{ ...iconBtn, padding: "4px 8px", fontWeight: 700, fontSize: 14, lineHeight: 1 }}
+            >+</button>
+            <span style={{ fontSize: 12, color: "#2563eb", fontWeight: 700, minWidth: 26, textAlign: "right" }}>
+              {Math.round((mapView.zoom ?? 18) * 10) / 10}×
+            </span>
+          </div>
           <button title="Reset" style={iconBtn} onClick={resetToLocation}>Reset</button>
 
           <div style={{ marginLeft: 8, fontSize: 12, color: "#666" }}>Editor</div>
@@ -9008,7 +9042,7 @@ setTimeout(() => {
                 scrollwheel: false,            // ✅ no mouse wheel zoom
                 keyboardShortcuts: false,      // ✅ no +/- zoom by keyboard
                 gestureHandling: "none",       // ✅ no trackpad/gesture pan/zoom
-                minZoom: 16,
+                minZoom: 10,
                 maxZoom: 22,
                 disableDoubleClickZoom: true,
 
