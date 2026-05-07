@@ -8104,7 +8104,7 @@ const tileIconStyle = {
             <span style={{ fontSize: 12, color: "#333", fontWeight: 600, whiteSpace: "nowrap" }}>Zoom</span>
             <button
               title="Zoom Out"
-              onClick={() => { const map = mapRef.current; if (map) map.setZoom(Math.max(10, (map.getZoom() ?? 18) - 0.5)); }}
+              onClick={zoomOut}
               style={{ ...iconBtn, padding: "4px 8px", fontWeight: 700, fontSize: 14, lineHeight: 1 }}
             >−</button>
             <input
@@ -8120,12 +8120,12 @@ const tileIconStyle = {
               }}
               style={{
                 width: 130,
-                "--zoom-pct": `${((( mapView.zoom ?? 18) - 10) / 12) * 100}%`,
+                "--zoom-pct": `${(((mapView.zoom ?? 18) - 10) / 12) * 100}%`,
               }}
             />
             <button
               title="Zoom In"
-              onClick={() => { const map = mapRef.current; if (map) map.setZoom(Math.min(22, (map.getZoom() ?? 18) + 0.5)); }}
+              onClick={zoomIn}
               style={{ ...iconBtn, padding: "4px 8px", fontWeight: 700, fontSize: 14, lineHeight: 1 }}
             >+</button>
             <span style={{ fontSize: 12, color: "#2563eb", fontWeight: 700, minWidth: 26, textAlign: "right" }}>
