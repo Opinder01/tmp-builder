@@ -265,7 +265,6 @@ export const SIGN_CATALOG_GENERATED = [
   { id: "R-018", label: "R-018", category: "general", src: "/signs/R-018.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "R-019-1", label: "R-019-1", category: "general", src: "/signs/R-019-1.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "R-019-2", label: "R-019-2", category: "general", src: "/signs/R-019-2.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
-  { id: "R-019-3", label: "R-019-3", category: "general", src: "/signs/R-019-3.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "R-019-Ta", label: "R-019-Ta", category: "general", src: "/signs/R-019-Ta.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "R-019-Tb", label: "R-019-Tb", category: "general", src: "/signs/R-019-Tb.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "R-020", label: "R-020", category: "general", src: "/signs/R-020.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
