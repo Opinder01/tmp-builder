@@ -175,20 +175,39 @@ function pickNiceMeters(maxMeters) {
   return best;
 }
 
-// Plan Scale bar (transparent background — map visible through)
-function ScaleBarSVG() {
+// Plan Scale bar — dynamically computed to match the PDF vector output exactly.
+function PlanScaleBarContent({ wPx, zRef, lat, w, h }) {
+  const totalMeters = (wPx || 120) * metersPerPixelAtLat(lat ?? 49, zRef ?? 18);
+  const niceMax     = pickNiceMeters(totalMeters * 0.9);
+  const ratio       = Math.min(1, niceMax / totalMeters);
+
+  const fmtDist = (m) =>
+    m >= 1000
+      ? `${+(m / 1000).toPrecision(3).replace(/\.?0+$/, "")} km`
+      : `${Math.round(m)} m`;
+
+  const fs    = Math.max(7,  Math.min(13, h * 0.22));
+  const fsLbl = Math.max(6,  Math.min(11, h * 0.18));
+  const barH  = Math.max(5,  h * 0.30);
+  const gap   = Math.max(1,  h * 0.06);
+
   return (
-    <img
-      src="/scale-bar.svg"
-      alt="Plan Scale"
-      style={{
-        display: "block",
-        width: "100%",
-        height: "100%",
-        objectFit: "fill",
-        background: "transparent",
-      }}
-    />
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", overflow: "hidden", background: "transparent" }}>
+      <div style={{ fontSize: fs, fontWeight: 700, color: "#000", whiteSpace: "nowrap", marginBottom: gap, letterSpacing: "0.02em" }}>
+        Plan Scale
+      </div>
+      <div style={{ width: `${ratio * 100}%`, minWidth: 20 }}>
+        <div style={{ display: "flex", height: barH, border: "1.5px solid #000", boxSizing: "border-box" }}>
+          <div style={{ width: "50%", background: "#000" }} />
+          <div style={{ width: "50%", background: "#fff" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: fsLbl, color: "#000", marginTop: gap, whiteSpace: "nowrap" }}>
+          <span>0</span>
+          <span>{fmtDist(niceMax / 2)}</span>
+          <span>{fmtDist(niceMax)}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 function MapScrollbars({ mapRef }) {
@@ -10664,7 +10683,13 @@ height: pendingPictureTool.hPx * elementScale,
   }}
 >
   <div style={{ width: "100%", height: "100%", background: "transparent", backgroundColor: "transparent" }}>
-    <ScaleBarSVG />
+    <PlanScaleBarContent
+      wPx={scale.wPx}
+      zRef={scaleZRef}
+      lat={scale.pos?.lat ?? 49}
+      w={scaleW}
+      h={scaleH}
+    />
   </div>
   {selectedEntity?.kind === "scale" && selectedEntity?.id === scale.id && (
   <BoxSelectionOverlay
