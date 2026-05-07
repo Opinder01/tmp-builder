@@ -3088,39 +3088,6 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   ctx.rect(0, 0, outW, outH);
   ctx.clip();
 
-  // Work areas — raster on export canvas.
-  // Fill bumped to 0.28 (vs editor's 0.12) so it reads clearly on satellite maps in PDF.
-  // Stroke drawn twice: wide semi-transparent halo first, then solid 2px line on top — same
-  // crisp appearance the Google Maps PolygonF produces via its own compositing.
-  {
-    const waStroke = Math.max(1.5, 2.5 * scaleToCanvas);
-    for (const wa of workAreas || []) {
-      const pts = (wa?.path || [])
-        .map((ll) => toCanvas(project(toPlainLL(ll))))
-        .filter(Boolean);
-      if (pts.length < 3) continue;
-
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
-
-      // Fill
-      ctx.fillStyle = "rgba(0, 200, 83, 0.28)";
-      ctx.fill();
-
-      // Outer glow stroke (wider, semi-transparent) for crispness
-      ctx.strokeStyle = "rgba(0, 200, 83, 0.35)";
-      ctx.lineWidth = waStroke * 3;
-      ctx.stroke();
-
-      // Inner solid stroke
-      ctx.strokeStyle = "rgba(0, 180, 70, 1.0)";
-      ctx.lineWidth = waStroke;
-      ctx.stroke();
-    }
-  }
-
   const loadRasterForExport = (url) => {
     if (!url || typeof url !== "string") return Promise.resolve(null);
     return new Promise((resolve) => {
@@ -3634,7 +3601,44 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const mapRect = { x: MARGIN, y: HDR_H, w: mapW_mm, h: mapH_mm };
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", mapRect.x, mapRect.y, mapRect.w, mapRect.h, undefined, "NONE");
 
-  // Work areas are baked into the map raster above (same styling as the editor).
+  // ── Work areas: PDF vector polygons ──
+  {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    for (const wa of workAreas || []) {
+      const pts = (wa?.path || [])
+        .map((ll) => toPdf(project(toPlainLL(ll))))
+        .filter(Boolean);
+      if (pts.length < 3) continue;
+
+      const moves = [];
+      for (let i = 1; i < pts.length; i++) {
+        moves.push([pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y]);
+      }
+
+      // Semi-transparent green fill
+      try {
+        pdf.saveGraphicsState();
+        pdf.setGState(new pdf.GState({ opacity: 0.28, "stroke-opacity": 0 }));
+        pdf.setFillColor(0, 200, 83);
+        pdf.lines(moves, pts[0].x, pts[0].y, [1, 1], "F", true);
+        pdf.restoreGraphicsState();
+      } catch (_) {
+        // GState unavailable — blended approximation on white
+        pdf.setFillColor(184, 240, 207);
+        pdf.lines(moves, pts[0].x, pts[0].y, [1, 1], "F", true);
+      }
+
+      // Solid stroke on top (full opacity)
+      pdf.setDrawColor(0, 180, 70);
+      pdf.setLineWidth(0.5);
+      pdf.lines(moves, pts[0].x, pts[0].y, [1, 1], "S", true);
+    }
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setLineWidth(0.5);
+  }
 
   // ── Sign / arrow-board stand connector lines: dashed vector ──
   {
