@@ -3088,22 +3088,35 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   ctx.rect(0, 0, outW, outH);
   ctx.clip();
 
-  // Work areas — raster on export canvas (matches editor PolygonF: #00c853, fill 0.12, stroke 2px @ ~0.9 opacity)
+  // Work areas — raster on export canvas.
+  // Fill bumped to 0.28 (vs editor's 0.12) so it reads clearly on satellite maps in PDF.
+  // Stroke drawn twice: wide semi-transparent halo first, then solid 2px line on top — same
+  // crisp appearance the Google Maps PolygonF produces via its own compositing.
   {
-    const waStrokeCanvas = Math.max(1, 2 * scaleToCanvas);
+    const waStroke = Math.max(1.5, 2.5 * scaleToCanvas);
     for (const wa of workAreas || []) {
       const pts = (wa?.path || [])
         .map((ll) => toCanvas(project(toPlainLL(ll))))
         .filter(Boolean);
       if (pts.length < 3) continue;
+
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.closePath();
-      ctx.fillStyle = "rgba(0, 200, 83, 0.12)";
+
+      // Fill
+      ctx.fillStyle = "rgba(0, 200, 83, 0.28)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(0, 200, 83, 0.9)";
-      ctx.lineWidth = waStrokeCanvas;
+
+      // Outer glow stroke (wider, semi-transparent) for crispness
+      ctx.strokeStyle = "rgba(0, 200, 83, 0.35)";
+      ctx.lineWidth = waStroke * 3;
+      ctx.stroke();
+
+      // Inner solid stroke
+      ctx.strokeStyle = "rgba(0, 180, 70, 1.0)";
+      ctx.lineWidth = waStroke;
       ctx.stroke();
     }
   }
@@ -4075,7 +4088,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
 
       // Needed height: pad + topRow + gap6 + gap6 + cmtFs + (n-1)*cmtLH + pad
       const neededH = 2 * pad + topRowH + 2 * gap6 + cmtFs + Math.max(0, n - 1) * cmtLH;
-      const boxH    = Math.max(planPxMm(obj.hPx ?? 180, zRef), neededH);
+      const boxH    = neededH; // always fit content exactly — no empty trailing space
 
       const left = center.x - boxW / 2;
       const top  = center.y - boxH / 2;  // re-centre with expanded height
