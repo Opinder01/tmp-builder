@@ -2884,6 +2884,7 @@ function promptEditInsertText(obj) {
   setPrintAreaBounds(null);
   setExportLiveRect(null);
   exportBoundsForPdfRef.current = null;
+  let tryInitAttempts = 0;
   const tryInit = () => {
     // Prefer the permanent page frame the user drew; fall back to 85% of current viewport.
     const b = pageFrameBounds ?? initExportAreaFromViewport();
@@ -2899,7 +2900,13 @@ function promptEditInsertText(obj) {
           map.panTo({ lat: centerLat, lng: centerLng });
         }
       }
-    } else setTimeout(tryInit, 50);
+    } else if (++tryInitAttempts < 200) {
+      setTimeout(tryInit, 50); // up to 10 s total
+    } else {
+      // Projection never became ready — cancel export and inform user
+      setExportMode(false);
+      alert("Could not start export: map not ready. Please wait a moment and try again.");
+    }
   };
   requestAnimationFrame(() => {
     tryInit();

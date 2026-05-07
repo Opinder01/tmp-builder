@@ -72,11 +72,12 @@ button:focus-visible {
   }
 }
 
-/* Zoom slider — arrow-shaped thumb */
+/* Zoom slider — round thumb, filled track */
 .zoom-slider {
   -webkit-appearance: none;
   appearance: none;
   height: 5px;
+  /* Chrome/Safari: gradient faked via background — updated by inline --zoom-pct */
   background: linear-gradient(to right, #2563eb var(--zoom-pct, 50%), #dde1e7 var(--zoom-pct, 50%));
   border-radius: 3px;
   outline: none;
