@@ -3258,6 +3258,23 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   const titleBoxLogoImgs = await Promise.all(titleBoxLogoInserts.map((o) => loadInsertImage(o.data.logoDataUrl)));
   const titleBoxLogoById = new Map(titleBoxLogoInserts.map((o, i) => [o.id, titleBoxLogoImgs[i]]));
 
+  // Pre-rasterise scale-bar.svg so the PDF embeds the exact same image as the editor
+  const scaleBarPng = await new Promise((resolve) => {
+    if (!(scales?.length)) return resolve(null);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width  = Math.max(1, img.naturalWidth  || 600);
+        c.height = Math.max(1, img.naturalHeight || 200);
+        c.getContext("2d").drawImage(img, 0, 0);
+        resolve(c.toDataURL("image/png"));
+      } catch { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = "/scale-bar.svg";
+  });
+
   // Newline-aware word-wrap helper.
   // • Splits text on \n (normalises \r\n / \r first).
   // • Each paragraph is word-wrapped at maxW.
@@ -4251,8 +4268,8 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     pdf.setFillColor(0, 0, 0);
   }
 
-  // ── Scale bar: PDF vector ──
-  if (exportIncludeScaleBar) {
+  // ── Scale bar: embed the same scale-bar.svg image as the editor shows ──
+  if (exportIncludeScaleBar && scaleBarPng) {
     const toPdf = (px) => {
       if (!px) return null;
       return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
@@ -4263,55 +4280,10 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     for (const sc of scales || []) {
       const center = toPdf(project(toPlainLL(sc.pos)));
       if (!center) continue;
-
-      const barW = Math.max(8, planPxMm(sc.wPx || 120, sc.zRef));
-      const barH = 3.5; // fixed mm height — clean and legible
-      const lat  = toPlainLL(sc.pos)?.lat ?? 49;
-      const mppAtExport = metersPerPixelAtLat(lat, zoom);  // metres / world-px
-      const metersPerMm = mppAtExport * (imgW / mapW_mm);  // metres / PDF mm
-      const totalMeters = barW * metersPerMm;
-      const niceMax = pickNiceMeters(totalMeters * 0.9);   // snap to 1/2/5/10…
-      const usedW   = (niceMax / totalMeters) * barW;      // mm for niceMax metres
-      const halfW   = usedW / 2;
-      const left    = center.x - usedW / 2;
-      const top     = center.y - barH / 2;
-
-      // "Plan Scale" header above the bar
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(6.0);
-      pdf.setTextColor(0, 0, 0);
-      pdf.text("Plan Scale", left + usedW / 2, top - 1.8, { align: "center", baseline: "bottom" });
-
-      // White base + black border
-      pdf.setFillColor(255, 255, 255);
-      pdf.setDrawColor(0, 0, 0);
-      pdf.setLineWidth(0.2);
-      pdf.rect(left, top, usedW, barH, "FD");
-      // Left half: filled black
-      pdf.setFillColor(0, 0, 0);
-      pdf.setDrawColor(0, 0, 0);
-      pdf.rect(left, top, halfW, barH, "F");
-      // Divider between halves
-      pdf.setLineWidth(0.2);
-      pdf.line(left + halfW, top, left + halfW, top + barH);
-
-      // Distance labels
-      const fmtDist = (m) => m >= 1000 ? `${+(m / 1000).toPrecision(3).replace(/\.?0+$/, "")} km` : `${Math.round(m)} m`;
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(5.5);
-      pdf.setTextColor(0, 0, 0);
-      const lblY = top + barH + 2;
-      pdf.text("0", left, lblY, { align: "center" });
-      pdf.text(fmtDist(niceMax / 2), left + halfW, lblY, { align: "center" });
-      pdf.text(fmtDist(niceMax), left + usedW, lblY, { align: "center" });
+      const w = Math.max(8, planPxMm(sc.wPx || 120, sc.zRef));
+      const h = Math.max(4, planPxMm(sc.hPx || 60,  sc.zRef));
+      pdf.addImage(scaleBarPng, "PNG", center.x - w / 2, center.y - h / 2, w, h, undefined, "NONE");
     }
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-    pdf.setTextColor(0, 0, 0);
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setFillColor(0, 0, 0);
-    pdf.setLineWidth(0.5);
   }
 
   // ── Attribution bar: PDF vector (Google Maps requirement) ──
