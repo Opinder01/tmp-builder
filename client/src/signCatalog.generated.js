@@ -2,6 +2,7 @@
 // Add SVG/PNG files under public/signs/ or public/signs/<category>/ and run: npm run generate:signs
 
 export const SIGN_CATALOG_GENERATED = [
+  { id: "R-003-1", label: "R-003-1", category: "general", src: "/signs/R-003-1.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "B-C-002", label: "B-C-002", category: "general", src: "/signs/B-C-002.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "B-C-004-1A", label: "B-C-004-1A", category: "general", src: "/signs/B-C-004-1A.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "B-C-004-1L", label: "B-C-004-1L", category: "general", src: "/signs/B-C-004-1L.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
