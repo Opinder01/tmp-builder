@@ -432,7 +432,7 @@ export default function Subscribe() {
           <div className="section">
             <h3>Need help?</h3>
             <p>
-              Call us: <b>6729225617</b> or{" "}
+              Need assistance?{" "}
               <button
                 type="button"
                 className="contactLink"
