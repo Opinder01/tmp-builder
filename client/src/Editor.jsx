@@ -3,6 +3,7 @@ import React, { useMemo, useRef, useState, useEffect, useCallback } from "react"
 import { flushSync } from "react-dom";
 import { jsPDF } from "jspdf";
 import { useNavigate, useLocation } from "react-router-dom";
+import AiAssistant from "./AiAssistant";
 
 
 
@@ -11855,6 +11856,7 @@ height: pendingPictureTool.hPx * elementScale,
           legendExclusions={legendExclusions}
         />
       )}
+      <AiAssistant />
       </main>
     </div>
   );
