@@ -64,8 +64,12 @@ html, body {
   display: block;
 }
 .lp-logo-full-footer {
-  height: 40px;
-  filter: brightness(0) invert(1);
+  height: 52px;
+  filter: none;
+  background: #fff;
+  border-radius: 10px;
+  padding: 4px 10px;
+  object-fit: contain;
 }
 .lp-nav-links {
   display: flex;
