@@ -406,6 +406,21 @@ html, body {
 .lp-features {
   padding: 90px 0;
   background: #f8fafc;
+  position: relative;
+  overflow: hidden;
+}
+.lp-features::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("/bc-flag.png") center center / cover no-repeat;
+  opacity: 0.06;
+  pointer-events: none;
+  z-index: 0;
+}
+.lp-features .lp-section-inner {
+  position: relative;
+  z-index: 1;
 }
 .lp-feat-grid {
   display: grid;
