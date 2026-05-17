@@ -1,11 +1,32 @@
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import "./Landing.css";
+
+function scrollTo(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 export default function Landing() {
   const nav = useNavigate();
+  const [scrollPct, setScrollPct] = useState(0);
+
+  useEffect(() => {
+    function onScroll() {
+      const el = document.documentElement;
+      const scrolled = el.scrollTop || document.body.scrollTop;
+      const total = el.scrollHeight - el.clientHeight;
+      setScrollPct(total > 0 ? (scrolled / total) * 100 : 0);
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <div className="lp-root">
+
+      {/* ── SCROLL PROGRESS BAR ── */}
+      <div className="lp-scroll-bar" style={{ width: `${scrollPct}%` }} />
 
       {/* ── NAV ── */}
       <nav className="lp-nav">
@@ -14,8 +35,8 @@ export default function Landing() {
             <img src="/logo.png" alt="TMP Builder" className="lp-logo-full" />
           </div>
           <div className="lp-nav-links">
-            <a href="#features" className="lp-nav-link">Features</a>
-            <a href="#contact" className="lp-nav-link">Contact</a>
+            <button className="lp-nav-link" onClick={() => scrollTo("features")}>Features</button>
+            <button className="lp-nav-link" onClick={() => scrollTo("contact")}>Contact</button>
             <button className="lp-btn-ghost" onClick={() => nav("/login")}>Login</button>
             <button className="lp-btn-primary" onClick={() => nav("/signup")}>Start Free Trial</button>
           </div>
