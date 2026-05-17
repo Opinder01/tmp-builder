@@ -119,6 +119,16 @@ html, body {
 }
 .lp-btn-ghost:hover { border-color: #94a3b8; background: #f8fafc; }
 
+/* Ghost button on dark hero background */
+.lp-hero .lp-btn-ghost {
+  color: #fff;
+  border-color: rgba(255,255,255,0.35);
+}
+.lp-hero .lp-btn-ghost:hover {
+  border-color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.08);
+}
+
 .lp-btn-outline {
   background: transparent;
   color: #0f172a;
