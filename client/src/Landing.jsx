@@ -290,6 +290,16 @@ export default function Landing() {
 
         {/* ── FEATURES ── */}
         <section className="lp-features" id="features">
+          {/* BC-inspired decorative background */}
+          <div className="lp-feat-bg">
+            <div className="lp-feat-sun" />
+            <div className="lp-feat-waves">
+              <svg viewBox="0 0 1440 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                <path className="lp-wave lp-wave-1" d="M0,60 C240,100 480,20 720,60 C960,100 1200,20 1440,60 L1440,0 L0,0 Z"/>
+                <path className="lp-wave lp-wave-2" d="M0,80 C240,40 480,100 720,60 C960,20 1200,100 1440,60 L1440,0 L0,0 Z"/>
+              </svg>
+            </div>
+          </div>
           <div className="lp-section-inner">
             <div className="lp-section-label">Features</div>
             <h2 className="lp-section-h2">Everything you need to create TMPs</h2>
