@@ -1,5 +1,5 @@
 // AI Assistant API — BC TMM MOTI Traffic Management Plan helper
-// Uses Anthropic Claude. Set ANTHROPIC_API_KEY in Vercel env vars.
+// Uses OpenAI GPT-4o-mini. Set OPENAI_API_KEY in Vercel env vars.
 
 const SYSTEM_PROMPT = `You are a professional Traffic Management Plan (TMP) assistant specialising in BC Ministry of Transportation and Infrastructure (MOTI) standards and the BC Traffic Management Manual (TMM).
 
@@ -97,9 +97,9 @@ export default async function handler(req, res) {
     return json(res, 405, { error: "Method not allowed" });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return json(res, 500, { error: "ANTHROPIC_API_KEY not configured." });
+    return json(res, 500, { error: "OPENAI_API_KEY not configured." });
   }
 
   const { messages } = req.body || {};
@@ -114,29 +114,30 @@ export default async function handler(req, res) {
   }));
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Content-Type":      "application/json",
-        "x-api-key":         apiKey,
-        "anthropic-version": "2023-06-01",
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model:      "claude-3-haiku-20240307",
-        max_tokens: 1024,
-        system:     SYSTEM_PROMPT,
-        messages:   trimmed,
+        model:       "gpt-4o-mini",
+        max_tokens:  1024,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          ...trimmed,
+        ],
       }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("[ai-assistant] Anthropic error:", JSON.stringify(data));
+      console.error("[ai-assistant] OpenAI error:", JSON.stringify(data));
       return json(res, 500, { error: data?.error?.message || "AI request failed." });
     }
 
-    const reply = data?.content?.[0]?.text || "";
+    const reply = data?.choices?.[0]?.message?.content || "";
     return json(res, 200, { reply });
 
   } catch (err) {
