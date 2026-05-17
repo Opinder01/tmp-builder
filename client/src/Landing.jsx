@@ -236,29 +236,6 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ── HOW IT WORKS ── */}
-        <section className="lp-how">
-          <div className="lp-section-inner">
-            <div className="lp-section-label">How It Works</div>
-            <h2 className="lp-section-h2">From address to PDF in minutes</h2>
-            <div className="lp-steps">
-              {[
-                { n: "1", title: "Search your work zone", desc: "Enter the job address and the map flies to the exact location." },
-                { n: "2", title: "Place your elements", desc: "Drop signs, cones, barriers, work areas, and annotations onto the aerial map." },
-                { n: "3", title: "Fill in the title block", desc: "Add project name, date, author, job location, and your company logo." },
-                { n: "4", title: "Export your PDF", desc: "Click Export → Download a clean, professional PDF ready for submission." },
-              ].map((s) => (
-                <div className="lp-step" key={s.n}>
-                  <div className="lp-step-num">{s.n}</div>
-                  <div>
-                    <div className="lp-step-title">{s.title}</div>
-                    <div className="lp-step-desc">{s.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
 
         {/* ── PRICING ── */}
         <section className="lp-pricing" id="pricing">
