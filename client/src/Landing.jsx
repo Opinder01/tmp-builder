@@ -11,8 +11,7 @@ export default function Landing() {
       <nav className="lp-nav">
         <div className="lp-nav-inner">
           <div className="lp-logo">
-            <img src="/favicon.svg" alt="TMP Builder" className="lp-logo-icon" />
-            <span className="lp-logo-text">TMP Builder</span>
+            <img src="/logo-source.png.png" alt="TMP Builder" className="lp-logo-full" />
           </div>
           <div className="lp-nav-links">
             <a href="#features" className="lp-nav-link">Features</a>
@@ -236,8 +235,7 @@ export default function Landing() {
       <footer className="lp-footer">
         <div className="lp-footer-inner">
           <div className="lp-footer-brand">
-            <img src="/favicon.svg" alt="TMP Builder" className="lp-logo-icon" />
-            <span className="lp-logo-text">TMP Builder</span>
+            <img src="/logo-source.png.png" alt="TMP Builder" className="lp-logo-full lp-logo-full-footer" />
           </div>
           <div className="lp-footer-meta">
             Victoria, BC · Canada

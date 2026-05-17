@@ -42,6 +42,16 @@
   color: #0f172a;
   letter-spacing: -0.02em;
 }
+.lp-logo-full {
+  height: 48px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+.lp-logo-full-footer {
+  height: 40px;
+  filter: brightness(0) invert(1);
+}
 .lp-nav-links {
   display: flex;
   align-items: center;
