@@ -3,6 +3,7 @@ import Success from "./Success";
 import CookieBanner from "./CookieBanner";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+import Landing from "./Landing";
 import Login from "./Login";
 import Signup from "./Signup";
 import ForgotPassword from "./ForgotPassword";
@@ -15,7 +16,7 @@ export default function App() {
     <BrowserRouter>
     <CookieBanner />
     <Routes>
-        <Route path="/" element={<Navigate to="/login" />} />
+        <Route path="/" element={<Landing />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/success" element={<Success />} />
 
