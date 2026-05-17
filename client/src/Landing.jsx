@@ -15,7 +15,6 @@ export default function Landing() {
           </div>
           <div className="lp-nav-links">
             <a href="#features" className="lp-nav-link">Features</a>
-            <a href="#pricing" className="lp-nav-link">Pricing</a>
             <a href="#contact" className="lp-nav-link">Contact</a>
             <button className="lp-btn-ghost" onClick={() => nav("/login")}>Login</button>
             <button className="lp-btn-primary" onClick={() => nav("/signup")}>Start Free Trial</button>
