@@ -27,7 +27,10 @@ export default function Landing() {
       <section className="lp-hero">
         <div className="lp-hero-grid">
         <div className="lp-hero-inner">
-          <div className="lp-badge"><span className="lp-badge-maple">🍁</span> Built for Canadian Traffic Control</div>
+          <div className="lp-badge">
+            <img src="/bc-flag.png" alt="BC" className="lp-badge-flag" />
+            Compliant with BC MOT Standards
+          </div>
           <h1 className="lp-hero-h1">
             Create Professional<br />
             <span className="lp-accent">Traffic Management Plans</span><br />
@@ -82,7 +85,7 @@ export default function Landing() {
       {/* ── SOCIAL PROOF ── */}
       <div className="lp-proof-strip">
         <div className="lp-proof-inner">
-          <span className="lp-proof-label">Trusted by BC traffic control professionals</span>
+          <span className="lp-proof-label">Built for BC traffic control professionals</span>
           <div className="lp-proof-stats">
             <div className="lp-proof-stat"><span className="lp-proof-num">100%</span><span className="lp-proof-text">Browser-based — no install</span></div>
             <div className="lp-proof-divider" />

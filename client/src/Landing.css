@@ -162,22 +162,24 @@
 .lp-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: rgba(249,115,22,0.15);
   color: #fb923c;
   border: 1px solid rgba(249,115,22,0.35);
   border-radius: 999px;
-  padding: 6px 16px;
+  padding: 6px 18px 6px 8px;
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 24px;
   letter-spacing: 0.01em;
 }
-.lp-badge-maple {
-  font-style: normal;
-  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-  font-size: 14px;
-  line-height: 1;
+.lp-badge-flag {
+  width: 26px;
+  height: 17px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.15);
+  flex-shrink: 0;
 }
 .lp-hero-h1 {
   font-size: clamp(32px, 5vw, 54px);
