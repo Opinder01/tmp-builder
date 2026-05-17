@@ -27,10 +27,7 @@ export default function Landing() {
       <section className="lp-hero">
         <div className="lp-hero-grid">
         <div className="lp-hero-inner">
-          <div className="lp-badge">
-            <img src="/bc-flag.png" alt="BC" className="lp-badge-flag" />
-            Compliant with BC MoTT Standards
-          </div>
+          <div className="lp-badge">Compliant with BC MOTI TMM Standards</div>
           <h1 className="lp-hero-h1">
             Create Professional<br />
             <span className="lp-accent">Traffic Management Plans</span><br />
@@ -89,7 +86,7 @@ export default function Landing() {
           <div className="lp-proof-stats">
             <div className="lp-proof-stat"><span className="lp-proof-num">100%</span><span className="lp-proof-text">Browser-based — no install</span></div>
             <div className="lp-proof-divider" />
-            <div className="lp-proof-stat"><span className="lp-proof-num">BC MoTT</span><span className="lp-proof-text">Sign catalog included</span></div>
+            <div className="lp-proof-stat"><span className="lp-proof-num">BC MOTI</span><span className="lp-proof-text">Sign catalog included</span></div>
             <div className="lp-proof-divider" />
             <div className="lp-proof-stat"><span className="lp-proof-num">PDF</span><span className="lp-proof-text">Submission-ready export</span></div>
             <div className="lp-proof-divider" />
@@ -104,7 +101,7 @@ export default function Landing() {
           <div className="lp-section-label">Features</div>
           <h2 className="lp-section-h2">Everything you need to create TMPs</h2>
           <p className="lp-section-sub">
-            Designed to help prepare TMPs according to BC Ministry of Transportation and Transit (MoTT)
+            Designed to help prepare TMPs according to BC Ministry of Transportation and Infrastructure (MOTI)
             traffic management requirements and guidelines.
           </p>
 
@@ -118,7 +115,7 @@ export default function Landing() {
               {
                 icon: "🇨🇦",
                 title: "Built for BC Traffic Control",
-                desc: "Pre-loaded Canadian sign catalog (R-, C-, W-series and more) designed for BC Ministry of Transportation and Transit (MoTT) requirements.",
+                desc: "Pre-loaded Canadian sign catalog (R-, C-, W-series and more) designed for BC Ministry of Transportation and Infrastructure (MOTI) requirements.",
               },
               {
                 icon: "🛑",
