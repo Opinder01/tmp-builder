@@ -20,8 +20,8 @@
 .lp-nav-inner {
   max-width: 1140px;
   margin: 0 auto;
-  padding: 0 24px;
-  height: 64px;
+  padding: 0 32px;
+  height: 68px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -43,7 +43,7 @@
   letter-spacing: -0.02em;
 }
 .lp-logo-full {
-  height: 48px;
+  height: 56px;
   width: auto;
   object-fit: contain;
   display: block;
@@ -113,6 +113,26 @@
 }
 .lp-btn-outline:hover { border-color: #64748b; background: #f8fafc; }
 
+/* Orange call-to-action button */
+.lp-btn-cta {
+  background: #f97316;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  font-family: inherit;
+  box-shadow: 0 4px 16px rgba(249,115,22,0.35);
+}
+.lp-btn-cta:hover {
+  background: #ea6c0a;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(249,115,22,0.45);
+}
+
 .lp-btn-lg { padding: 14px 28px; font-size: 16px; border-radius: 12px; }
 .lp-btn-block { width: 100%; justify-content: center; }
 
@@ -120,21 +140,30 @@
 .lp-hero {
   background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #164e63 100%);
   color: #fff;
-  padding: 80px 24px 100px;
+  padding: 90px 0 110px;
+}
+.lp-hero-grid {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 48px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 60px;
+  gap: 64px;
   align-items: center;
-  max-width: 100%;
 }
-@media (max-width: 900px) {
-  .lp-hero { grid-template-columns: 1fr; }
+@media (max-width: 960px) {
+  .lp-hero-grid { grid-template-columns: 1fr; padding: 0 32px; }
   .lp-hero-visual { display: none; }
+}
+@media (max-width: 680px) {
+  .lp-hero-grid { padding: 0 24px; }
 }
 .lp-hero-inner { max-width: 560px; }
 .lp-badge {
-  display: inline-block;
-  background: rgba(249,115,22,0.18);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(249,115,22,0.15);
   color: #fb923c;
   border: 1px solid rgba(249,115,22,0.35);
   border-radius: 999px;
@@ -143,6 +172,12 @@
   font-weight: 600;
   margin-bottom: 24px;
   letter-spacing: 0.01em;
+}
+.lp-badge-maple {
+  font-style: normal;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 14px;
+  line-height: 1;
 }
 .lp-hero-h1 {
   font-size: clamp(32px, 5vw, 54px);
@@ -289,6 +324,66 @@
   line-height: 1.65;
   max-width: 640px;
   margin: 0 0 52px;
+}
+
+/* ── SOCIAL PROOF STRIP ── */
+.lp-proof-strip {
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 28px 0;
+}
+.lp-proof-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+.lp-proof-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.lp-proof-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0;
+}
+.lp-proof-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 32px;
+}
+.lp-proof-num {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+.lp-proof-text {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.lp-proof-divider {
+  width: 1px;
+  height: 40px;
+  background: #e2e8f0;
+}
+@media (max-width: 680px) {
+  .lp-proof-stats { gap: 16px; }
+  .lp-proof-divider { display: none; }
+  .lp-proof-stat { padding: 0 16px; }
+  .lp-proof-inner { padding: 0 24px; }
 }
 
 /* ── FEATURES ── */
@@ -539,7 +634,7 @@
 /* ── MOBILE NAV ── */
 @media (max-width: 680px) {
   .lp-nav-links .lp-nav-link { display: none; }
-  .lp-hero { padding: 60px 20px 70px; }
+  .lp-hero { padding: 60px 0 70px; }
   .lp-hero-btns { flex-direction: column; }
   .lp-hero-btns .lp-btn-lg { width: 100%; justify-content: center; text-align: center; }
   .lp-footer-inner { flex-direction: column; align-items: flex-start; }

@@ -25,8 +25,9 @@ export default function Landing() {
 
       {/* ── HERO ── */}
       <section className="lp-hero">
+        <div className="lp-hero-grid">
         <div className="lp-hero-inner">
-          <div className="lp-badge">🇨🇦 Built for Canadian Traffic Control</div>
+          <div className="lp-badge"><span className="lp-badge-maple">🍁</span> Built for Canadian Traffic Control</div>
           <h1 className="lp-hero-h1">
             Create Professional<br />
             <span className="lp-accent">Traffic Management Plans</span><br />
@@ -37,21 +38,17 @@ export default function Landing() {
             Place signs, cones, work areas, and export clean PDFs — all in your browser.
           </p>
           <div className="lp-hero-btns">
-            <button className="lp-btn-primary lp-btn-lg" onClick={() => nav("/signup")}>
-              Start Free 7-Day Trial
+            <button className="lp-btn-cta lp-btn-lg" onClick={() => nav("/signup")}>
+              Start Free 7-Day Trial →
             </button>
             <button className="lp-btn-ghost lp-btn-lg" onClick={() => nav("/login")}>
               Login
             </button>
-            <a href="#features" className="lp-btn-outline lp-btn-lg">
-              See Features ↓
-            </a>
           </div>
-          <p className="lp-hero-note">No credit card required · Cancel anytime</p>
         </div>
 
-        {/* decorative map preview */}
-        <div className="lp-hero-visual">
+          {/* decorative map preview */}
+          <div className="lp-hero-visual">
           <div className="lp-map-card">
             <div className="lp-map-bar">
               <span className="lp-dot red" /><span className="lp-dot yellow" /><span className="lp-dot green" />
@@ -79,7 +76,24 @@ export default function Landing() {
             </div>
           </div>
         </div>
+        </div>
       </section>
+
+      {/* ── SOCIAL PROOF ── */}
+      <div className="lp-proof-strip">
+        <div className="lp-proof-inner">
+          <span className="lp-proof-label">Trusted by BC traffic control professionals</span>
+          <div className="lp-proof-stats">
+            <div className="lp-proof-stat"><span className="lp-proof-num">100%</span><span className="lp-proof-text">Browser-based — no install</span></div>
+            <div className="lp-proof-divider" />
+            <div className="lp-proof-stat"><span className="lp-proof-num">BC MOT</span><span className="lp-proof-text">Sign catalog included</span></div>
+            <div className="lp-proof-divider" />
+            <div className="lp-proof-stat"><span className="lp-proof-num">PDF</span><span className="lp-proof-text">Submission-ready export</span></div>
+            <div className="lp-proof-divider" />
+            <div className="lp-proof-stat"><span className="lp-proof-num">7-day</span><span className="lp-proof-text">Free trial, full access</span></div>
+          </div>
+        </div>
+      </div>
 
       {/* ── FEATURES ── */}
       <section className="lp-features" id="features">
@@ -163,7 +177,7 @@ export default function Landing() {
         <div className="lp-section-inner">
           <div className="lp-section-label">Pricing</div>
           <h2 className="lp-section-h2">Simple, transparent pricing</h2>
-          <p className="lp-section-sub">7-day free trial on every plan. No credit card required to start.</p>
+          <p className="lp-section-sub">7-day free trial on every plan. Money-back guarantee within 14 days of first payment.</p>
 
           <div className="lp-price-grid">
             <div className="lp-price-card">
@@ -177,7 +191,7 @@ export default function Landing() {
                 <li>✓ PDF export</li>
                 <li>✓ All sign catalog updates</li>
               </ul>
-              <button className="lp-btn-primary lp-btn-block" onClick={() => nav("/signup")}>
+              <button className="lp-btn-cta lp-btn-block" onClick={() => nav("/signup")}>
                 Start Free Trial
               </button>
             </div>
@@ -195,7 +209,7 @@ export default function Landing() {
                 <li>✓ All sign catalog updates</li>
                 <li>✓ Save ~$140 vs monthly</li>
               </ul>
-              <button className="lp-btn-primary lp-btn-block" onClick={() => nav("/signup")}>
+              <button className="lp-btn-cta lp-btn-block" onClick={() => nav("/signup")}>
                 Start Free Trial
               </button>
             </div>
@@ -222,11 +236,10 @@ export default function Landing() {
             </div>
           </div>
           <div className="lp-contact-cta">
-            <p>Ready to try it for free?</p>
-            <button className="lp-btn-primary lp-btn-lg" onClick={() => nav("/signup")}>
-              Start Free 7-Day Trial
+            <p>Ready to try it?</p>
+            <button className="lp-btn-cta lp-btn-lg" onClick={() => nav("/signup")}>
+              Start Free 7-Day Trial →
             </button>
-            <p className="lp-hero-note">No credit card required · Cancel anytime</p>
           </div>
         </div>
       </section>
