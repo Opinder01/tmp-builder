@@ -8,6 +8,115 @@ function scrollTo(id) {
   if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ── Live canvas hero background ──────────────────────────────────────────────
+function HeroCanvas() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    let raf;
+    let W, H;
+
+    const COLORS = ["#f97316", "#38bdf8", "#818cf8", "#34d399", "#fb923c"];
+    const COUNT  = 72;
+    const MAX_DIST = 160;
+
+    const nodes = [];
+
+    function resize() {
+      W = canvas.width  = canvas.offsetWidth;
+      H = canvas.height = canvas.offsetHeight;
+    }
+
+    function initNodes() {
+      nodes.length = 0;
+      for (let i = 0; i < COUNT; i++) {
+        nodes.push({
+          x:  Math.random() * W,
+          y:  Math.random() * H,
+          vx: (Math.random() - 0.5) * 0.55,
+          vy: (Math.random() - 0.5) * 0.55,
+          r:  Math.random() * 2.2 + 1.2,
+          color: COLORS[Math.floor(Math.random() * COLORS.length)],
+          pulse: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+
+      // background
+      const bg = ctx.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0,   "#060d1a");
+      bg.addColorStop(0.5, "#0d1f3c");
+      bg.addColorStop(1,   "#071622");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, W, H);
+
+      // update + draw connections
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        a.x += a.vx;
+        a.y += a.vy;
+        a.pulse += 0.025;
+        if (a.x < 0 || a.x > W) a.vx *= -1;
+        if (a.y < 0 || a.y > H) a.vy *= -1;
+
+        for (let j = i + 1; j < nodes.length; j++) {
+          const b = nodes[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < MAX_DIST) {
+            const alpha = (1 - dist / MAX_DIST) * 0.35;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = `rgba(148,163,184,${alpha})`;
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+          }
+        }
+      }
+
+      // draw nodes on top
+      for (const n of nodes) {
+        const pulse = 1 + Math.sin(n.pulse) * 0.3;
+
+        // outer glow
+        const grd = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 6 * pulse);
+        grd.addColorStop(0,   n.color + "55");
+        grd.addColorStop(1,   n.color + "00");
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r * 6 * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = grd;
+        ctx.fill();
+
+        // core dot
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = n.color;
+        ctx.fill();
+      }
+
+      raf = requestAnimationFrame(draw);
+    }
+
+    resize();
+    initNodes();
+    draw();
+
+    const ro = new ResizeObserver(() => { resize(); initNodes(); });
+    ro.observe(canvas);
+
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
+  return <canvas ref={canvasRef} className="lp-hero-canvas" />;
+}
+
 // ── Contact form helpers ──────────────────────────────────────────────────────
 const EMPTY_FORM = { firstName: "", lastName: "", email: "", companyName: "", phoneNumber: "", subject: "", message: "" };
 
@@ -107,14 +216,8 @@ export default function Landing() {
 
         {/* ── HERO ── */}
         <section className="lp-hero">
-          {/* animated background */}
-          <div className="lp-hero-bg">
-            <div className="lp-orb lp-orb-1" />
-            <div className="lp-orb lp-orb-2" />
-            <div className="lp-orb lp-orb-3" />
-            <div className="lp-orb lp-orb-4" />
-            <div className="lp-hero-grid-lines" />
-          </div>
+          {/* live canvas background */}
+          <HeroCanvas />
           <div className="lp-hero-grid">
             <div className="lp-hero-inner">
               <div className="lp-badge">Compliant with BC TMM MOTI Standards</div>
