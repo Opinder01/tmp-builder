@@ -428,81 +428,22 @@ html, body {
 /* ── FEATURES ── */
 .lp-features {
   padding: 90px 0;
-  background: #f0f4ff;
+  background: #f8fafc;
   position: relative;
   overflow: hidden;
 }
-.lp-features .lp-section-inner {
-  position: relative;
-  z-index: 2;
-}
-
-/* BC-inspired animated background */
-.lp-feat-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* BC flag faint background */
-.lp-feat-bg::before {
+.lp-features::before {
   content: "";
   position: absolute;
   inset: 0;
   background: url("/bc-flag.png") center center / cover no-repeat;
-  opacity: 0.05;
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
 }
-
-/* Golden sun rays — like BC flag sun */
-.lp-feat-sun {
-  position: absolute;
-  bottom: -320px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 900px;
-  height: 900px;
-  border-radius: 50%;
-  background: repeating-conic-gradient(
-    rgba(234, 179, 8, 0.13) 0deg 7deg,
-    transparent 7deg 14deg
-  );
-  animation: sunSpin 40s linear infinite;
-  transform-origin: center bottom;
-}
-@keyframes sunSpin {
-  from { transform: translateX(-50%) rotate(0deg); }
-  to   { transform: translateX(-50%) rotate(360deg); }
-}
-
-/* Blue waves at top — like BC flag Pacific waves */
-.lp-feat-waves {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 120px;
-  overflow: hidden;
-}
-.lp-feat-waves svg {
-  width: 100%;
-  height: 100%;
-}
-.lp-wave {
-  fill: none;
-  stroke-width: 2;
-}
-.lp-wave-1 {
-  stroke: rgba(29, 78, 216, 0.12);
-  animation: waveDrift 8s ease-in-out infinite;
-}
-.lp-wave-2 {
-  stroke: rgba(29, 78, 216, 0.07);
-  animation: waveDrift 11s ease-in-out infinite reverse;
-}
-@keyframes waveDrift {
-  0%, 100% { d: path("M0,60 C240,100 480,20 720,60 C960,100 1200,20 1440,60 L1440,0 L0,0 Z"); }
-  50%       { d: path("M0,40 C240,80 480,10 720,50 C960,90 1200,30 1440,50 L1440,0 L0,0 Z"); }
+.lp-features .lp-section-inner {
+  position: relative;
+  z-index: 1;
 }
 .lp-feat-grid {
   display: grid;
