@@ -1,11 +1,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 /* ── ROOT ── */
+html, body {
+  overflow-x: hidden;
+}
 .lp-root {
   font-family: Inter, system-ui, -apple-system, Roboto, Arial, sans-serif;
   color: #0f172a;
   background: #fff;
-  overflow-x: hidden;
 }
 
 /* ── SCROLL PROGRESS BAR ── */
