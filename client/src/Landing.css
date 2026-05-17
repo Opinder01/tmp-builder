@@ -423,7 +423,15 @@ html, body {
   box-shadow: 0 8px 32px rgba(15,23,42,0.08);
   transform: translateY(-3px);
 }
-.lp-feat-icon { font-size: 28px; margin-bottom: 14px; }
+.lp-feat-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
 .lp-feat-title {
   font-size: 17px;
   font-weight: 700;

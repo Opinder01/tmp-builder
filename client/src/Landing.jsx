@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState, useMemo } from "react";
+import { Zap, MapPin, TriangleAlert, Ruler, FileText, Map } from "lucide-react";
 import "./Landing.css";
 
 function scrollTo(id) {
@@ -189,38 +190,46 @@ export default function Landing() {
             <div className="lp-feat-grid">
               {[
                 {
-                  icon: "⚡",
+                  icon: <Zap size={26} strokeWidth={2} />,
+                  color: "#f97316",
                   title: "Create TMPs Faster",
                   desc: "Drag-and-drop signs, cones, barriers, and work areas directly onto a live Google Maps aerial. No CAD software needed.",
                 },
                 {
-                  icon: "🍁",
+                  icon: <MapPin size={26} strokeWidth={2} />,
+                  color: "#0ea5e9",
                   title: "Built for BC Traffic Control",
                   desc: "Pre-loaded Canadian sign catalog (R-, C-, W-series and more) designed for BC TMM MOTI (Ministry of Transportation and Infrastructure) requirements.",
                 },
                 {
-                  icon: "🛑",
+                  icon: <TriangleAlert size={26} strokeWidth={2} />,
+                  color: "#ef4444",
                   title: "Full Sign & Cone Toolkit",
                   desc: "Place regulatory signs, construction cones, barriers, pedestrian tape, arrow boards, and work area polygons with ease.",
                 },
                 {
-                  icon: "📐",
+                  icon: <Ruler size={26} strokeWidth={2} />,
+                  color: "#8b5cf6",
                   title: "Measurements & Annotations",
                   desc: "Add measurement lines, text labels, rectangles, and tables directly on the plan for professional documentation.",
                 },
                 {
-                  icon: "📄",
+                  icon: <FileText size={26} strokeWidth={2} />,
+                  color: "#10b981",
                   title: "Export Clean Professional PDFs",
                   desc: "One-click PDF export with title block, north arrow, scale bar, legend, and manifest — ready for submission.",
                 },
                 {
-                  icon: "🗺️",
+                  icon: <Map size={26} strokeWidth={2} />,
+                  color: "#f59e0b",
                   title: "Live Aerial Map Base",
                   desc: "Build your TMP on a real satellite or road map. Zoom, pan, and frame the exact work zone area you need.",
                 },
               ].map((f) => (
                 <div className="lp-feat-card" key={f.title}>
-                  <div className="lp-feat-icon">{f.icon}</div>
+                  <div className="lp-feat-icon" style={{ color: f.color, background: f.color + "18" }}>
+                    {f.icon}
+                  </div>
                   <h3 className="lp-feat-title">{f.title}</h3>
                   <p className="lp-feat-desc">{f.desc}</p>
                 </div>
