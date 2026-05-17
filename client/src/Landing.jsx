@@ -23,10 +23,11 @@ export default function Landing() {
   }, []);
 
   return (
-    <div className="lp-root">
-
+    <>
       {/* ── SCROLL PROGRESS BAR ── */}
       <div className="lp-scroll-bar" style={{ width: `${scrollPct}%` }} />
+
+    <div className="lp-root">
 
       {/* ── NAV ── */}
       <nav className="lp-nav">
@@ -285,5 +286,6 @@ export default function Landing() {
       </footer>
 
     </div>
+    </>
   );
 }
