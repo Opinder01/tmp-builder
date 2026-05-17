@@ -160,11 +160,88 @@ html, body {
 
 /* ── HERO ── */
 .lp-hero {
-  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #164e63 100%);
+  background: #060d1a;
   color: #fff;
   padding: 90px 0 110px;
+  position: relative;
+  overflow: hidden;
 }
+
+/* animated background layer */
+.lp-hero-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* glowing orbs */
+.lp-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.55;
+}
+.lp-orb-1 {
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, #1e40af 0%, transparent 70%);
+  top: -150px; left: -100px;
+  animation: orbFloat1 12s ease-in-out infinite;
+}
+.lp-orb-2 {
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, #f97316 0%, transparent 70%);
+  top: -80px; right: 10%;
+  opacity: 0.2;
+  animation: orbFloat2 15s ease-in-out infinite;
+}
+.lp-orb-3 {
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, #0e7490 0%, transparent 70%);
+  bottom: -250px; right: -150px;
+  opacity: 0.4;
+  animation: orbFloat3 18s ease-in-out infinite;
+}
+.lp-orb-4 {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, #7c3aed 0%, transparent 70%);
+  bottom: 0; left: 30%;
+  opacity: 0.18;
+  animation: orbFloat4 14s ease-in-out infinite;
+}
+
+/* subtle dot grid */
+.lp-hero-grid-lines {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+}
+
+@keyframes orbFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(60px, 40px) scale(1.08); }
+  66%       { transform: translate(-30px, 70px) scale(0.95); }
+}
+@keyframes orbFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%       { transform: translate(-80px, 60px) scale(1.1); }
+}
+@keyframes orbFloat3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  40%       { transform: translate(-60px, -50px) scale(1.05); }
+  70%       { transform: translate(40px, -30px) scale(0.98); }
+}
+@keyframes orbFloat4 {
+  0%, 100% { transform: translate(0, 0); }
+  50%       { transform: translate(50px, -40px) scale(1.12); }
+}
+
 .lp-hero-grid {
+  position: relative;
+  z-index: 1;
   max-width: 1140px;
   margin: 0 auto;
   padding: 0 48px;

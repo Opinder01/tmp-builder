@@ -107,6 +107,14 @@ export default function Landing() {
 
         {/* ── HERO ── */}
         <section className="lp-hero">
+          {/* animated background */}
+          <div className="lp-hero-bg">
+            <div className="lp-orb lp-orb-1" />
+            <div className="lp-orb lp-orb-2" />
+            <div className="lp-orb lp-orb-3" />
+            <div className="lp-orb lp-orb-4" />
+            <div className="lp-hero-grid-lines" />
+          </div>
           <div className="lp-hero-grid">
             <div className="lp-hero-inner">
               <div className="lp-badge">Compliant with BC TMM MOTI Standards</div>
