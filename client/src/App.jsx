@@ -10,6 +10,8 @@ import ForgotPassword from "./ForgotPassword";
 import Dashboard from "./Dashboard";
 import Editor from "./Editor";
 import ProtectedRoute from "./ProtectedRoute";
+import Privacy from "./Privacy";
+import Terms from "./Terms";
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
 
         <Route
           path="/dashboard"

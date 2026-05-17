@@ -1,0 +1,114 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+.legal-root {
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+  background: #fff;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Nav */
+.legal-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 32px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+}
+.legal-logo-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+.legal-logo {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+/* Body */
+.legal-body {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 60px 32px 80px;
+  flex: 1;
+}
+.legal-body h1 {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+  margin: 0 0 8px;
+}
+.legal-date {
+  font-size: 14px;
+  color: #94a3b8;
+  margin: 0 0 40px;
+}
+.legal-body h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 36px 0 12px;
+}
+.legal-body p {
+  font-size: 15px;
+  color: #475569;
+  line-height: 1.75;
+  margin: 0 0 16px;
+}
+.legal-body ul {
+  padding-left: 20px;
+  margin: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legal-body li {
+  font-size: 15px;
+  color: #475569;
+  line-height: 1.65;
+}
+.legal-body a {
+  color: #f97316;
+  text-decoration: none;
+  font-weight: 500;
+}
+.legal-body a:hover { text-decoration: underline; }
+
+/* Footer */
+.legal-footer {
+  border-top: 1px solid #e2e8f0;
+  padding: 20px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.legal-footer button {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f97316;
+  cursor: pointer;
+  padding: 0;
+}
+.legal-footer button:hover { text-decoration: underline; }
+.legal-footer span {
+  font-size: 13px;
+  color: #94a3b8;
+}

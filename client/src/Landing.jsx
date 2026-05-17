@@ -451,9 +451,8 @@ export default function Landing() {
             <div className="lp-footer-links">
               <button className="lp-footer-link" onClick={() => nav("/login")}>Login</button>
               <button className="lp-footer-link" onClick={() => nav("/signup")}>Sign Up</button>
-              <a href="mailto:info@tmpbuilder.ca" className="lp-footer-link">Contact</a>
-              <a href="/privacy" className="lp-footer-link">Privacy Policy</a>
-              <a href="/terms" className="lp-footer-link">Terms of Service</a>
+              <button className="lp-footer-link" onClick={() => nav("/privacy")}>Privacy Policy</button>
+              <button className="lp-footer-link" onClick={() => nav("/terms")}>Terms of Service</button>
             </div>
             <div className="lp-footer-copy">
               © {new Date().getFullYear()} TMP Builder. All rights reserved.
