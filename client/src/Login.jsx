@@ -79,41 +79,47 @@ export default function Login() {
     navigate("/dashboard");
   }
 
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box",
+    padding: "9px 12px", fontSize: 13,
+    border: "1.5px solid #e2e8f0", borderRadius: 8,
+    outline: "none", fontFamily: "inherit",
+    background: "#f8fafc", color: "#0f172a",
+  };
+
+  const btnStyle = {
+    width: "100%", padding: "10px", fontSize: 14, fontWeight: 600,
+    background: "linear-gradient(135deg,#f97316,#ea580c)",
+    color: "#fff", border: "none", borderRadius: 8,
+    cursor: loading ? "not-allowed" : "pointer",
+    opacity: loading ? 0.7 : 1, marginTop: 4,
+  };
+
   return (
     <AuthLayout title="Sign In">
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input
-          type="email"
-          placeholder="Email Address"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          disabled={loading}
+          type="email" placeholder="Email Address"
+          value={email} onChange={(e) => setEmail(e.target.value)}
+          disabled={loading} style={inputStyle}
         />
-        <br /><br />
-
         <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={loading}
+          type="password" placeholder="Password"
+          value={password} onChange={(e) => setPassword(e.target.value)}
+          disabled={loading} style={inputStyle}
         />
-        <br /><br />
 
-        {error && (
-          <p style={{ color: "crimson", marginTop: 0 }}>{error}</p>
-        )}
+        {error && <p style={{ color: "crimson", margin: 0, fontSize: 12 }}>{error}</p>}
 
-        <button type="submit" disabled={loading}>
+        <button type="submit" disabled={loading} style={btnStyle}>
           {loading ? "Signing in…" : "Sign In"}
         </button>
 
-        <p style={{ marginTop: 16 }}>
-          <a href="/forgot-password">Forgot Password?</a>
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#64748b" }}>
+          <a href="/forgot-password" style={{ color: "#f97316" }}>Forgot Password?</a>
         </p>
-
-        <p>
-          New user? <a href="/signup">Create Account</a>
+        <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
+          New user? <a href="/signup" style={{ color: "#f97316", fontWeight: 600 }}>Create Account</a>
         </p>
       </form>
     </AuthLayout>

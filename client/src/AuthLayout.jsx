@@ -168,14 +168,14 @@ export default function AuthLayout({ title, children }) {
 
       {/* Layer 4 — auth card */}
       <div style={{
-        position: "relative", zIndex: 3, width: "100%", maxWidth: 420,
-        background: "rgba(255,255,255,0.94)", padding: "36px 32px",
-        borderRadius: 18,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)",
+        position: "relative", zIndex: 3, width: "100%", maxWidth: 360,
+        background: "rgba(255,255,255,0.94)", padding: "24px 26px 28px",
+        borderRadius: 14,
+        boxShadow: "0 16px 48px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)",
         backdropFilter: "blur(16px)",
         border: "1px solid rgba(255,255,255,0.15)",
       }}>
-        <h2 style={{ marginTop: 0, marginBottom: 22, color: "#0f172a" }}>{title}</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16, color: "#0f172a", fontSize: 20 }}>{title}</h2>
         {children}
       </div>
     </div>
