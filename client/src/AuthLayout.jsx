@@ -19,17 +19,18 @@ export default function AuthLayout({ title, children }) {
       <div
         style={{
           position: "absolute",
-          top: 30,
-          left: 40,
-          color: "white",
-          fontSize: 24,
-          fontWeight: 600,
-          letterSpacing: 0.2,
+          top: 20,
+          left: 32,
           userSelect: "none",
-          pointerEvents: "none",
         }}
       >
-        TMP Builder
+        <a href="/" style={{ display: "inline-block" }}>
+          <img
+            src="/logo.png"
+            alt="TMP Builder"
+            style={{ height: 64, width: "auto", display: "block" }}
+          />
+        </a>
       </div>
       <div
         style={{
