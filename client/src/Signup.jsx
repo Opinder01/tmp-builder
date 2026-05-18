@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import AuthLayout from "./AuthLayout";
 
@@ -12,6 +12,18 @@ export default function Signup() {
 
   const [error, setError] = useState("");
   const navigate = useNavigate();
+
+  // If already logged in and subscribed, skip signup
+  useEffect(() => {
+    try {
+      const user = JSON.parse(localStorage.getItem("loggedInUser") || "null");
+      if (user?.email && user?.subscribed) {
+        navigate("/editor", { replace: true });
+      }
+    } catch {
+      // ignore corrupt storage
+    }
+  }, [navigate]);
 
   function handleSubmit(e) {
     e.preventDefault();

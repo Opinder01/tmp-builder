@@ -45,6 +45,9 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Catch-all: any unknown URL → landing page */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
