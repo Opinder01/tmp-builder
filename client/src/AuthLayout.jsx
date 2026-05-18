@@ -28,7 +28,13 @@ export default function AuthLayout({ title, children }) {
           <img
             src="/logo.png"
             alt="TMP Builder"
-            style={{ height: 64, width: "auto", display: "block" }}
+            style={{
+              height: 72,
+              width: "auto",
+              display: "block",
+              mixBlendMode: "multiply",
+              filter: "brightness(1.05) contrast(1.1)",
+            }}
           />
         </a>
       </div>
