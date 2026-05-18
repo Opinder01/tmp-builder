@@ -1,5 +1,3 @@
-import authBg from "./assets/auth-bg.png";
-
 export default function AuthLayout({ title, children }) {
   return (
     <div
@@ -10,7 +8,7 @@ export default function AuthLayout({ title, children }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundImage: `linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.35)), url(${authBg})`,
+        backgroundImage: `linear-gradient(rgba(10,20,40,0.55), rgba(10,20,40,0.45)), url(/auth-bg.jpg)`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
@@ -29,11 +27,11 @@ export default function AuthLayout({ title, children }) {
             src="/logo.png"
             alt="TMP Builder"
             style={{
-              height: 72,
+              height: 76,
               width: "auto",
               display: "block",
               mixBlendMode: "multiply",
-              filter: "brightness(1.05) contrast(1.1)",
+              filter: "brightness(1.1) contrast(1.15) drop-shadow(0 2px 8px rgba(0,0,0,0.4))",
             }}
           />
         </a>
