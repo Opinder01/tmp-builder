@@ -8,11 +8,13 @@ const SUGGESTED = [
   "What does a flagger setup require?",
 ];
 
-function BotIcon() {
+function BotIcon({ size = 20 }) {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" />
-      <path d="M2 14h2M20 14h2M9 18v2M15 18v2" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      {/* 4-pointed AI sparkle — universally recognised AI icon */}
+      <path d="M12 2C12 2 13.2 7.8 14.8 9.2C16.4 10.6 22 12 22 12C22 12 16.4 13.4 14.8 14.8C13.2 16.2 12 22 12 22C12 22 10.8 16.2 9.2 14.8C7.6 13.4 2 12 2 12C2 12 7.6 10.6 9.2 9.2C10.8 7.8 12 2 12 2Z" />
+      {/* Small accent sparkle top-right */}
+      <path d="M19 2C19 2 19.6 4.4 20.3 5.1C21 5.8 23 6 23 6C23 6 21 6.2 20.3 6.9C19.6 7.6 19 10 19 10C19 10 18.4 7.6 17.7 6.9C17 6.2 15 6 15 6C15 6 17 5.8 17.7 5.1C18.4 4.4 19 2 19 2Z" />
     </svg>
   );
 }
@@ -116,7 +118,7 @@ export default function AiAssistant() {
           transform:    open ? "scale(0.92)" : "scale(1)",
         }}
       >
-        {open ? <CloseIcon /> : <BotIcon />}
+        {open ? <CloseIcon /> : <BotIcon size={22} />}
       </button>
 
       {/* Chat panel */}
@@ -156,7 +158,7 @@ export default function AiAssistant() {
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "#fff", flexShrink: 0,
             }}>
-              <BotIcon />
+              <BotIcon size={18} />
             </div>
             <div>
               <div style={{ color: "#fff", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
@@ -189,7 +191,7 @@ export default function AiAssistant() {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   color: "#fff", margin: "0 auto 10px",
                 }}>
-                  <BotIcon />
+                  <BotIcon size={26} />
                 </div>
                 <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 4 }}>
                   TMP Assistant
@@ -228,7 +230,7 @@ export default function AiAssistant() {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     color: "#fff", marginRight: 7, marginTop: 2, fontSize: 11,
                   }}>
-                    <BotIcon />
+                    <BotIcon size={14} />
                   </div>
                 )}
                 <div style={{
@@ -255,7 +257,7 @@ export default function AiAssistant() {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   color: "#fff", fontSize: 11, flexShrink: 0,
                 }}>
-                  <BotIcon />
+                  <BotIcon size={14} />
                 </div>
                 <div style={{
                   background: "#f1f5f9", borderRadius: "14px 14px 14px 4px",
