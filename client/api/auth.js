@@ -1,15 +1,27 @@
 /**
  * Unified auth API — ?action=register|login|request-reset|reset-password|session
- *
- * Security changes:
- *  - Passwords hashed with PBKDF2 (100k iterations, SHA-512, random salt)
- *  - Legacy plaintext passwords auto-migrated to hash on first successful login
- *  - OTP validated server-side via AES-256-GCM encrypted token (no schema change)
- *  - reset-password requires valid OTP token; clears all sessions on success
- *  - Plaintext password no longer returned or stored on clients
  */
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = new Set([
+  "https://tmpbuilder.ca",
+  "https://www.tmpbuilder.ca",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:4173",
+]);
+
+function setCors(req, res) {
+  const origin = req.headers?.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -21,6 +33,25 @@ function getSupabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// ── In-memory rate limiter (best-effort; clears on cold start) ────────────────
+const _rl = new Map();
+function rateLimit(ip, key, maxAttempts, windowSec) {
+  const k = `${ip}|${key}`;
+  const now = Date.now();
+  const e = _rl.get(k);
+  if (!e || now > e.r) { _rl.set(k, { n: 1, r: now + windowSec * 1000 }); return false; }
+  e.n++;
+  return e.n > maxAttempts;
+}
+function getIp(req) {
+  return (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+    || req.socket?.remoteAddress || "unknown";
+}
+
+// ── In-memory OTP token blacklist (cleared on cold start) ────────────────────
+// Prevents replay within the same warm instance window (~10-15 min)
+const _usedTokens = new Set();
+
 // ── Password hashing ─────────────────────────────────────────────────────────
 
 function hashPassword(password) {
@@ -31,34 +62,28 @@ function hashPassword(password) {
 
 function verifyPassword(password, stored) {
   if (!stored) return false;
-  if (!stored.startsWith("pbkdf2:")) {
-    // Legacy plaintext — direct compare, will be upgraded after login
-    return password === stored;
-  }
+  if (!stored.startsWith("pbkdf2:")) return password === stored; // legacy plaintext
   const [, salt, hash] = stored.split(":");
   const attempt = crypto.pbkdf2Sync(password, salt, 100_000, 64, "sha512").toString("hex");
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(attempt, "hex"));
 }
 
-function isHashed(stored) {
-  return typeof stored === "string" && stored.startsWith("pbkdf2:");
-}
+function isHashed(s) { return typeof s === "string" && s.startsWith("pbkdf2:"); }
 
-// ── OTP encrypted token (AES-256-GCM, no DB schema change needed) ───────────
+// ── OTP encrypted token ───────────────────────────────────────────────────────
 
 function getOtpKey() {
-  const secret =
-    (process.env.SUPABASE_SERVICE_ROLE_KEY || "") +
-    (process.env.STRIPE_SECRET_KEY || "") +
-    "_otp_v1";
+  const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || "")
+    + (process.env.STRIPE_SECRET_KEY || "") + "_otp_v1";
   return crypto.scryptSync(secret, "tmpbuilder_otp_salt", 32);
 }
 
 function encryptOtpToken(email, otp, expiresAt) {
   const key = getOtpKey();
-  const iv = crypto.randomBytes(12);
+  const iv  = crypto.randomBytes(12);
+  const tid = crypto.randomBytes(8).toString("hex"); // unique token ID for blacklisting
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const payload = JSON.stringify({ email: email.toLowerCase().trim(), otp, expiresAt });
+  const payload = JSON.stringify({ email: email.toLowerCase().trim(), otp, expiresAt, tid });
   const enc = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, enc]).toString("base64url");
@@ -71,251 +96,247 @@ function decryptOtpToken(token) {
     const iv  = buf.subarray(0, 12);
     const tag = buf.subarray(12, 28);
     const enc = buf.subarray(28);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(tag);
-    const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
+    const d   = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    d.setAuthTag(tag);
+    const dec = Buffer.concat([d.update(enc), d.final()]);
     return JSON.parse(dec.toString("utf8"));
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ── Email helper (Resend) ────────────────────────────────────────────────────
+// ── Email ─────────────────────────────────────────────────────────────────────
 
 async function sendOtpEmail(email, otp) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("Email service not configured.");
   const html =
     "<div style='font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px'>" +
-    "<h2 style='color:#0f172a'>TMP Builder</h2>" +
-    "<p>Your password reset code:</p>" +
+    "<h2 style='color:#0f172a'>TMP Builder</h2><p>Your password reset code:</p>" +
     "<p style='font-size:36px;font-weight:900;letter-spacing:8px;color:#0f172a'>" + otp + "</p>" +
-    "<p style='color:#64748b;font-size:13px'>This code expires in 10 minutes. If you did not request this, ignore this email.</p>" +
-    "</div>";
+    "<p style='color:#64748b;font-size:13px'>Expires in 10 minutes. If you did not request this, ignore this email.</p></div>";
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: "TMP Builder <no-reply@tmpbuilder.ca>",
-      to: [email],
-      subject: "Your TMP Builder password reset code",
-      html,
-    }),
+    body: JSON.stringify({ from: "TMP Builder <no-reply@tmpbuilder.ca>", to: [email],
+      subject: "Your TMP Builder password reset code", html }),
   });
   if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body?.message || "Failed to send email.");
+    const b = await r.json().catch(() => ({}));
+    throw new Error(b?.message || "Failed to send email.");
   }
 }
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_DEVICES  = 2;
 const SESSION_DAYS = 30;
-const OTP_TTL_MS   = 10 * 60 * 1000; // 10 minutes
+const OTP_TTL_MS   = 10 * 60 * 1000;
+
+// ── Input validation ─────────────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
+function validateInputs(fields) {
+  const { email, password, fullName, companyName, phone } = fields;
+  if (email    !== undefined && (!EMAIL_RE.test(email) || email.length > 254))
+    return "Please enter a valid email address.";
+  if (password !== undefined && password.length > 128)
+    return "Password must be 128 characters or fewer.";
+  if (fullName    !== undefined && fullName.length    > 100) return "Full name too long.";
+  if (companyName !== undefined && companyName.length > 100) return "Company name too long.";
+  if (phone       !== undefined && phone.length       > 30)  return "Phone number too long.";
+  return null;
+}
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  setCors(req, res);
   if (req.method === "OPTIONS") return json(res, 204, {});
 
   const action = req.query?.action;
+  const ip     = getIp(req);
 
-  // ── REGISTER ────────────────────────────────────────────────────────────────
+  // ── REGISTER ──────────────────────────────────────────────────────────────
   if (action === "register") {
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
 
     const { email, password, fullName, companyName, phone } = req.body || {};
     if (!email || !password || !fullName || !companyName || !phone)
       return json(res, 400, { error: "Please fill all fields." });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return json(res, 400, { error: "Please enter a valid email." });
-    if (password.length < 6)
-      return json(res, 400, { error: "Password must be at least 6 characters." });
+
+    const validErr = validateInputs({ email, password, fullName, companyName, phone });
+    if (validErr) return json(res, 400, { error: validErr });
+    if (password.length < 6) return json(res, 400, { error: "Password must be at least 6 characters." });
 
     const supabase = getSupabase();
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const { data: existing, error: selectErr } = await supabase
-      .from("app_users").select("email").eq("email", normalizedEmail).maybeSingle();
-    if (selectErr) {
-      console.error("[register] select error:", selectErr);
-      return json(res, 500, { error: "Database error. Please try again." });
-    }
+    const norm = email.toLowerCase().trim();
+    const { data: existing } = await supabase.from("app_users").select("email").eq("email", norm).maybeSingle();
     if (existing) return json(res, 409, { error: "An account already exists with this email." });
 
     const { error: insertErr } = await supabase.from("app_users").insert({
-      email:        normalizedEmail,
-      password:     hashPassword(password),
-      full_name:    fullName.trim(),
-      company_name: companyName.trim(),
-      phone:        phone.trim(),
+      email: norm, password: hashPassword(password),
+      full_name: fullName.trim(), company_name: companyName.trim(), phone: phone.trim(),
     });
     if (insertErr) {
-      console.error("[register] insert error:", insertErr);
-      if (insertErr.code === "23505")
-        return json(res, 409, { error: "An account already exists with this email." });
+      if (insertErr.code === "23505") return json(res, 409, { error: "An account already exists with this email." });
       return json(res, 500, { error: "Failed to create account. Please try again." });
     }
     return json(res, 200, { ok: true });
   }
 
-  // ── LOGIN ────────────────────────────────────────────────────────────────────
+  // ── LOGIN (creates session internally) ────────────────────────────────────
   if (action === "login") {
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+
+    // Rate limit: 10 attempts per IP per 15 minutes
+    if (rateLimit(ip, "login", 10, 900))
+      return json(res, 429, { error: "Too many login attempts. Please wait 15 minutes and try again." });
 
     const { email, password } = req.body || {};
     if (!email || !password) return json(res, 400, { error: "Please enter email and password." });
 
+    const validErr = validateInputs({ email, password });
+    if (validErr) return json(res, 400, { error: validErr });
+
     const supabase = getSupabase();
-    const normalizedEmail = email.toLowerCase().trim();
+    const norm = email.toLowerCase().trim();
 
     const { data: user, error } = await supabase
-      .from("app_users")
-      .select("email, password, full_name, company_name, phone")
-      .eq("email", normalizedEmail).maybeSingle();
+      .from("app_users").select("email, password, full_name, company_name, phone")
+      .eq("email", norm).maybeSingle();
 
     if (error) return json(res, 500, { error: "Database error. Please try again." });
     if (!user || !verifyPassword(password, user.password))
       return json(res, 401, { error: "Invalid email or password." });
 
-    // Auto-upgrade legacy plaintext password to hashed (transparent migration)
+    // Auto-upgrade legacy plaintext to hash
     if (!isHashed(user.password)) {
-      await supabase.from("app_users")
-        .update({ password: hashPassword(password) })
-        .eq("email", normalizedEmail);
+      await supabase.from("app_users").update({ password: hashPassword(password) }).eq("email", norm);
     }
 
-    // Never return the stored password hash to the client
+    // Create session — enforce device limit
+    const expiryDate = new Date(Date.now() - SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await supabase.from("user_sessions").delete().eq("email", norm).lt("last_active", expiryDate);
+
+    const { data: sessions } = await supabase
+      .from("user_sessions").select("id").eq("email", norm);
+
+    if ((sessions || []).length >= MAX_DEVICES) {
+      return json(res, 403, {
+        error: `This account is already signed in on ${MAX_DEVICES} devices. Please sign out from another device first.`,
+        code: "MAX_DEVICES_REACHED",
+      });
+    }
+
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+    const { error: sessErr } = await supabase.from("user_sessions")
+      .insert({ email: norm, session_token: sessionToken });
+    if (sessErr) return json(res, 500, { error: "Failed to create session." });
+
     return json(res, 200, {
       email:       user.email,
       fullName:    user.full_name,
       companyName: user.company_name,
       phone:       user.phone,
+      sessionToken,
     });
   }
 
-  // ── REQUEST RESET (send OTP email) ──────────────────────────────────────────
+  // ── REQUEST RESET ────────────────────────────────────────────────────────
   if (action === "request-reset") {
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
 
+    // Rate limit: 3 reset requests per IP per hour
+    if (rateLimit(ip, "request-reset", 3, 3600))
+      return json(res, 429, { error: "Too many reset requests. Please wait an hour and try again." });
+
     const { email } = req.body || {};
     if (!email) return json(res, 400, { error: "Please enter your email." });
+    const validErr = validateInputs({ email });
+    if (validErr) return json(res, 400, { error: validErr });
 
+    const norm = email.toLowerCase().trim();
     const supabase = getSupabase();
-    const normalizedEmail = email.toLowerCase().trim();
 
-    const otp       = String(Math.floor(100_000 + Math.random() * 900_000));
+    // Check existence — but return a generic success even if not found to prevent enumeration
+    const { data: user } = await supabase.from("app_users").select("email").eq("email", norm).maybeSingle();
+    if (!user) {
+      // No account found — return success without sending email (prevents email bombing + user enumeration)
+      return json(res, 200, { otpToken: null, noAccount: true });
+    }
+
+    const otp      = String(crypto.randomInt(100_000, 1_000_000));
     const expiresAt = Date.now() + OTP_TTL_MS;
-    const otpToken  = encryptOtpToken(normalizedEmail, otp, expiresAt);
+    const otpToken  = encryptOtpToken(norm, otp, expiresAt);
 
     try {
-      await sendOtpEmail(normalizedEmail, otp);
+      await sendOtpEmail(norm, otp);
     } catch (err) {
       console.error("[request-reset] email error:", err.message);
       return json(res, 500, { error: "Could not send reset email. Please try again." });
     }
 
-    // Return the encrypted token — client stores it and sends it back with the OTP they received
     return json(res, 200, { otpToken });
   }
 
-  // ── RESET PASSWORD ───────────────────────────────────────────────────────────
+  // ── RESET PASSWORD ────────────────────────────────────────────────────────
   if (action === "reset-password") {
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+
+    // Rate limit: 5 attempts per IP per 15 minutes
+    if (rateLimit(ip, "reset-password", 5, 900))
+      return json(res, 429, { error: "Too many attempts. Please wait 15 minutes." });
 
     const { email, newPassword, otp, otpToken } = req.body || {};
     if (!email || !newPassword || !otp || !otpToken)
       return json(res, 400, { error: "Missing required fields." });
-    if (newPassword.length < 6)
-      return json(res, 400, { error: "Password must be at least 6 characters." });
 
-    // Verify OTP server-side via encrypted token
+    const validErr = validateInputs({ email, password: newPassword });
+    if (validErr) return json(res, 400, { error: validErr });
+    if (newPassword.length < 6) return json(res, 400, { error: "Password must be at least 6 characters." });
+
+    // Single-use check (in-memory; also protected by rate limiter + short TTL)
+    const tokenHash = crypto.createHash("sha256").update(otpToken).digest("hex");
+    if (_usedTokens.has(tokenHash))
+      return json(res, 400, { error: "This reset code has already been used. Please request a new one." });
+
     const decoded = decryptOtpToken(otpToken);
-    if (!decoded)
-      return json(res, 400, { error: "Invalid reset token. Please request a new code." });
-    if (Date.now() > decoded.expiresAt)
-      return json(res, 400, { error: "Reset code has expired. Please request a new one." });
-    if (decoded.email !== email.toLowerCase().trim())
-      return json(res, 400, { error: "Invalid reset token." });
-    if (decoded.otp !== otp)
-      return json(res, 400, { error: "Incorrect code. Please check your email and try again." });
+    if (!decoded)       return json(res, 400, { error: "Invalid reset token. Please request a new code." });
+    if (Date.now() > decoded.expiresAt) return json(res, 400, { error: "Reset code has expired. Please request a new one." });
+    if (decoded.email !== email.toLowerCase().trim()) return json(res, 400, { error: "Invalid reset token." });
+    if (decoded.otp   !== otp)  return json(res, 400, { error: "Incorrect code. Please check your email and try again." });
+
+    // Mark token as used
+    _usedTokens.add(tokenHash);
 
     const supabase = getSupabase();
-    const normalizedEmail = email.toLowerCase().trim();
-
+    const norm = email.toLowerCase().trim();
     const hashedPw = hashPassword(newPassword);
 
-    // Try to update an existing Supabase account
+    // Update existing account
     const { data: updated, error: updateErr } = await supabase
-      .from("app_users")
-      .update({ password: hashedPw })
-      .eq("email", normalizedEmail)
-      .select("email");
-    if (updateErr)
-      return json(res, 500, { error: "Failed to reset password. Please try again." });
+      .from("app_users").update({ password: hashedPw }).eq("email", norm).select("email");
+    if (updateErr) return json(res, 500, { error: "Failed to reset password. Please try again." });
 
-    // Account only in localStorage (legacy) — migrate it into Supabase now
+    // Migrate legacy localStorage-only account into Supabase
     if (!updated || updated.length === 0) {
       const { error: insertErr } = await supabase.from("app_users").insert({
-        email:        normalizedEmail,
-        password:     hashedPw,
-        full_name:    "",
-        company_name: "",
-        phone:        "",
+        email: norm, password: hashedPw, full_name: "", company_name: "", phone: "",
       });
-      // 23505 = unique violation — race condition, account now exists; that's fine
       if (insertErr && insertErr.code !== "23505")
         return json(res, 500, { error: "Failed to reset password. Please try again." });
     }
 
-    // Invalidate all active sessions so old devices must re-login
-    await supabase.from("user_sessions").delete().eq("email", normalizedEmail);
+    // Kick all sessions — everyone must re-login with the new password
+    await supabase.from("user_sessions").delete().eq("email", norm);
 
     return json(res, 200, { ok: true });
   }
 
-  // ── SESSION ──────────────────────────────────────────────────────────────────
+  // ── SESSION ───────────────────────────────────────────────────────────────
   if (action === "session") {
     const supabase = getSupabase();
 
-    // POST — create session
-    if (req.method === "POST") {
-      const { email } = req.body || {};
-      if (!email) return json(res, 400, { error: "email required." });
-      const normalizedEmail = email.toLowerCase().trim();
-      const expiryDate = new Date(Date.now() - SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-      // Clean up expired sessions
-      await supabase.from("user_sessions").delete()
-        .eq("email", normalizedEmail).lt("last_active", expiryDate);
-
-      // Count active sessions
-      const { data: sessions, error: countErr } = await supabase
-        .from("user_sessions").select("id, created_at")
-        .eq("email", normalizedEmail).order("created_at", { ascending: true });
-
-      if (countErr) return json(res, 500, { error: "Database error." });
-
-      if ((sessions || []).length >= MAX_DEVICES) {
-        return json(res, 403, {
-          error: `This account is already signed in on ${MAX_DEVICES} devices. Please sign out from another device first.`,
-          code: "MAX_DEVICES_REACHED",
-        });
-      }
-
-      const sessionToken = crypto.randomBytes(32).toString("hex");
-      const { error: insertErr } = await supabase
-        .from("user_sessions").insert({ email: normalizedEmail, session_token: sessionToken });
-      if (insertErr) return json(res, 500, { error: "Failed to create session." });
-
-      return json(res, 200, { sessionToken });
-    }
-
-    // DELETE — remove session
+    // DELETE — logout
     if (req.method === "DELETE") {
       const { sessionToken } = req.body || {};
       if (!sessionToken) return json(res, 400, { error: "sessionToken required." });
@@ -323,20 +344,16 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true });
     }
 
-    // GET — validate session
+    // GET — validate session token
     if (req.method === "GET") {
       const token = req.query?.token;
       if (!token) return json(res, 400, { error: "token required." });
-
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("user_sessions").select("email, last_active")
         .eq("session_token", token).maybeSingle();
-
-      if (error || !data) return json(res, 200, { valid: false });
-
+      if (!data) return json(res, 200, { valid: false });
       await supabase.from("user_sessions")
         .update({ last_active: new Date().toISOString() }).eq("session_token", token);
-
       return json(res, 200, { valid: true, email: data.email });
     }
 

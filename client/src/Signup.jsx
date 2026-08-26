@@ -42,8 +42,8 @@ export default function Signup() {
         return;
       }
 
-      // Save session to localStorage
-      const newUser = { fullName, companyName, phone, email: email.toLowerCase(), password };
+      // Save user info to localStorage (no password stored)
+      const newUser = { fullName, companyName, phone, email: email.toLowerCase() };
       localStorage.setItem("loggedInUser", JSON.stringify(newUser));
 
       navigate("/subscribe", { replace: true });

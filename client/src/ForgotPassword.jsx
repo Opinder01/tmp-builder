@@ -40,9 +40,10 @@ export default function ForgotPassword() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Error (${res.status})`);
 
-      setOtpToken(data.otpToken);
+      // noAccount: true means no account found — show same message to prevent email enumeration
+      setOtpToken(data.otpToken || "");
       setOtpSent(true);
-      setSuccess("A 6-digit code has been sent to your email. It expires in 10 minutes.");
+      setSuccess("If an account exists for that email, a 6-digit code has been sent. It expires in 10 minutes.");
     } catch (err) {
       setError(err.message || "Could not send reset email. Please try again.");
     } finally {
@@ -54,6 +55,7 @@ export default function ForgotPassword() {
     e.preventDefault();
     setError(""); setSuccess("");
     if (!otpSent)                         { setError("Please send OTP first."); return; }
+    if (!otpToken)                        { setError("No account found with that email address."); return; }
     if (!otp)                             { setError("Please enter the OTP."); return; }
     if (!newPassword || !confirmPassword) { setError("Please enter and confirm your new password."); return; }
     if (newPassword.length < 6)           { setError("Password must be at least 6 characters."); return; }

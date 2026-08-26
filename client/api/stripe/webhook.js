@@ -227,20 +227,19 @@ export default async function handler(req, res) {
 
   let event;
 
-  if (webhookSecret && webhookSecret !== "whsec_REPLACE_ME_AFTER_SETUP") {
-    try {
-      const rawBody = await getRawBody(req);
-      const sig = req.headers["stripe-signature"];
-      event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-      console.log("[webhook] ✅ Signature verified");
-    } catch (err) {
-      console.error("[webhook] ❌ Signature verification failed:", err.message);
-      return json(res, 400, { error: `Webhook error: ${err.message}` });
-    }
-  } else {
-    console.warn("[webhook] ⚠️  No webhook secret — accepting without signature verification (dev only).");
-    const body = req.body || {};
-    event = { type: body.type, data: body.data };
+  if (!webhookSecret || webhookSecret === "whsec_REPLACE_ME_AFTER_SETUP") {
+    console.error("[webhook] ❌ STRIPE_WEBHOOK_SECRET not configured — refusing request.");
+    return json(res, 500, { error: "Webhook not configured." });
+  }
+
+  try {
+    const rawBody = await getRawBody(req);
+    const sig = req.headers["stripe-signature"];
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+    console.log("[webhook] ✅ Signature verified");
+  } catch (err) {
+    console.error("[webhook] ❌ Signature verification failed:", err.message);
+    return json(res, 400, { error: `Webhook error: ${err.message}` });
   }
 
   console.log(`[webhook] 📦 Event type: ${event?.type ?? "unknown"}`);
@@ -301,12 +300,15 @@ export default async function handler(req, res) {
       let email = "";
       try { const c = await stripe.customers.retrieve(sub.customer); email = c.email ?? ""; } catch {}
 
-      const status = sub.status;
-      console.log(`[webhook] subscription.updated — ${sub.id} status=${status} email=${email}`);
+      const status  = sub.status;
+      const priceId = sub.items?.data?.[0]?.price?.id ?? null;
+      const plan    = priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
+      console.log(`[webhook] subscription.updated — ${sub.id} status=${status} plan=${plan} email=${email}`);
 
       await saveSubscription(email, {
         subscriptionId: sub.id,
         customerId: sub.customer,
+        plan,
         subscriptionStatus: (status === "active" || status === "trialing") ? status : "inactive",
       });
       break;

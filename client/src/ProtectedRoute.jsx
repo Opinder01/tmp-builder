@@ -57,9 +57,11 @@ export default function ProtectedRoute({ children }) {
 
         let data = null;
         try {
+          const subHeaders = {};
+          if (sessionToken) subHeaders["Authorization"] = `Bearer ${sessionToken}`;
           const res = await fetch(
             `/api/subscription-status?email=${encodeURIComponent(user.email)}`,
-            { signal: controller.signal }
+            { signal: controller.signal, headers: subHeaders }
           );
           if (res.ok) {
             data = await res.json();

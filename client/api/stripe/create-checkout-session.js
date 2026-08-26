@@ -89,17 +89,13 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. Search Stripe by email if no valid customer found yet
+    // 2. List Stripe customers by email if no valid customer found yet
     if (!customerId) {
-      const existing = await stripe.customers.search({
-        query: `email:"${normalizedEmail}"`,
-        limit: 5,
-      });
-      // Find the first non-deleted customer
+      const existing = await stripe.customers.list({ email: normalizedEmail, limit: 5 });
       const valid = existing.data.find(c => !c.deleted);
       if (valid) {
         customerId = valid.id;
-        console.log("[checkout] found customer in Stripe search:", customerId);
+        console.log("[checkout] found customer in Stripe list:", customerId);
       }
     }
 

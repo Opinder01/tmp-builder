@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -10,17 +11,50 @@ function getSupabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// Rate limit admin auth attempts to prevent brute-force
+const _rl = new Map();
+function rateLimit(ip, maxAttempts, windowSec) {
+  const now = Date.now();
+  const e = _rl.get(ip);
+  if (!e || now > e.r) { _rl.set(ip, { n: 1, r: now + windowSec * 1000 }); return false; }
+  e.n++;
+  return e.n > maxAttempts;
+}
+function getIp(req) {
+  return (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+    || req.socket?.remoteAddress || "unknown";
+}
+
 function isAuthorized(req) {
   const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
   if (!adminPassword) return false;
-  return (req.headers["x-admin-password"] || "").trim() === adminPassword;
+  const supplied = (req.headers["x-admin-password"] || "").trim();
+  if (!supplied) return false;
+  // Constant-time comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(adminPassword));
+  } catch { return false; }
 }
 
+const ALLOWED_ORIGINS = new Set([
+  "https://tmpbuilder.ca", "https://www.tmpbuilder.ca",
+  "http://localhost:3000", "http://localhost:5173", "http://localhost:4173",
+]);
+
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers?.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password");
   if (req.method === "OPTIONS") return json(res, 204, {});
+
+  const ip = getIp(req);
+  // 5 failed attempts per IP per 15 minutes
+  if (rateLimit(ip, 5, 900) && !isAuthorized(req))
+    return json(res, 429, { error: "Too many attempts. Please wait 15 minutes." });
 
   if (!isAuthorized(req)) return json(res, 401, { error: "Unauthorized." });
 

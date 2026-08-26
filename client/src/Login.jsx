@@ -20,9 +20,10 @@ export default function Login() {
 
     setLoading(true);
 
+    // ── Step 1: Login via API (server verifies credentials + creates session) ──
     let userData = null;
+    let sessionToken = null;
 
-    // ── Step 1: Try Supabase via API (primary source of truth) ────────────────
     try {
       const res = await fetch("/api/auth?action=login", {
         method:  "POST",
@@ -33,80 +34,56 @@ export default function Login() {
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data?.email) {
-        userData = {
-          email:       data.email,
-          fullName:    data.fullName    || "",
-          companyName: data.companyName || "",
-          phone:       data.phone       || "",
-        };
+        userData     = { email: data.email, fullName: data.fullName || "",
+                         companyName: data.companyName || "", phone: data.phone || "" };
+        sessionToken = data.sessionToken || null;
       } else if (res.status === 401) {
-        // Valid response — wrong credentials (don't fall back to localStorage)
         setError("Invalid email or password.");
         setLoading(false);
         return;
+      } else if (res.status === 403 && data?.code === "MAX_DEVICES_REACHED") {
+        setError(data.error);
+        setLoading(false);
+        return;
+      } else if (res.status === 429) {
+        setError(data?.error || "Too many login attempts. Please try again later.");
+        setLoading(false);
+        return;
+      } else {
+        setError("Login service is temporarily unavailable. Please try again in a moment.");
+        setLoading(false);
+        return;
       }
-      // Any other error (500, network, etc.) → fall through to localStorage
     } catch {
-      // Network error — fall through to localStorage fallback
-    }
-
-    // ── Step 2: localStorage fallback for accounts created before Supabase ───
-    if (!userData) {
-      const users = JSON.parse(localStorage.getItem("users") || "[]");
-      const found = users.find(
-        (u) => u.email?.toLowerCase() === email.toLowerCase() && u.password === password
-      );
-      if (found) {
-        // Omit password from the stored session object
-        const { password: _pw, ...rest } = found;
-        userData = rest;
-      }
-    }
-
-    if (!userData) {
-      setError("Invalid email or password.");
+      setError("Network error. Please check your connection and try again.");
       setLoading(false);
       return;
     }
 
-    // ── Step 3: Create session (device limit check) ───────────────────────────
-    try {
-      const sessionRes = await fetch("/api/auth?action=session", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ email: userData.email }),
-      });
-      const sessionData = await sessionRes.json().catch(() => ({}));
-
-      if (!sessionRes.ok) {
-        if (sessionData?.code === "MAX_DEVICES_REACHED") {
-          setError(sessionData.error);
-        } else {
-          setError("Login failed. Please try again.");
-        }
-        setLoading(false);
-        return;
-      }
-
-      // Store session token for this device
-      if (sessionData.sessionToken) {
-        localStorage.setItem("sessionToken", sessionData.sessionToken);
-      }
-    } catch {
-      // If session API is unreachable, allow login (graceful degradation)
-      console.warn("[Login] session API unreachable — proceeding without session tracking");
+    if (!userData) {
+      setError("Login failed. Please try again.");
+      setLoading(false);
+      return;
     }
 
-    // ── Step 4: Hydrate subscription status ───────────────────────────────────
+    // Store session token
+    if (sessionToken) {
+      localStorage.setItem("sessionToken", sessionToken);
+    }
+
+    // ── Step 2: Hydrate subscription status ───────────────────────────────────
     let hydratedUser = { ...userData };
     try {
-      const res = await fetch(`/api/subscription-status?email=${encodeURIComponent(userData.email)}`);
+      const headers = { "Content-Type": "application/json" };
+      if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
+      const res = await fetch(`/api/subscription-status?email=${encodeURIComponent(userData.email)}`,
+        { headers });
       if (res.ok) {
         const data = await res.json();
         if (data.subscribed === true) {
           hydratedUser.subscribed           = true;
-          hydratedUser.plan                 = data.plan                 ?? userData.plan;
-          hydratedUser.stripeCustomerId     = data.stripeCustomerId     ?? userData.stripeCustomerId;
+          hydratedUser.plan                 = data.plan ?? userData.plan;
+          hydratedUser.stripeCustomerId     = data.stripeCustomerId ?? userData.stripeCustomerId;
           hydratedUser.stripeSubscriptionId = data.stripeSubscriptionId ?? userData.stripeSubscriptionId;
         }
       }
