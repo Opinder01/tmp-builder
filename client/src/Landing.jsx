@@ -240,32 +240,22 @@ export default function Landing() {
               </div>
             </div>
 
-            {/* decorative map preview */}
+            {/* hero video */}
             <div className="lp-hero-visual">
-              <div className="lp-map-card">
+              <div className="lp-hero-video-card">
                 <div className="lp-map-bar">
                   <span className="lp-dot red" /><span className="lp-dot yellow" /><span className="lp-dot green" />
-                  <span className="lp-map-bar-title">TMP Builder — Editor</span>
+                  <span className="lp-map-bar-title">TMP Builder — Demo</span>
                 </div>
-                <div className="lp-map-body">
-                  <div className="lp-map-mock">
-                    <div className="lp-road lp-road-h" />
-                    <div className="lp-road lp-road-v" />
-                    <div className="lp-cone" style={{ top: "28%", left: "38%" }} />
-                    <div className="lp-cone" style={{ top: "36%", left: "40%" }} />
-                    <div className="lp-cone" style={{ top: "44%", left: "42%" }} />
-                    <div className="lp-sign-box" style={{ top: "20%", left: "58%" }}>
-                      <span>R-001</span>
-                    </div>
-                    <div className="lp-sign-box" style={{ top: "52%", left: "20%" }}>
-                      <span>C-001</span>
-                    </div>
-                    <div className="lp-work-area" />
-                    <div className="lp-title-box">
-                      <div className="lp-tb-row"><b>Project:</b> Hwy 1 Resurfacing</div>
-                      <div className="lp-tb-row"><b>Date:</b> 2026-05-17</div>
-                    </div>
-                  </div>
+                <div className="lp-hero-video-body">
+                  <iframe
+                    src="https://www.youtube.com/embed/EGfHvzJkqbc?rel=0&modestbranding=1"
+                    title="TMP Builder Demo"
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    className="lp-hero-video-iframe"
+                  />
                 </div>
               </div>
             </div>

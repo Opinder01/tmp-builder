@@ -41,6 +41,9 @@ import {
   measureLegendNaturalBase,
   legendCanvasPixelHeight,
   buildLegendCanvas,
+  buildManifestCanvas,
+  manifestCanvasPixelHeight,
+  measureManifestNaturalWidth,
 } from "./legend/legendShared";
 
 const GMAP_LIBRARIES = ["places", "geometry"];
@@ -238,10 +241,6 @@ function MapScrollbars({ mapRef }) {
     const c = map.getCenter?.();
     if (!c) return;
 
-    // Initialize display origin only once so thumb moves as user pans
-    if (!displayOriginRef.current) displayOriginRef.current = { lat: c.lat(), lng: c.lng() };
-    const origin = displayOriginRef.current;
-
     const z = map.getZoom?.() ?? 18;
 
     const viewW = div.clientWidth;
@@ -256,6 +255,23 @@ function MapScrollbars({ mapRef }) {
     const thumbW = clamp((viewW / docW) * trackW, 40, trackW || 40);
     const thumbH = clamp((viewH / docH) * trackH, 40, trackH || 40);
 
+    // Set or re-anchor origin. Re-anchor whenever the map has jumped further
+    // than half the virtual canvas from the stored origin (e.g. after loading
+    // a saved project that moves the map to a completely different location).
+    const maxDx = (docW - viewW) / 2;
+    const maxDy = (docH - viewH) / 2;
+    if (!displayOriginRef.current) {
+      displayOriginRef.current = { lat: c.lat(), lng: c.lng() };
+    } else {
+      const wo0 = latLngToWorld(displayOriginRef.current.lat, displayOriginRef.current.lng, z);
+      const wc0 = latLngToWorld(c.lat(), c.lng(), z);
+      if (Math.abs(wc0.x - wo0.x) > maxDx || Math.abs(wc0.y - wo0.y) > maxDy) {
+        // Map jumped outside the virtual canvas — re-anchor to current center
+        displayOriginRef.current = { lat: c.lat(), lng: c.lng() };
+      }
+    }
+    const origin = displayOriginRef.current;
+
     // center delta in "world pixels" at current zoom
     const wo = latLngToWorld(origin.lat, origin.lng, z);
     const wc = latLngToWorld(c.lat(), c.lng(), z);
@@ -264,9 +280,6 @@ function MapScrollbars({ mapRef }) {
     const dy = wc.y - wo.y;
 
     // clamp motion to virtual doc range
-    const maxDx = (docW - viewW) / 2;
-    const maxDy = (docH - viewH) / 2;
-
     const dxClamped = clamp(dx, -maxDx, maxDx);
     const dyClamped = clamp(dy, -maxDy, maxDy);
 
@@ -352,24 +365,21 @@ function MapScrollbars({ mapRef }) {
     e.preventDefault();
     e.stopPropagation();
 
-    dragRef.current = {
-      axis,
-      startX: e.clientX,
-      startY: e.clientY,
-      startThumbX: ui.thumbX,
-      startThumbY: ui.thumbY,
-    };
+    dragRef.current = { axis, lastX: e.clientX, lastY: e.clientY };
 
     const onMove = (ev) => {
       const d = dragRef.current;
-      if (!d) return;
-
+      if (!d || !mapRef.current) return;
+      // Each thumb pixel = K map pixels (thumb is 1/K the virtual canvas width).
+      // panBy is always relative so a stale origin can never cause a large jump.
       if (d.axis === "x") {
-        const dx = ev.clientX - d.startX;
-        setCenterFromThumb("x", d.startThumbX + dx);
+        const dx = ev.clientX - d.lastX;
+        d.lastX = ev.clientX;
+        mapRef.current.panBy(dx * K, 0);
       } else {
-        const dy = ev.clientY - d.startY;
-        setCenterFromThumb("y", d.startThumbY + dy);
+        const dy = ev.clientY - d.lastY;
+        d.lastY = ev.clientY;
+        mapRef.current.panBy(0, dy * K);
       }
     };
 
@@ -996,8 +1006,10 @@ function DimensionSegment({
   scale = 1,
   pixelLen = null,
 }) {
-  // Paper-like behaviour: graphics don't explode with zoom.
-  const lineWeight = 1.4; // px, constant
+  // Scale line weight and arrows with zoom so they don't dominate when zoomed out.
+  // Clamped: min 0.5 (readable at low zoom), max 4 (not overwhelming at high zoom).
+  const s = Math.max(0.5, Math.min(4, scale));
+  const lineWeight = 1.4 * s;
 
   const isShort = pixelLen != null && pixelLen < 24;
 
@@ -1010,10 +1022,7 @@ function DimensionSegment({
     strokeLinecap: "round",
   };
 
-  // Clean professional style:
-  // - trimmed dimension line
-  // - small arrowheads at both ends, aligned with the line
-  const arrowScale = 2.4; // constant small arrow size
+  const arrowScale = 2.4 * s;
   const arrowPath = window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW;
 
   const arrowIcon = {
@@ -1149,9 +1158,9 @@ function MeasureLabel({
   
   transformOrigin: "center",
   background: "#fff",
-  border: "1px solid #777",
+  border: `${Math.max(0.5, fontScale)}px solid #777`,
   borderRadius: "1px",
-  padding: "2px 6px",
+  padding: `${Math.max(0.5, 2 * fontScale)}px ${Math.max(1, 6 * fontScale)}px`,
   fontSize: 4 * fontScale,
   fontWeight: 500,
   lineHeight: 1,
@@ -2287,6 +2296,7 @@ useEffect(() => {
   // Canvas-rendered legend images for editor (same pipeline as PDF)
   const [_editorSignDataUrls, _setEditorSignDataUrls] = useState({});
   const [_legendCanvasUrls, _setLegendCanvasUrls] = useState({});
+  const [_manifestCanvasUrls, _setManifestCanvasUrls] = useState({});
 
 
   const [northArrows, setNorthArrows] = useState([]); // {id, pos:{lat,lng}, wPx, hPx, rotDeg}
@@ -2877,6 +2887,49 @@ function promptEditInsertText(obj) {
   return rectPxToBounds({ x, y, w, h });
 }
 
+  // Compute export bounds that enclose every placed plan element (cones, signs,
+  // measurements, work areas, legend, title box, etc.) plus a small margin.
+  function fitBoundsToAllPlanElements() {
+  if (!getProjection()) return null;
+  const allLatLngs = [];
+  const push = (ll) => { if (ll?.lat != null && ll?.lng != null) allLatLngs.push(ll); };
+
+  conesFeatures?.forEach((f)    => push(f.pos));
+  placedSigns?.forEach((s)      => { push(s.pos); s.stands?.forEach((st) => push(st.pos)); });
+  measurements?.forEach((m)     => m.path?.forEach(push));
+  workAreas?.forEach((wa)       => wa.path?.forEach(push));
+  placedArrows?.forEach((a)     => a.points?.forEach(push));
+  northArrows?.forEach((na)     => push(na.pos));
+  scales?.forEach((sc)          => push(sc.pos));
+  legendBoxes?.forEach((lb)     => push(lb.pos));
+  manifestBoxes?.forEach((mb)   => push(mb.pos));
+  insertObjects?.forEach((o)    => push(o.pos));
+
+  if (allLatLngs.length === 0) return initExportAreaFromViewport();
+
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const ll of allLatLngs) {
+    if (ll.lat < minLat) minLat = ll.lat;
+    if (ll.lat > maxLat) maxLat = ll.lat;
+    if (ll.lng < minLng) minLng = ll.lng;
+    if (ll.lng > maxLng) maxLng = ll.lng;
+  }
+
+  // Convert to screen pixels and add 8% padding on each side
+  const nwPx = latLngToPx({ lat: maxLat, lng: minLng });
+  const sePx = latLngToPx({ lat: minLat, lng: maxLng });
+  if (!nwPx || !sePx) return initExportAreaFromViewport();
+
+  const padX = Math.max(40, Math.round((sePx.x - nwPx.x) * 0.08));
+  const padY = Math.max(40, Math.round((sePx.y - nwPx.y) * 0.08));
+  return rectPxToBounds({
+    x: nwPx.x - padX,
+    y: nwPx.y - padY,
+    w: (sePx.x - nwPx.x) + padX * 2,
+    h: (sePx.y - nwPx.y) + padY * 2,
+  });
+}
+
   function beginExportToPdf() {
   if (!mapRef.current) return;
   setOpenFileMenu(false);
@@ -2887,19 +2940,18 @@ function promptEditInsertText(obj) {
   exportBoundsForPdfRef.current = null;
   let tryInitAttempts = 0;
   const tryInit = () => {
-    // Prefer the permanent page frame the user drew; fall back to 85% of current viewport.
-    const b = pageFrameBounds ?? initExportAreaFromViewport();
+    // Auto-fit to all plan elements so the blue box always encloses everything.
+    // Fall back to 85% of viewport only when there are no elements yet.
+    const b = fitBoundsToAllPlanElements() ?? pageFrameBounds ?? initExportAreaFromViewport();
     if (b) {
       exportBoundsForPdfRef.current = b;
       setPrintAreaBounds(b);
-      // Pan the map to show the export area so the user can see and adjust the selection box.
-      if (pageFrameBounds) {
-        const map = mapRef.current;
-        if (map) {
-          const centerLat = (pageFrameBounds.nw.lat + pageFrameBounds.se.lat) / 2;
-          const centerLng = (pageFrameBounds.nw.lng + pageFrameBounds.se.lng) / 2;
-          map.panTo({ lat: centerLat, lng: centerLng });
-        }
+      // Pan the map to centre on the computed export area.
+      const map = mapRef.current;
+      if (map) {
+        const centerLat = (b.nw.lat + b.se.lat) / 2;
+        const centerLng = (b.nw.lng + b.se.lng) / 2;
+        map.panTo({ lat: centerLat, lng: centerLng });
       }
     } else if (++tryInitAttempts < 200) {
       setTimeout(tryInit, 50); // up to 10 s total
@@ -3408,16 +3460,17 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         if (logoImg) {
           const logoScale = Number(d.logoScale) || 1;
           const ar = (logoImg.naturalWidth || 1) / (logoImg.naturalHeight || 1);
-          const innerPad = 2 * exportCanvasScale;
+          // innerPad in canvas-pixel units (same space as tPad/logoW/logoH)
+          const innerPad = cssToCanvas(cssPlanPx(2, zRef));
           const maxLW = Math.max(1, logoW - innerPad * 2);
           const maxLH = Math.max(1, logoH - innerPad * 2);
-          let lw2 = Math.min(maxLW, maxLH * ar);
+          // Fit to box first, then apply logoScale uniformly from center
+          let lw2 = Math.min(maxLW, maxLH * ar) * logoScale;
           let lh2 = lw2 / ar;
           const lcx = tPad + logoW / 2;
           const lcy = tPad + logoH / 2;
           sx.save();
           sx.translate(lcx, lcy);
-          sx.scale(logoScale, logoScale);
           sx.drawImage(logoImg, -lw2 / 2, -lh2 / 2, lw2, lh2);
           sx.restore();
         } else {
@@ -4000,7 +4053,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     }
   }
 
-  // ── Manifest box: PDF vector ──
+  // ── Manifest box: embed same canvas image used by the editor (pixel-perfect match) ──
   if (exportIncludeNotes) {
     const toPdf = (px) => {
       if (!px) return null;
@@ -4008,63 +4061,27 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     };
     const planPxMm = (wPx, zRef) =>
       cssPlanPxRounded(wPx || 60, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
-    const mmToPt = (mm) => mm * 72 / 25.4;
+
+    const _mfNaturalW = measureManifestNaturalWidth(manifestRows);
 
     for (const mb of manifestBoxes || []) {
       const center = toPdf(project(toPlainLL(mb.pos)));
       if (!center) continue;
-      const MANIFEST_DEFAULT_W = 240;
-      const MANIFEST_DEFAULT_H = 220;
-      const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
+      const zRef   = mb.zRef ?? ELEMENT_BASE_ZOOM;
+      const wPx    = mb.wPx ?? _mfNaturalW;
+      const canvasH = manifestCanvasPixelHeight(manifestRows, wPx, _mfNaturalW);
 
-      // Fixed readable sizes — independent of export zoom
-      const pad     = 2.0;   // mm
-      const titleFs = 3.0;   // mm (≈8.5pt)
-      const rowFs   = 2.6;   // mm (≈7.4pt)
-      const rowH    = rowFs * 1.5;
-      const divGap  = 1.0;   // mm
+      // Render the exact same canvas the editor displays
+      const cv = buildManifestCanvas(manifestRows, wPx, _mfNaturalW);
+      const dataUrl = cv.toDataURL("image/png");
 
-      // Minimum box: enough for header + at least 4 rows
-      const minBoxH = pad + titleFs + divGap * 2 + rowH * 4 + pad;
-      const minBoxW = pad + 38 + pad;
-      const boxW = Math.max(minBoxW, planPxMm(mb.wPx ?? MANIFEST_DEFAULT_W, zRef));
-      const boxH = Math.max(minBoxH, planPxMm(mb.hPx ?? MANIFEST_DEFAULT_H, zRef));
+      // Convert CSS plan-px dimensions to PDF mm (same scale as legend/title box)
+      const boxW_mm = planPxMm(wPx,     zRef);
+      const boxH_mm = planPxMm(canvasH, zRef);
+      const left    = center.x - boxW_mm / 2;
+      const top     = center.y - boxH_mm / 2;
 
-      const left = center.x - boxW / 2;
-      const top  = center.y - boxH / 2;
-
-      pdf.setFillColor(255, 255, 255);
-      pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(0.3);
-      pdf.rect(left, top, boxW, boxH, "FD");
-
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(mmToPt(titleFs));
-      pdf.setTextColor(17, 17, 17);
-      pdf.text("Manifest", left + pad, top + pad + titleFs, { baseline: "bottom" });
-
-      const divY = top + pad + titleFs + divGap;
-      pdf.setDrawColor(17, 17, 17);
-      pdf.setLineWidth(0.3);
-      pdf.line(left + pad, divY, left + boxW - pad, divY);
-
-      let rowY = divY + divGap + rowH;
-      const maxY = top + boxH - pad;
-
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(mmToPt(rowFs));
-      pdf.setTextColor(17, 17, 17);
-
-      if (manifestRows.length === 0) {
-        pdf.setFont("helvetica", "normal");
-        pdf.text("(no items yet)", left + pad, rowY, { baseline: "bottom" });
-      } else {
-        for (const r of manifestRows) {
-          if (rowY > maxY) break;
-          pdf.text(`${r.count} x ${r.label}`, left + pad, rowY, { baseline: "bottom" });
-          rowY += rowH;
-        }
-      }
+      pdf.addImage(dataUrl, "PNG", left, top, boxW_mm, boxH_mm, undefined, "NONE");
     }
 
     pdf.setFont("helvetica", "normal");
@@ -4090,53 +4107,107 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     for (const obj of (insertObjects || []).filter((o) => o.kind === "title_box")) {
       const center = toPdf(project(toPlainLL(obj.pos)));
       if (!center) continue;
-      const zRef   = obj.zRef ?? ELEMENT_BASE_ZOOM;
-      const boxW   = planPxMm(obj.wPx ?? 360, zRef);
+      const zRef    = obj.zRef ?? ELEMENT_BASE_ZOOM;
+      const boxW    = planPxMm(obj.wPx ?? 360, zRef);
       const rawUnit = boxW / (obj.wPx ?? 360);
-      const unit   = Math.max(rawUnit, 0.14);
-      const cMm    = (px) => px * unit;
-      const d      = obj.data || {};
+      const unit    = Math.max(rawUnit, 0.14);
+      const cMm     = (px) => px * unit;
+      const d       = obj.data || {};
 
-      // Pre-compute all sizes to determine final boxH before drawing anything
-      const pad       = Math.max(1.5, cMm(10));   // padding: 10*s
-      const gap6      = Math.max(0.5, cMm(6));    // flex column gap: 6*s
+      const pad       = Math.max(1.5, cMm(10));
+      const gap6      = Math.max(0.5, cMm(6));
       const logoAreaW = Math.max(12, cMm(90));
-      const logoAreaH = Math.max(9, cMm(70));
-      const projFs    = Math.max(2.12, cMm(14));  // fontSize: max(8, 14*s)
-      const fieldFs   = Math.max(1.94, cMm(12));  // fontSize: max(8, 12*s)
-      const cmtFs     = Math.max(1.94, cMm(12));  // fontSize: max(8, 12*s)
-      const cmtLH     = cmtFs * 1.35;             // lineHeight: 1.35
+      const logoAreaH = Math.max(9,  cMm(70));
+      const projFs    = Math.max(2.12, cMm(14));
+      const fieldFs   = Math.max(1.94, cMm(12));
+      const cmtFs     = Math.max(1.94, cMm(12));
+      const cmtLH     = cmtFs * 1.35;
 
-      // Top-row inner height (text column vs logo area)
-      const textColH   = projFs + Math.max(0.5, cMm(4)) + fieldFs * 1.3 + fieldFs * 1.3;
-      const topRowH    = Math.max(logoAreaH, textColH);
+      // Available width for the right text column
+      const textX    = pad + logoAreaW + Math.max(1.5, cMm(12));
+      const textColW = boxW - textX - pad;
 
-      // Comment lines — split by normalised newlines, preserving blank lines
-      const cmtLines = normalizeCommentLineBreaks(d.comments || "").split("\n");
-      const n        = cmtLines.length;
+      // Helper: measure text width in mm at a given font size using jsPDF SUW
+      const tw = (text, fs, bold = false) => {
+        pdf.setFont("helvetica", bold ? "bold" : "normal");
+        pdf.setFontSize(mmToPt(fs));
+        return pdf.getStringUnitWidth(text) * fs;
+      };
+      // Helper: truncate text to maxW mm with ellipsis
+      const trunc = (text, maxW, fs, bold = false) => {
+        if (!text) return "";
+        if (tw(text, fs, bold) <= maxW) return text;
+        let out = text;
+        while (out.length > 0 && tw(out + "…", fs, bold) > maxW) out = out.slice(0, -1);
+        return out + (out.length < text.length ? "…" : "");
+      };
 
-      // Needed height: pad + topRow + gap6 + gap6 + cmtFs + (n-1)*cmtLH + pad
-      const neededH = 2 * pad + topRowH + 2 * gap6 + cmtFs + Math.max(0, n - 1) * cmtLH;
-      const boxH    = neededH; // always fit content exactly — no empty trailing space
+      // ── Project row ──
+      const projLabel  = "Project: ";
+      const projLabelW = tw(projLabel, projFs, true);
+      const projValue  = trunc(String(d.project || ""), textColW - projLabelW, projFs, false);
+      const projRowH   = projFs;
+
+      // ── Date + Author row: fit on one line; if Author overflows, drop to second line ──
+      const dateLabel  = "Date: ";
+      const dateLabelW = tw(dateLabel, fieldFs, true);
+      const dateVal    = String(d.date || "");
+      const dateValW   = tw(dateVal, fieldFs, false);
+      const authLabel  = "  Author: ";
+      const authLabelW = tw(authLabel, fieldFs, true);
+      const authorVal  = String(d.author || "");
+      const authorValW = tw(authorVal, fieldFs, false);
+      const daRowH     = fieldFs * 1.3;
+
+      // Does everything fit on one line?
+      const daFits = dateLabelW + dateValW + authLabelW + authorValW <= textColW;
+      const authorTruncated = daFits
+        ? authorVal
+        : trunc(authorVal, textColW - tw("Author: ", fieldFs, true), fieldFs, false);
+
+      // ── Job Location row ──
+      const jobLabel  = "Job Location: ";
+      const jobLabelW = tw(jobLabel, fieldFs, true);
+      const jobValue  = trunc(String(d.jobLocation || ""), textColW - jobLabelW, fieldFs, false);
+
+      // ── Comment lines — word-wrap with jsPDF splitTextToSize ──
+      const cmtLabel  = "Comments: ";
+      const cmtLabelW = tw(cmtLabel, cmtFs, true);
+      const cmtMaxW   = boxW - 2 * pad;
+      const cmtRaw    = normalizeCommentLineBreaks(d.comments || "");
+      // Split by user newlines first, then word-wrap each segment
+      const cmtWrapped = cmtRaw.split("\n").flatMap((seg, i) => {
+        const maxW = i === 0 ? cmtMaxW - cmtLabelW : cmtMaxW;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(mmToPt(cmtFs));
+        return seg === "" ? [""] : pdf.splitTextToSize(seg, maxW);
+      });
+      const cmtLineCount = Math.max(1, cmtWrapped.length);
+
+      // ── Compute topRowH and boxH ──
+      const textColH = projRowH + Math.max(0.5, cMm(4))
+        + daRowH + (daFits ? 0 : fieldFs * 1.3)   // extra line if author wrapped
+        + fieldFs * 1.3;                            // job location
+      const topRowH = Math.max(logoAreaH, textColH);
+      const neededH = 2 * pad + topRowH + 2 * gap6 + cmtFs + Math.max(0, cmtLineCount - 1) * cmtLH;
+      const boxH    = neededH;
 
       const left = center.x - boxW / 2;
-      const top  = center.y - boxH / 2;  // re-centre with expanded height
+      const top  = center.y - boxH / 2;
 
-      // Box
+      // ── Box ──
       pdf.setFillColor(255, 255, 255);
       pdf.setDrawColor(17, 17, 17);
       pdf.setLineWidth(Math.max(0.1, cMm(2)));
       pdf.rect(left, top, boxW, boxH, "FD");
 
-      // Logo area border
+      // ── Logo area ──
       const logoLeft = left + pad;
       const logoTop  = top + pad;
       pdf.setFillColor(255, 255, 255);
       pdf.setDrawColor(221, 221, 221);
       pdf.setLineWidth(Math.max(0.05, cMm(1)));
       pdf.rect(logoLeft, logoTop, logoAreaW, logoAreaH, "FD");
-
-      // Logo image or placeholder
       const logoImg = titleBoxLogoById.get(obj.id);
       if (logoImg && d.logoDataUrl) {
         try {
@@ -4144,13 +4215,11 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
           const ar = (logoImg.naturalWidth || 1) / (logoImg.naturalHeight || 1);
           let lw = Math.min(logoAreaW, logoAreaH * ar) * logoScale;
           let lh = lw / ar;
-          if (lh > logoAreaH) { lh = logoAreaH * logoScale; lw = lh * ar; }
-          pdf.addImage(
-            d.logoDataUrl, "PNG",
+          const logoFmt = d.logoDataUrl.match(/^data:image\/(\w+)/)?.[1]?.toUpperCase() || "PNG";
+          pdf.addImage(d.logoDataUrl, logoFmt,
             logoLeft + (logoAreaW - lw) / 2, logoTop + (logoAreaH - lh) / 2, lw, lh,
-            undefined, "NONE"
-          );
-        } catch (_) { /* logo decode failed — leave blank */ }
+            undefined, "NONE");
+        } catch (_) { /* logo decode failed */ }
       } else {
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(mmToPt(Math.max(1.8, cMm(11))));
@@ -4158,72 +4227,58 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
         pdf.text("Logo", logoLeft + logoAreaW / 2, logoTop + logoAreaH / 2, { align: "center", baseline: "middle" });
       }
 
-      // Right-side text column (label widths: SUW * fontSizeMm — no /scaleFactor)
-      const textX = logoLeft + logoAreaW + Math.max(1.5, cMm(12));
-      let ty = top + pad;
-
-      // Project row
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(mmToPt(projFs));
+      // ── Right text column ──
+      const tx = left + textX;
+      let ty   = top + pad;
       pdf.setTextColor(17, 17, 17);
-      const projLabel  = "Project: ";
-      const projLabelW = pdf.getStringUnitWidth(projLabel) * projFs;
-      pdf.text(projLabel, textX, ty + projFs, { baseline: "bottom" });
-      pdf.setFont("helvetica", "normal");
-      pdf.text(String(d.project || ""), textX + projLabelW, ty + projFs, { baseline: "bottom" });
-      ty += projFs + Math.max(0.5, cMm(4));  // marginBottom: 4*s
 
-      // Date + Author row
+      // Project
+      pdf.setFontSize(mmToPt(projFs));
+      pdf.setFont("helvetica", "bold");   pdf.text(projLabel,  tx,               ty + projFs, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal"); pdf.text(projValue,  tx + projLabelW,  ty + projFs, { baseline: "bottom" });
+      ty += projFs + Math.max(0.5, cMm(4));
+
+      // Date + Author
       pdf.setFontSize(mmToPt(fieldFs));
-      pdf.setFont("helvetica", "bold");
-      const dateLabelW = pdf.getStringUnitWidth("Date: ") * fieldFs;
-      pdf.text("Date: ", textX, ty + fieldFs, { baseline: "bottom" });
-      pdf.setFont("helvetica", "normal");
-      const dateVal = String(d.date || "");
-      pdf.text(dateVal, textX + dateLabelW, ty + fieldFs, { baseline: "bottom" });
-      const authorX = textX + dateLabelW + pdf.getStringUnitWidth(dateVal) * fieldFs + Math.max(1.5, cMm(6));
-      pdf.setFont("helvetica", "bold");
-      const authLabelW = pdf.getStringUnitWidth("Author: ") * fieldFs;
-      pdf.text("Author: ", authorX, ty + fieldFs, { baseline: "bottom" });
-      pdf.setFont("helvetica", "normal");
-      pdf.text(String(d.author || ""), authorX + authLabelW, ty + fieldFs, { baseline: "bottom" });
+      pdf.setFont("helvetica", "bold");   pdf.text(dateLabel,     tx,                                             ty + fieldFs, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal"); pdf.text(dateVal,       tx + dateLabelW,                                ty + fieldFs, { baseline: "bottom" });
+      if (daFits) {
+        // Author on same line
+        const authX = tx + dateLabelW + dateValW;
+        pdf.setFont("helvetica", "bold");   pdf.text(authLabel,      authX,             ty + fieldFs, { baseline: "bottom" });
+        pdf.setFont("helvetica", "normal"); pdf.text(authorTruncated, authX + authLabelW, ty + fieldFs, { baseline: "bottom" });
+        ty += daRowH;
+      } else {
+        // Author on next line
+        ty += daRowH;
+        pdf.setFont("helvetica", "bold");   pdf.text("Author: ",      tx,                          ty + fieldFs, { baseline: "bottom" });
+        pdf.setFont("helvetica", "normal"); pdf.text(authorTruncated, tx + tw("Author: ", fieldFs, true), ty + fieldFs, { baseline: "bottom" });
+        ty += fieldFs * 1.3;
+      }
+
+      // Job Location
+      pdf.setFont("helvetica", "bold");   pdf.text(jobLabel,  tx,              ty + fieldFs, { baseline: "bottom" });
+      pdf.setFont("helvetica", "normal"); pdf.text(jobValue,  tx + jobLabelW,  ty + fieldFs, { baseline: "bottom" });
       ty += fieldFs * 1.3;
 
-      // Job Location row
-      pdf.setFont("helvetica", "bold");
-      const jobLabelW = pdf.getStringUnitWidth("Job Location: ") * fieldFs;
-      pdf.text("Job Location: ", textX, ty + fieldFs, { baseline: "bottom" });
-      pdf.setFont("helvetica", "normal");
-      pdf.text(String(d.jobLocation || ""), textX + jobLabelW, ty + fieldFs, { baseline: "bottom" });
-      ty += fieldFs * 1.3;
-
-      // Divider: gap6 below top-row (flex column gap), then grey line
+      // ── Divider ──
       const rowBottom = Math.max(top + pad + logoAreaH, ty);
       const divY      = rowBottom + gap6;
-      pdf.setDrawColor(204, 204, 204);  // opacity 0.2 #111 over white ≈ #ccc
+      pdf.setDrawColor(204, 204, 204);
       pdf.setLineWidth(Math.max(0.05, cMm(1)));
       pdf.line(left + pad, divY, left + boxW - pad, divY);
 
-      // Comments: gap6 below divider (flex column gap), then lines at cmtLH spacing
+      // ── Comments with word-wrap ──
       const cmtY = divY + gap6;
       pdf.setFontSize(mmToPt(cmtFs));
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(17, 17, 17);
-      const cmtLabel  = "Comments: ";
-      const cmtLabelW = pdf.getStringUnitWidth(cmtLabel) * cmtFs;
       pdf.text(cmtLabel, left + pad, cmtY + cmtFs, { baseline: "bottom" });
       pdf.setFont("helvetica", "normal");
-
-      // Draw all comment lines — boxH was expanded to fit, so no truncation
-      let ly        = cmtY;
+      let ly = cmtY;
       let firstLine = true;
-      for (const line of cmtLines) {
-        pdf.text(
-          line,
-          firstLine ? left + pad + cmtLabelW : left + pad,
-          ly + cmtFs,
-          { baseline: "bottom" }
-        );
+      for (const line of cmtWrapped) {
+        pdf.text(line, firstLine ? left + pad + cmtLabelW : left + pad, ly + cmtFs, { baseline: "bottom" });
         ly += cmtLH;
         firstLine = false;
       }
@@ -5164,9 +5219,10 @@ return;
           else addMeasVertex(p);
         }
       } else {
-        // Any other tool: also clear measurement + cone selection
+        // Any other tool: also clear measurement + cone + work area selection
         setSelectedMeasId(null);
         setSelectedConeId(null);
+        setSelectedWorkAreaId(null);
       }
       // setSelectedEntity(null);  // <-- disable: keep selection until dbl/right click
 
@@ -5402,7 +5458,67 @@ if (measEdit) {
   // deselect anything
   setSelectedEntity(null);
   setSelectedInsertId(null);
+  setSelectedWorkAreaId(null);
 }
+// ── Right-click anywhere always deselects work area ─────────────────────────
+// Use BOTH contextmenu (fires for two-finger tap, right mouse button, etc.)
+// AND pointerup button===2 as belt-and-suspenders for touchpad edge cases.
+useEffect(() => {
+  const deselect = () => setSelectedWorkAreaId(null);
+  window.addEventListener("contextmenu", deselect, true); // capture phase
+  window.addEventListener("pointerup", (e) => { if (e.button === 2) deselect(); });
+  return () => {
+    window.removeEventListener("contextmenu", deselect, true);
+  };
+}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+// ── Mutual exclusion: only one thing selected at a time ─────────────────────
+useEffect(() => {
+  if (selectedWorkAreaId != null) {
+    setSelectedInsertId(null);
+    setSelectedEntity(null);
+    setSelectedConeId(null);
+    setSelectedMeasId(null);
+  }
+}, [selectedWorkAreaId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+useEffect(() => {
+  if (selectedInsertId != null) {
+    setSelectedWorkAreaId(null);
+    setSelectedEntity(null);
+    setSelectedConeId(null);
+    setSelectedMeasId(null);
+  }
+}, [selectedInsertId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+useEffect(() => {
+  if (selectedEntity != null) {
+    setSelectedWorkAreaId(null);
+    setSelectedInsertId(null);
+    setSelectedConeId(null);
+    setSelectedMeasId(null);
+  }
+}, [selectedEntity]); // eslint-disable-line react-hooks/exhaustive-deps
+
+useEffect(() => {
+  if (selectedConeId != null) {
+    setSelectedWorkAreaId(null);
+    setSelectedInsertId(null);
+    setSelectedEntity(null);
+    setSelectedMeasId(null);
+  }
+}, [selectedConeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+useEffect(() => {
+  if (selectedMeasId != null) {
+    setSelectedWorkAreaId(null);
+    setSelectedInsertId(null);
+    setSelectedEntity(null);
+    setSelectedConeId(null);
+  }
+}, [selectedMeasId]); // eslint-disable-line react-hooks/exhaustive-deps
+// ────────────────────────────────────────────────────────────────────────────
+
 useEffect(() => {
   if (!mapRef.current) return;
 
@@ -7030,7 +7146,8 @@ const mapCursor =
 
     const signCounts = {};
     for (const s of placedSigns) {
-      signCounts[s.code] = (signCounts[s.code] || 0) + 1;
+      const key = s.typeId ?? s.code ?? s.id;
+      signCounts[key] = (signCounts[key] || 0) + 1;
     }
 
     const coneCounts = {};
@@ -7052,6 +7169,28 @@ const mapCursor =
 
     return rows.filter((r) => r.count > 0);
   }, [placedSigns, conesFeatures, projectionReady]);
+
+  // Memoize natural manifest width (DOM canvas text measurement) — mirrors legendNaturalDims.
+  const manifestNaturalW0 = useMemo(
+    () => measureManifestNaturalWidth(manifestRows),
+    [manifestRows]
+  );
+
+  // Render manifest canvases — width user-resizable (scales content), height auto from content
+  useEffect(() => {
+    if (manifestBoxes.length === 0) {
+      _setManifestCanvasUrls({});
+      return;
+    }
+    const newUrls = {};
+    Promise.allSettled(
+      manifestBoxes.map(async (mb) => {
+        const wPx = mb.wPx ?? manifestNaturalW0;
+        const cv = buildManifestCanvas(manifestRows, wPx, manifestNaturalW0);
+        newUrls[mb.id] = cv.toDataURL("image/png");
+      })
+    ).then(() => _setManifestCanvasUrls({ ...newUrls }));
+  }, [manifestBoxes, manifestRows, manifestNaturalW0]);
 
   /* ================= helpers for selecting & drags ================= */
   const onSelectSign = (id) => {
@@ -7747,7 +7886,11 @@ const tileIconStyle = {
 
     <div
       style={{ height: "100vh", display: "flex", flexDirection: "column" }}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // Right-click anywhere always clears work area selection
+        setSelectedWorkAreaId(null);
+      }}
     >
       {/* ================= SAVE AS MODAL ================= */}
 {saveAsOpen && (
@@ -9382,7 +9525,9 @@ onUnmount={(polygon) => {
 
     
     
-    onClick={() => {
+    onClick={(e) => {
+  if (e.domEvent?.button === 2) return; // ignore right-click firing as click (touchpad)
+  e?.stop?.(); // prevent map onClick from also firing and clearing the selection
   setSelectedWorkAreaId(wa.id);
 
   // ✅ clear any leftover draft preview so you don’t see the inner polygon
@@ -9392,6 +9537,7 @@ onUnmount={(polygon) => {
 }}
 
     onRightClick={(e) => {
+      setSelectedWorkAreaId(null);
       if (e.domEvent) {
         openContextMenu(e.domEvent, "workArea", wa.id, "workArea");
       }
@@ -9446,6 +9592,7 @@ onUnmount={(polygon) => {
   };
 
   const onHandlePointerDown = (handleType, handleIndex, ev) => {
+    if (ev.button === 2) return; // right-click: let the window pointerup listener deselect
     ev.preventDefault();
     ev.stopPropagation();
     ev.currentTarget.setPointerCapture?.(ev.pointerId);
@@ -9860,25 +10007,22 @@ onUnmount={(polygon) => {
                 const isSelected =
                   selectedEntity?.kind === "manifest" && selectedEntity.id === mb.id;
                 const zRef = mb.zRef ?? ELEMENT_BASE_ZOOM;
-                // Content scale: zoom × geometric-mean(wScale, hScale) so stretching in
-                // either direction (or both) proportionally grows/shrinks all internal content.
-                const MANIFEST_DEFAULT_W = 240;
-                const MANIFEST_DEFAULT_H = 220;
-                const _mbScaleX = (mb.wPx ?? MANIFEST_DEFAULT_W) / MANIFEST_DEFAULT_W;
-                const _mbScaleY = (mb.hPx ?? MANIFEST_DEFAULT_H) / MANIFEST_DEFAULT_H;
-                const s = planElementZoomScale(zRef) * Math.sqrt(_mbScaleX * _mbScaleY);
+                const _wPxMb   = mb.wPx ?? manifestNaturalW0;
+                const kPlan    = planElementZoomScale(zRef);
+                const _mbCanvasH = manifestCanvasPixelHeight(manifestRows, _wPxMb, manifestNaturalW0);
+                const _mbCssW  = scalePxPlanRounded(_wPxMb, zRef);
+                const _mbCssH  = Math.round(kPlan * _mbCanvasH);
 
                 return (
                   <OverlayViewF key={mb.id} position={mb.pos} mapPaneName="overlayMouseTarget">
-                    {/* Outer wrapper: no overflow so handles can extend outside — same pattern as insert title_box */}
                     <div
                       style={{
                         transform: "translate(-50%, -50%)",
                         transformOrigin: "center center",
-                        width: scalePxPlanRounded(mb.wPx, zRef),
-                        height: scalePxPlanRounded(mb.hPx, zRef),
+                        width: _mbCssW,
+                        height: _mbCssH,
                         position: "relative",
-                        cursor: uiDrag?.type === "moveManifest" && uiDrag?.id === mb.id ? "grabbing" : "grab",
+                        cursor: uiDrag?.type === "moveManifest" && uiDrag?.manifestId === mb.id ? "grabbing" : "grab",
                         userSelect: "none",
                       }}
                       onContextMenu={(e) => openContextMenu(e, "manifest", mb.id, "manifest")}
@@ -9889,50 +10033,27 @@ onUnmount={(polygon) => {
                         beginMoveManifest(mb.id, mb.pos, { x: e.clientX, y: e.clientY });
                       }}
                     >
-                      {/* Inner content div: border, background, padding, overflow:hidden */}
-                      <div style={{
-                        width: "100%",
-                        height: "100%",
-                        background: "#fff",
-                        border: `${Math.max(1, 2 * s)}px solid #111`,
-                        borderRadius: 4 * s,
-                        boxSizing: "border-box",
-                        padding: 10 * s,
-                        overflow: "hidden",
-                      }}>
-                        <div style={{ fontSize: 18 * s, fontWeight: 900 }}>Manifest</div>
-                        <div style={{ marginTop: 6 * s, height: Math.max(1, 2 * s), background: "#111" }} />
+                      {/* Canvas-rendered manifest image — height auto-fits content like legend */}
+                      {_manifestCanvasUrls[mb.id]
+                        ? <img src={_manifestCanvasUrls[mb.id]} alt="Manifest" style={{ width: "100%", height: "100%", display: "block", pointerEvents: "none", userSelect: "none" }} />
+                        : <div style={{ width: "100%", height: "100%", background: "#fff", border: "1px solid #111", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#999" }}>Manifest</div>
+                      }
 
-                        <div style={{ marginTop: 8 * s, fontSize: 16 * s, fontWeight: 900, lineHeight: 1.25 }}>
-                          {manifestRows.length === 0 ? (
-                            <div style={{ fontSize: 13 * s, fontWeight: 700 }}>(no items yet)</div>
-                          ) : (
-                            manifestRows.map((r) => (
-                              <div key={r.label}>
-                                {r.count} x {r.label}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      {/* BoxSelectionOverlay is OUTSIDE the overflow:hidden div so handles extend freely */}
                       {isSelected && (
                         <BoxSelectionOverlay
-                          w={scalePxPlanRounded(mb.wPx, zRef)}
-                          h={scalePxPlanRounded(mb.hPx, zRef)}
+                          w={_mbCssW}
+                          h={_mbCssH}
                           onBeginResize={(corner, clientPt) =>
                             beginResizeManifest(mb.id, corner, clientPt, {
-                              wPx: mb.wPx,
-                              hPx: mb.hPx,
-                              zRef: mb.zRef ?? ELEMENT_BASE_ZOOM,
+                              wPx: _wPxMb,
+                              hPx: _mbCanvasH,
+                              zRef: zRef,
                             })
                           }
                         />
                       )}
                     </div>
                   </OverlayViewF>
-                  
                 );
               })}
 {/* ================= INSERT OBJECTS (Phase 2 render) ================= */}
@@ -11768,10 +11889,13 @@ height: pendingPictureTool.hPx * elementScale,
                 <div
                   className="no-print"
                   style={{
-                    position: "absolute", right: 16, top: 16, zIndex: 100000,
+                    position: "fixed",
+                    top: "50%", left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    zIndex: 100000,
                     display: "flex", flexDirection: "column", gap: 8,
                     background: "#fff", borderRadius: 10,
-                    boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
+                    boxShadow: "0 8px 40px rgba(0,0,0,0.22)",
                     border: "1px solid #e5e7eb", padding: 14,
                     fontFamily: "system-ui, sans-serif", minWidth: 210,
                   }}

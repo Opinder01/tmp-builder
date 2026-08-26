@@ -125,7 +125,21 @@ useEffect(() => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Remove session from Supabase so this device slot is freed
+    const sessionToken = localStorage.getItem("sessionToken");
+    if (sessionToken) {
+      try {
+        await fetch("/api/auth?action=session", {
+          method:  "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ sessionToken }),
+        });
+      } catch {
+        // Non-critical — session will auto-expire after 30 days
+      }
+      localStorage.removeItem("sessionToken");
+    }
     localStorage.removeItem("loggedInUser");
     nav("/login", { replace: true });
   };

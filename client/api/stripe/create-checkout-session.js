@@ -49,15 +49,22 @@ export default async function handler(req, res) {
   const appUrl = (process.env.APP_URL || "https://tmpbuilder.ca").replace(/\/$/, "");
   const stripe = new Stripe(secretKey, { apiVersion: "2025-04-30.basil" });
 
-  // ── Find or create a Stripe Customer tied to this account email ─────────────
-  // Passing `customer` (a Customer ID) to stripe.checkout.sessions.create()
-  // locks the email field as read-only in the Stripe Checkout page, so users
-  // cannot change it to a different address. This guarantees the webhook always
-  // saves the exact email the user signed up with.
+  // ── Find or create a valid Stripe Customer ──────────────────────────────────
   let customerId = null;
 
+  // Helper: verify a customer ID still exists in Stripe
+  async function isValidCustomer(id) {
+    if (!id) return false;
+    try {
+      const c = await stripe.customers.retrieve(id);
+      return !c.deleted;
+    } catch {
+      return false; // "No such customer" or network error
+    }
+  }
+
   try {
-    // 1. Check Supabase first (fastest path)
+    // 1. Check Supabase for a saved customer ID
     if (supabaseUrl && serviceKey) {
       const supabase = createClient(supabaseUrl, serviceKey);
       const { data } = await supabase
@@ -67,31 +74,43 @@ export default async function handler(req, res) {
         .maybeSingle();
 
       if (data?.stripe_customer_id) {
-        customerId = data.stripe_customer_id;
-        console.log("[checkout] found customer in Supabase:", customerId);
+        // Verify the customer still exists in Stripe before trusting it
+        if (await isValidCustomer(data.stripe_customer_id)) {
+          customerId = data.stripe_customer_id;
+          console.log("[checkout] found valid customer in Supabase:", customerId);
+        } else {
+          console.log("[checkout] Supabase customer ID is stale/deleted — will create new one:", data.stripe_customer_id);
+          // Clear the stale customer ID from Supabase
+          await supabase
+            .from("subscriptions")
+            .update({ stripe_customer_id: null, stripe_subscription_id: null })
+            .eq("email", normalizedEmail);
+        }
       }
     }
 
-    // 2. Search Stripe by email if not already known
+    // 2. Search Stripe by email if no valid customer found yet
     if (!customerId) {
       const existing = await stripe.customers.search({
         query: `email:"${normalizedEmail}"`,
-        limit: 1,
+        limit: 5,
       });
-      if (existing.data.length > 0) {
-        customerId = existing.data[0].id;
-        console.log("[checkout] found customer in Stripe:", customerId);
+      // Find the first non-deleted customer
+      const valid = existing.data.find(c => !c.deleted);
+      if (valid) {
+        customerId = valid.id;
+        console.log("[checkout] found customer in Stripe search:", customerId);
       }
     }
 
-    // 3. Create a brand-new Stripe customer if none exists
+    // 3. Create a brand-new Stripe customer if still none found
     if (!customerId) {
       const customer = await stripe.customers.create({ email: normalizedEmail });
       customerId = customer.id;
       console.log("[checkout] created new Stripe customer:", customerId);
     }
 
-    // 4. Persist the customer ID to Supabase for future fast lookups
+    // 4. Persist the valid customer ID to Supabase
     if (supabaseUrl && serviceKey && customerId) {
       const supabase = createClient(supabaseUrl, serviceKey);
       await supabase
@@ -103,7 +122,20 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error("[checkout] customer setup error:", err.message);
-    // Non-fatal: fall back to customer_email (pre-filled but editable)
+    // Non-fatal — fall back to customer_email
+  }
+
+  // ── Check if customer already used their free trial ───────────────────────
+  let hadTrial = false;
+  if (customerId) {
+    try {
+      const allSubs = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 10 });
+      // If ANY past subscription exists (including cancelled), trial was already used
+      hadTrial = allSubs.data.length > 0;
+      console.log("[checkout] hadTrial:", hadTrial, "for customer:", customerId);
+    } catch (err) {
+      console.warn("[checkout] Could not check trial history:", err.message);
+    }
   }
 
   // ── Create the Checkout Session ─────────────────────────────────────────────
@@ -111,16 +143,14 @@ export default async function handler(req, res) {
     const sessionParams = {
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      subscription_data: { trial_period_days: 7 },
+      subscription_data: hadTrial ? {} : { trial_period_days: 7 },
       success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `${appUrl}/subscribe`,
     };
 
     if (customerId) {
-      // Email is read-only when a Customer ID is provided
       sessionParams.customer = customerId;
     } else {
-      // Fallback: pre-fill but still editable
       sessionParams.customer_email = normalizedEmail;
     }
 

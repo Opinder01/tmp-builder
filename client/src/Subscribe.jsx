@@ -40,23 +40,14 @@ export default function Subscribe() {
   const navigate = useNavigate();
 
   // Read user once on mount — never re-read so guards stay stable across re-renders
-  const [user] = useState(() => getAuthUser());
+  const [user]     = useState(() => getAuthUser());
+  const [hadTrial, setHadTrial] = useState(false);
 
   // ── ALL hooks must come before any conditional return ──────────────────────
 
-  // Redirect already-subscribed users.
-  // Checks localStorage first (instant), then calls the API to catch users
-  // whose localStorage doesn't have subscribed:true yet (e.g. after a fix
-  // deployed while they were already logged in).
+  // Always verify subscription via API — never trust localStorage alone.
+  // This prevents stale subscribed:true in localStorage from bypassing the paywall.
   useEffect(() => {
-    // If localStorage already says subscribed, redirect immediately
-    if (user?.subscribed === true) {
-      navigate("/dashboard", { replace: true });
-      return;
-    }
-
-    // Otherwise, ask the API — catches existing subscribers whose localStorage
-    // is stale (webhook was broken, just fixed, etc.)
     if (!user?.email) return;
 
     let cancelled = false;
@@ -69,8 +60,12 @@ export default function Subscribe() {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled) return;
+
+        // Track whether this user already used their free trial
+        if (data?.hadTrial === true) setHadTrial(true);
+
         if (data?.subscribed === true) {
-          // Update localStorage so ProtectedRoute passes on next navigation
+          // Confirmed subscribed — update localStorage and go to dashboard
           const updated = {
             ...user,
             subscribed:           true,
@@ -80,7 +75,6 @@ export default function Subscribe() {
           };
           localStorage.setItem("loggedInUser", JSON.stringify(updated));
 
-          // Also update users[] array so future logins work offline
           try {
             const allUsers = JSON.parse(localStorage.getItem("users") || "[]");
             localStorage.setItem(
@@ -96,9 +90,14 @@ export default function Subscribe() {
           } catch { /* non-critical */ }
 
           navigate("/dashboard", { replace: true });
+        } else if (data !== null) {
+          // API confirmed NOT subscribed — clear any stale subscribed:true from localStorage
+          const updated = { ...user, subscribed: false };
+          localStorage.setItem("loggedInUser", JSON.stringify(updated));
         }
+        // data === null means API failed — stay on subscribe page, let user try
       })
-      .catch(() => { /* ignore — user stays on subscribe page */ })
+      .catch(() => { /* network error — stay on subscribe page */ })
       .finally(() => clearTimeout(timeoutId));
 
     return () => {
@@ -147,8 +146,7 @@ export default function Subscribe() {
     );
   }
 
-  // Guard: render nothing while a redirect is in flight.
-  if (user?.subscribed === true) return null;
+  // (removed: do not skip rendering based on stale localStorage)
 
   const startTrial = async (plan) => {
     setCheckoutError("");
@@ -386,10 +384,17 @@ export default function Subscribe() {
         <div className="subInner">
           <div className="subHeader">
             <h1>Choose your plan</h1>
-            <p>
-              Start your <b>7-day free trial</b>. Cancel anytime.{" "}
-              <b>Money-back guarantee:</b> 14 days after first payment.
-            </p>
+            {hadTrial ? (
+              <p>
+                Welcome back. Your free trial has already been used.{" "}
+                Subscribe below to regain full access. <b>Money-back guarantee:</b> 14 days after payment.
+              </p>
+            ) : (
+              <p>
+                Start your <b>7-day free trial</b>. Cancel anytime.{" "}
+                <b>Money-back guarantee:</b> 14 days after first payment.
+              </p>
+            )}
           </div>
 
           <div className="planGrid">
@@ -408,9 +413,19 @@ export default function Subscribe() {
                 </div>
 
                 <ul className="list">
-                  <li>7-day free trial</li>
-                  <li>Full access during trial</li>
-                  <li>Money-back guarantee (14 days)</li>
+                  {hadTrial ? (
+                    <>
+                      <li>Full access immediately</li>
+                      <li>Cancel anytime</li>
+                      <li>Money-back guarantee (14 days)</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>7-day free trial</li>
+                      <li>Full access during trial</li>
+                      <li>Money-back guarantee (14 days)</li>
+                    </>
+                  )}
                 </ul>
 
                 <button
@@ -418,7 +433,9 @@ export default function Subscribe() {
                   onClick={() => startTrial(plan)}
                   disabled={checkoutLoading !== null}
                 >
-                  {checkoutLoading === plan.id ? "Redirecting…" : "Start free trial"}
+                  {checkoutLoading === plan.id
+                    ? "Redirecting…"
+                    : hadTrial ? "Subscribe Now" : "Start free trial"}
                 </button>
               </div>
             ))}

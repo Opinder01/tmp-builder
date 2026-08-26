@@ -11,8 +11,12 @@ function json(res, status, body) {
  * GET /api/subscription-status?email=user@example.com
  *
  * 1. Checks the Supabase `subscriptions` table first (fast path).
- * 2. If no row found, searches Stripe directly by email for an
- *    active/trialing subscription (fallback for missed webhooks).
+ *    — A row with NO stripe_subscription_id means customer was created but
+ *      never completed checkout → NOT subscribed.
+ *    — A row WITH stripe_subscription_id is verified live with Stripe to
+ *      confirm the subscription is still active/trialing.
+ * 2. If no row (or row has no subscription), searches Stripe directly by email
+ *    for an active/trialing subscription (fallback for missed webhooks).
  * 3. On a Stripe hit, backfills Supabase so future checks are fast.
  */
 export default async function handler(req, res) {
@@ -60,17 +64,49 @@ export default async function handler(req, res) {
     return json(res, 500, { error: "Database error." });
   }
 
-  if (data) {
-    console.log("[subscription-status] ✅ found in Supabase:", JSON.stringify(data));
-    return json(res, 200, {
-      subscribed:           true,
-      plan:                 data.plan,
-      stripeCustomerId:     data.stripe_customer_id,
-      stripeSubscriptionId: data.stripe_subscription_id,
-    });
+  // A row exists AND has a real subscription ID — verify it's still active with Stripe
+  if (data?.stripe_subscription_id && stripeKey) {
+    console.log("[subscription-status] Supabase row found with subscription:", data.stripe_subscription_id, "— verifying with Stripe…");
+    try {
+      const stripe = new Stripe(stripeKey, { apiVersion: "2025-04-30.basil" });
+      const sub = await stripe.subscriptions.retrieve(data.stripe_subscription_id);
+
+      if (sub.status === "active" || sub.status === "trialing") {
+        console.log("[subscription-status] ✅ Stripe subscription is", sub.status);
+        return json(res, 200, {
+          subscribed:           true,
+          hadTrial:             true,
+          plan:                 data.plan,
+          stripeCustomerId:     data.stripe_customer_id,
+          stripeSubscriptionId: data.stripe_subscription_id,
+        });
+      } else {
+        // Subscription exists but is cancelled — not subscribed, but HAS used trial
+        console.log("[subscription-status] ⚠️ Stripe subscription status:", sub.status, "— not active, had trial");
+        return json(res, 200, { subscribed: false, hadTrial: true });
+      }
+    } catch (err) {
+      // Stripe unreachable — fall back to trusting the Supabase row
+      console.warn("[subscription-status] Stripe verify failed:", err.message, "— trusting Supabase row");
+      return json(res, 200, {
+        subscribed:           true,
+        hadTrial:             true,
+        plan:                 data.plan,
+        stripeCustomerId:     data.stripe_customer_id,
+        stripeSubscriptionId: data.stripe_subscription_id,
+      });
+    }
   }
 
-  console.log("[subscription-status] no Supabase row — checking Stripe for:", email);
+  // Row exists but NO stripe_subscription_id = customer created, never completed checkout
+  if (data && !data.stripe_subscription_id) {
+    console.log("[subscription-status] Supabase row found but no subscription ID — user never completed checkout");
+    // Fall through to Stripe direct search below (in case webhook was missed)
+  }
+
+  if (!data) {
+    console.log("[subscription-status] no Supabase row — checking Stripe for:", email);
+  }
 
   // ── Step 2: fallback — search Stripe directly ─────────────────────────────
   if (!stripeKey) {
@@ -81,7 +117,6 @@ export default async function handler(req, res) {
   try {
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-04-30.basil" });
 
-    // Find the Stripe customer by email
     const customers = await stripe.customers.search({
       query: `email:"${email}"`,
       limit: 5,
@@ -119,7 +154,6 @@ export default async function handler(req, res) {
       return json(res, 200, { subscribed: false });
     }
 
-    // Determine plan from the price nickname / interval
     const priceItem = activeSub.items?.data?.[0]?.price;
     const plan =
       priceItem?.nickname?.toLowerCase?.().includes("year") ? "yearly" :
@@ -148,6 +182,7 @@ export default async function handler(req, res) {
 
     return json(res, 200, {
       subscribed:           true,
+      hadTrial:             true,
       plan:                 plan,
       stripeCustomerId:     customerId,
       stripeSubscriptionId: activeSub.id,
@@ -155,7 +190,6 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("[subscription-status] Stripe error:", err.message);
-    // Don't block the user — if Stripe is unreachable, fall back to false
-    return json(res, 200, { subscribed: false });
+    return json(res, 200, { subscribed: false, hadTrial: false });
   }
 }

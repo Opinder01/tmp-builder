@@ -12,6 +12,7 @@ import Editor from "./Editor";
 import ProtectedRoute from "./ProtectedRoute";
 import Privacy from "./Privacy";
 import Terms from "./Terms";
+import Admin from "./Admin";
 
 export default function App() {
   return (
@@ -45,6 +46,8 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route path="/admin" element={<Admin />} />
 
         {/* Catch-all: any unknown URL → landing page */}
         <Route path="*" element={<Navigate to="/" replace />} />

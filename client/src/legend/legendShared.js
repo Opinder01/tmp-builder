@@ -435,3 +435,147 @@ export async function buildLegendCanvas(allItems, wPx, naturalW0, signDataUrls) 
 
   return cv;
 }
+
+/**
+ * Measure the tight natural width for a manifest from its row text — mirrors measureLegendNaturalBase.
+ * Returns naturalW0: the minimum width at scale s=1 that fits all text content.
+ */
+export function measureManifestNaturalWidth(rows) {
+  const pad = 8;
+  const labelSz = 11;
+  const titleSz = 13;
+  const lw = 1.5;
+
+  const cv =
+    typeof document !== "undefined" ? document.createElement("canvas") : null;
+  const ctx = cv?.getContext?.("2d");
+
+  let maxTextW = 0;
+  if (ctx) {
+    ctx.font = `bold ${labelSz}px Arial, Helvetica, sans-serif`;
+    for (const r of rows || []) {
+      maxTextW = Math.max(maxTextW, ctx.measureText(`${r.count} x ${r.label}`).width);
+    }
+    ctx.font = `bold ${titleSz}px Arial, Helvetica, sans-serif`;
+    maxTextW = Math.max(maxTextW, ctx.measureText("Manifest").width);
+  }
+
+  return Math.max(80, Math.ceil(lw * 2 + pad * 2 + maxTextW));
+}
+
+/**
+ * Layout tokens scaled from manifest width — mirrors legendLayoutScaled.
+ * naturalW0 = tight natural width; wPx = current user width (scales all internals).
+ */
+function manifestLayoutScaled(wPx, naturalW0) {
+  const safeNW = Math.max(44, Number(naturalW0) || 120);
+  const s = wPx / safeNW;
+  const pad = 8 * s;
+  const rowH = Math.max(26 * s, 22 * s);
+  const rowGap = 1 * s;
+  const labelSz = 11 * s;
+  const titleSz = 13 * s;
+  const divThick = Math.max(1, 1 * s);
+  const afterDiv = 3 * s;
+  const lw = Math.max(1, 1.5 * s);
+  const titleBlock = titleSz * 1.5 + 4 * s + divThick + afterDiv;
+  return { s, pad, rowH, rowGap, labelSz, titleSz, divThick, afterDiv, lw, titleBlock };
+}
+
+/**
+ * Content-driven pixel height — mirrors legendCanvasPixelHeight.
+ * Pass naturalW0 from measureManifestNaturalWidth so scaling stays consistent.
+ */
+export function manifestCanvasPixelHeight(rows, wPx, naturalW0) {
+  const { pad, rowH, rowGap, titleBlock, lw } = manifestLayoutScaled(wPx, naturalW0);
+  const n = (rows || []).length;
+  const contentH = n > 0 ? n * rowH + Math.max(0, n - 1) * rowGap : rowH;
+  const innerBody = pad + titleBlock + contentH + pad;
+  return Math.ceil(innerBody + lw);
+}
+
+/**
+ * Render manifest canvas — mirrors buildLegendCanvas.
+ * wPx: current user width (resize-controlled). naturalW0: tight base width for scaling.
+ * Height is auto-computed from content; width is user-controlled with proportional scaling.
+ */
+export function buildManifestCanvas(rows, wPx, naturalW0) {
+  const DPR = 2;
+  const { pad, rowH, rowGap, labelSz, titleSz, divThick, afterDiv, lw, s } =
+    manifestLayoutScaled(wPx, naturalW0);
+  const canvasH = manifestCanvasPixelHeight(rows, wPx, naturalW0);
+
+  const cv =
+    typeof document !== "undefined"
+      ? document.createElement("canvas")
+      : null;
+  if (!cv) throw new Error("buildManifestCanvas requires a browser document");
+  cv.width  = Math.round(wPx * DPR);
+  cv.height = Math.round(canvasH * DPR);
+  const ctx = cv.getContext("2d");
+  ctx.scale(DPR, DPR);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // White background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, wPx, canvasH);
+
+  // Border
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = lw;
+  ctx.strokeRect(lw / 2, lw / 2, wPx - lw, canvasH - lw);
+
+  // Title
+  ctx.fillStyle = "#111111";
+  ctx.font = `bold ${Math.round(titleSz)}px Arial, Helvetica, sans-serif`;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.fillText("Manifest", pad, pad);
+
+  // Horizontal divider
+  const divY = pad + titleSz * 1.5 + 4 * s;
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = divThick;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pad, divY);
+  ctx.lineTo(wPx - pad, divY);
+  ctx.stroke();
+
+  // Rows
+  const maxTextW = wPx - pad * 2;
+  let rowY = divY + divThick + afterDiv;
+
+  function truncate(text) {
+    if (!maxTextW || maxTextW <= 8 || ctx.measureText(text).width <= maxTextW) return text;
+    const ell = "…";
+    let lo = 0, hi = text.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (ctx.measureText(text.slice(0, mid) + ell).width <= maxTextW) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo <= 0 ? ell : text.slice(0, lo) + ell;
+  }
+
+  if (!rows || rows.length === 0) {
+    ctx.fillStyle = "#999999";
+    ctx.font = `italic ${Math.round(labelSz)}px Arial, Helvetica, sans-serif`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText("No items", pad, rowY + rowH / 2);
+  } else {
+    ctx.fillStyle = "#111111";
+    ctx.font = `bold ${Math.round(labelSz)}px Arial, Helvetica, sans-serif`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    for (const r of rows) {
+      const text = `${r.count} x ${r.label}`;
+      ctx.fillText(truncate(text), pad, rowY + rowH / 2, maxTextW);
+      rowY += rowH + rowGap;
+    }
+  }
+
+  return cv;
+}

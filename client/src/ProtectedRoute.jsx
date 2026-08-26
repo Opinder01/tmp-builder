@@ -33,6 +33,28 @@ export default function ProtectedRoute({ children }) {
           return; // finally still runs
         }
 
+        // Validate session token (device limit enforcement)
+        const sessionToken = localStorage.getItem("sessionToken");
+        if (sessionToken) {
+          try {
+            const sRes = await fetch(`/api/auth?action=session&token=${encodeURIComponent(sessionToken)}`, {
+              signal: controller.signal,
+            });
+            if (sRes.ok) {
+              const sData = await sRes.json();
+              if (!sData.valid) {
+                // Session was revoked (e.g. logged out from another tab or admin action)
+                localStorage.removeItem("sessionToken");
+                localStorage.removeItem("loggedInUser");
+                nextState = "no-user";
+                return;
+              }
+            }
+          } catch {
+            // Session API unreachable — allow through (graceful degradation)
+          }
+        }
+
         let data = null;
         try {
           const res = await fetch(
@@ -49,10 +71,10 @@ export default function ProtectedRoute({ children }) {
         }
 
         if (data !== null) {
-          // API succeeded — only upgrade subscribed, never downgrade.
-          // If the API says false but localStorage says true, the Supabase webhook
-          // is just delayed — trust the local value the user earned at checkout.
-          const resolvedSubscribed = data.subscribed === true ? true : (user.subscribed === true);
+          // API is the source of truth — always trust its answer.
+          // The subscription-status API now verifies live with Stripe,
+          // so if it says false the user genuinely has no active subscription.
+          const resolvedSubscribed = data.subscribed === true;
           const updated = {
             ...user,
             subscribed:           resolvedSubscribed,
@@ -61,7 +83,7 @@ export default function ProtectedRoute({ children }) {
             stripeSubscriptionId: data.stripeSubscriptionId ?? user.stripeSubscriptionId,
           };
           localStorage.setItem("loggedInUser", JSON.stringify(updated));
-          console.log("[ProtectedRoute] API subscribed:", data.subscribed, "| local subscribed:", user.subscribed, "| resolved:", resolvedSubscribed);
+          console.log("[ProtectedRoute] API subscribed:", data.subscribed, "| resolved:", resolvedSubscribed);
           nextState = resolvedSubscribed ? "allowed" : "denied";
         } else {
           // API failed / timed out — fall back to localStorage
