@@ -208,10 +208,6 @@ export default async function handler(req, res) {
     const supabase = getSupabase();
     const normalizedEmail = email.toLowerCase().trim();
 
-    const { data: user } = await supabase
-      .from("app_users").select("email").eq("email", normalizedEmail).maybeSingle();
-    if (!user) return json(res, 404, { error: "No account found with this email." });
-
     const otp       = String(Math.floor(100_000 + Math.random() * 900_000));
     const expiresAt = Date.now() + OTP_TTL_MS;
     const otpToken  = encryptOtpToken(normalizedEmail, otp, expiresAt);
@@ -251,12 +247,30 @@ export default async function handler(req, res) {
     const supabase = getSupabase();
     const normalizedEmail = email.toLowerCase().trim();
 
-    const { error: updateErr } = await supabase
+    const hashedPw = hashPassword(newPassword);
+
+    // Try to update an existing Supabase account
+    const { data: updated, error: updateErr } = await supabase
       .from("app_users")
-      .update({ password: hashPassword(newPassword) })
-      .eq("email", normalizedEmail);
+      .update({ password: hashedPw })
+      .eq("email", normalizedEmail)
+      .select("email");
     if (updateErr)
       return json(res, 500, { error: "Failed to reset password. Please try again." });
+
+    // Account only in localStorage (legacy) — migrate it into Supabase now
+    if (!updated || updated.length === 0) {
+      const { error: insertErr } = await supabase.from("app_users").insert({
+        email:        normalizedEmail,
+        password:     hashedPw,
+        full_name:    "",
+        company_name: "",
+        phone:        "",
+      });
+      // 23505 = unique violation — race condition, account now exists; that's fine
+      if (insertErr && insertErr.code !== "23505")
+        return json(res, 500, { error: "Failed to reset password. Please try again." });
+    }
 
     // Invalidate all active sessions so old devices must re-login
     await supabase.from("user_sessions").delete().eq("email", normalizedEmail);
