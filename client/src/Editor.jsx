@@ -5976,7 +5976,9 @@ useEffect(() => {
         uiDrag.type === "resizeArrow" ||
         uiDrag.type === "rotateArrow" ||
         uiDrag.type === "moveArrowPoint" ||
-        uiDrag.type === "rotateArrowPoint"
+        uiDrag.type === "rotateArrowPoint" ||
+        uiDrag.type === "moveRoadVertex" ||
+        uiDrag.type === "resizeRoadWidth"
       ) {
         lockMapInteractions(false);
       }
@@ -9946,6 +9948,7 @@ draggingCursor:
             onPointerDown={(ev) => {
               ev.stopPropagation();
               ev.preventDefault();
+              lockMapInteractions(true);
               setUiDrag({ type: "moveRoadVertex", roadId: road.id, vi });
             }}
           />
@@ -9969,6 +9972,7 @@ draggingCursor:
               onPointerDown={(ev) => {
                 ev.stopPropagation();
                 ev.preventDefault();
+                lockMapInteractions(true);
                 setUiDrag({ type: "resizeRoadWidth", roadId: road.id, startWidth: road.widthMeters });
               }}
             >↔</div>
