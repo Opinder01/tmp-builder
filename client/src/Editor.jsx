@@ -5165,6 +5165,11 @@ if (activeTool === "roads" && selectedRoadMarkingType) {
   return;
 }
 
+// ROADS: clicking empty map deselects any selected marking
+if (activeTool === "roads" && selectedRoadMarkingId) {
+  setSelectedRoadMarkingId(null);
+}
+
 // ROADS: click-to-place vertices (use ref for drawing state — avoids stale closure)
 if (activeTool === "roads") {
   const detail = e?.domEvent?.detail;
@@ -12576,7 +12581,7 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                           onClick={(ev) => {
                             ev.preventDefault(); ev.stopPropagation();
-                            setSelectedRoadMarkingId(prev => prev === marking.id ? null : marking.id);
+                            setSelectedRoadMarkingId(marking.id);
                             setSelectedRoadMarkingType(null);
                           }}
                           onPointerDown={(ev) => {
