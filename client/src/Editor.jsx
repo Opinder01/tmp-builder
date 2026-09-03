@@ -6515,7 +6515,8 @@ useEffect(() => {
         const screenDx = curPx.x - startPx.x;
         const screenDy = curPx.y - startPx.y;
         // project movement onto perpendicular direction → delta in pixels
-        const dot = screenDx * perpX + screenDy * perpY;
+        // screenDy is negated because screen +y = down but geographic +y = north
+        const dot = screenDx * perpX - screenDy * perpY;
         // convert px to meters (approximate using current zoom)
         const map = mapRef.current;
         const zoom = map ? map.getZoom() : 18;
