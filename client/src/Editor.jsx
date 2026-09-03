@@ -1938,47 +1938,70 @@ const ROAD_TYPES = [
   { id: "multi_lane",         label: "Multi-Lane",          lanes: 4, defaultWidth: 14.8 },
 ];
 
-// BC MUTCD pavement marking types (white on asphalt)
+// BC MUTCD pavement marking types — white marking on dark asphalt background
 const ROAD_MARKING_TYPES = [
   {
     id: "marking_left",
     label: "Left Arrow",
-    defaultW: 40,
-    defaultH: 90,
-    viewBox: "0 0 60 100",
-    // curved shaft from bottom-center, curves left, arrowhead pointing left
-    svgEl: (
-      <g>
-        <path d="M 30,100 L 30,58 Q 30,26 8,26" fill="none" stroke="white" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
-        <polygon points="0,26 20,10 20,42" fill="white"/>
-      </g>
+    defaultW: 44,
+    defaultH: 100,
+    viewBox: "0 0 60 110",
+    // render function called inside component JSX — avoids module-level JSX pitfalls
+    renderSvg: () => (
+      <>
+        <rect x="0" y="0" width="60" height="110" rx="6" fill="rgba(32,32,32,0.88)"/>
+        <path d="M 30,106 L 30,62 Q 30,28 8,28" fill="none" stroke="white" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
+        <polygon points="0,28 20,11 20,45" fill="white"/>
+      </>
+    ),
+    renderPanel: () => (
+      <>
+        <rect x="0" y="0" width="60" height="110" rx="4" fill="#2a2a2a"/>
+        <path d="M 30,106 L 30,62 Q 30,28 8,28" fill="none" stroke="white" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
+        <polygon points="0,28 20,11 20,45" fill="white"/>
+      </>
     ),
   },
   {
     id: "marking_right",
     label: "Right Arrow",
-    defaultW: 40,
-    defaultH: 90,
-    viewBox: "0 0 60 100",
-    // curved shaft from bottom-center, curves right, arrowhead pointing right
-    svgEl: (
-      <g>
-        <path d="M 30,100 L 30,58 Q 30,26 52,26" fill="none" stroke="white" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
-        <polygon points="60,26 40,10 40,42" fill="white"/>
-      </g>
+    defaultW: 44,
+    defaultH: 100,
+    viewBox: "0 0 60 110",
+    renderSvg: () => (
+      <>
+        <rect x="0" y="0" width="60" height="110" rx="6" fill="rgba(32,32,32,0.88)"/>
+        <path d="M 30,106 L 30,62 Q 30,28 52,28" fill="none" stroke="white" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
+        <polygon points="60,28 40,11 40,45" fill="white"/>
+      </>
+    ),
+    renderPanel: () => (
+      <>
+        <rect x="0" y="0" width="60" height="110" rx="4" fill="#2a2a2a"/>
+        <path d="M 30,106 L 30,62 Q 30,28 52,28" fill="none" stroke="white" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
+        <polygon points="60,28 40,11 40,45" fill="white"/>
+      </>
     ),
   },
   {
     id: "marking_straight",
     label: "Straight Arrow",
-    defaultW: 30,
-    defaultH: 90,
-    viewBox: "0 0 40 100",
-    svgEl: (
-      <g>
-        <line x1="20" y1="100" x2="20" y2="28" stroke="white" strokeWidth="13" strokeLinecap="round"/>
-        <polygon points="20,0 2,32 38,32" fill="white"/>
-      </g>
+    defaultW: 36,
+    defaultH: 100,
+    viewBox: "0 0 48 110",
+    renderSvg: () => (
+      <>
+        <rect x="0" y="0" width="48" height="110" rx="6" fill="rgba(32,32,32,0.88)"/>
+        <line x1="24" y1="106" x2="24" y2="34" stroke="white" strokeWidth="12" strokeLinecap="round"/>
+        <polygon points="24,4 6,38 42,38" fill="white"/>
+      </>
+    ),
+    renderPanel: () => (
+      <>
+        <rect x="0" y="0" width="48" height="110" rx="4" fill="#2a2a2a"/>
+        <line x1="24" y1="106" x2="24" y2="34" stroke="white" strokeWidth="12" strokeLinecap="round"/>
+        <polygon points="24,4 6,38 42,38" fill="white"/>
+      </>
     ),
   },
 ];
@@ -9514,10 +9537,10 @@ const tileIconStyle = {
                         borderRadius: 8, background: active ? "#f0f4ff" : "#fff",
                         cursor: "pointer", textAlign: "center",
                       }}>
-                      {/* SVG preview on asphalt */}
-                      <div style={{ width: 36, height: 52, background: "#3a3a3a", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <svg viewBox={mt.viewBox} width={mt.id === "marking_cycle" ? 28 : 24} height={mt.id === "marking_cycle" ? 44 : 44} style={{ display: "block" }}>
-                          {mt.svgEl}
+                      {/* SVG preview — background included in renderPanel SVG */}
+                      <div style={{ width: 36, height: 52, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <svg viewBox={mt.viewBox} width={28} height={44} style={{ display: "block" }}>
+                          {mt.renderPanel()}
                         </svg>
                       </div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: active ? "#1e3a5f" : "#444", lineHeight: 1.2 }}>{mt.label}</div>
@@ -12574,14 +12597,14 @@ height: pendingPictureTool.hPx * elementScale,
                             });
                           }}
                         >
-                          {/* SVG marking */}
+                          {/* SVG marking — dark asphalt bg + white marking */}
                           <svg
                             viewBox={mt.viewBox}
                             width={markW}
                             height={markH}
                             style={{ display: "block", pointerEvents: "none" }}
                           >
-                            {mt.svgEl}
+                            {mt.renderSvg()}
                           </svg>
 
                           {/* Selection handles */}
