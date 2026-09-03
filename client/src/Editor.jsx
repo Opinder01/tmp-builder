@@ -5066,6 +5066,7 @@ if (activeTool === "roads") {
   const detail = e?.domEvent?.detail;
   if (detail === 2) return; // ignore 2nd click of dblclick
   if (!roadIsDrawing) {
+    setSelectedRoadId(null);
     roadVerticesRef.current = [p];
     setRoadVerticesState([p]);
     setRoadIsDrawing(true);
@@ -9923,9 +9924,9 @@ draggingCursor:
           fillOpacity: isSelected ? 0.97 : 0.93,
           strokeOpacity: 0,
           zIndex: 1,
-          clickable: activeTool === "roads",
+          clickable: activeTool === "roads" && !roadIsDrawing,
         }}
-        onClick={() => activeTool === "roads" && setSelectedRoadId(isSelected ? null : road.id)}
+        onClick={() => activeTool === "roads" && !roadIsDrawing && setSelectedRoadId(isSelected ? null : road.id)}
       />
       {/* edge lines (white) */}
       <PolylineF path={road.edge} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
@@ -9934,7 +9935,7 @@ draggingCursor:
       {centerLines}
       {arrowMarkers}
       {/* Vertex handles — only when selected */}
-      {isSelected && activeTool === "roads" && road.edge.map((v, vi) => (
+      {isSelected && activeTool === "roads" && !roadIsDrawing && road.edge.map((v, vi) => (
         <OverlayViewF key={`vh-${vi}`} position={v} mapPaneName="overlayMouseTarget">
           <div
             style={{
@@ -9951,7 +9952,7 @@ draggingCursor:
         </OverlayViewF>
       ))}
       {/* Width handle at midpoint of offset edge */}
-      {isSelected && activeTool === "roads" && (() => {
+      {isSelected && activeTool === "roads" && !roadIsDrawing && (() => {
         const offEdge = perpOffsetEdge(road.edge, road.widthMeters, 1);
         const mid = offEdge[Math.floor(offEdge.length / 2)];
         if (!mid) return null;
