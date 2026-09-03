@@ -2044,9 +2044,14 @@ function perpOffsetEdge(edge, widthMeters, side = 1) {
     else {
       const p1 = segPerp(edge[i-1], edge[i]);
       const p2 = segPerp(edge[i], edge[i+1]);
-      const ax2 = (p1.x+p2.x)/2, ay2 = (p1.y+p2.y)/2;
-      const al = Math.sqrt(ax2*ax2+ay2*ay2) || 1;
-      perp = { x: ax2/al, y: ay2/al };
+      const ax = (p1.x+p2.x)/2, ay = (p1.y+p2.y)/2;
+      const al = Math.sqrt(ax*ax+ay*ay) || 1;
+      const candidate = { x: ax/al, y: ay/al };
+      // If averaged direction has flipped relative to both segment normals
+      // (very sharp bend > 180°), fall back to entry segment normal to prevent
+      // the offset vertex crossing to the wrong side of the polygon.
+      const dotCheck = candidate.x * p1.x + candidate.y * p1.y;
+      perp = dotCheck >= 0 ? candidate : p1;
     }
     const cos = Math.cos(pt.lat * Math.PI / 180);
     return {
@@ -5569,7 +5574,9 @@ if (activeTool === "roads" && roadVerticesRef.current.length > 0) {
     const last = verts[verts.length - 1];
     const prev = verts[verts.length - 2];
     const d2 = (last.lat - prev.lat)**2 + (last.lng - prev.lng)**2;
-    if (d2 < 1e-14) verts = verts.slice(0, -1);
+    // 1e-8 ≈ 1m² threshold — removes the inadvertent vertex added by the
+    // first click of the finalizing double-click
+    if (d2 < 1e-8) verts = verts.slice(0, -1);
   }
   roadVerticesRef.current = [];
   setRoadVerticesState([]);
