@@ -1928,6 +1928,76 @@ const WORK_AREA_STYLE = {
   fillOpacity: 0.22,
 };
 
+// ─── Road drawing constants & helpers ────────────────────────────────────────
+const ROAD_TYPES = [
+  { id: "one_way",            label: "One-Way",            lanes: 1, defaultWidth: 3.7 },
+  { id: "two_way_dashed",     label: "Two-Way Dashed",     lanes: 2, defaultWidth: 7.4 },
+  { id: "two_way_solid_yellow", label: "Solid Yellow",     lanes: 2, defaultWidth: 7.4 },
+  { id: "two_way_double_yellow", label: "Double Yellow",   lanes: 2, defaultWidth: 7.4 },
+  { id: "two_way_dashed_yellow", label: "Dashed Yellow",   lanes: 2, defaultWidth: 7.4 },
+  { id: "multi_lane",         label: "Multi-Lane",          lanes: 4, defaultWidth: 14.8 },
+];
+
+function rdpSimplify(pts, eps = 0.000003) {
+  if (pts.length < 3) return pts;
+  const last = pts.length - 1;
+  let maxD = 0, idx = 0;
+  const ax = pts[0].lng, ay = pts[0].lat, bx = pts[last].lng, by = pts[last].lat;
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx*dx + dy*dy;
+  for (let i = 1; i < last; i++) {
+    const px = pts[i].lng - ax, py = pts[i].lat - ay;
+    const d = len2 === 0 ? Math.sqrt(px*px+py*py)
+      : Math.abs(dy*pts[i].lng - dx*pts[i].lat + bx*ay - by*ax) / Math.sqrt(len2);
+    if (d > maxD) { maxD = d; idx = i; }
+  }
+  if (maxD > eps) {
+    const l = rdpSimplify(pts.slice(0, idx+1), eps);
+    const r = rdpSimplify(pts.slice(idx), eps);
+    return [...l.slice(0,-1), ...r];
+  }
+  return [pts[0], pts[last]];
+}
+
+function perpOffsetEdge(edge, widthMeters, side = 1) {
+  const n = edge.length;
+  if (n < 2) return [];
+  function segPerp(a, b) {
+    const cos = Math.cos(((a.lat + b.lat)/2) * Math.PI / 180);
+    const dx = (b.lng - a.lng) * cos * 111320;
+    const dy = (b.lat - a.lat) * 111320;
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    return { x: -dy/len, y: dx/len };
+  }
+  return edge.map((pt, i) => {
+    let perp;
+    if (i === 0) perp = segPerp(edge[0], edge[1]);
+    else if (i === n-1) perp = segPerp(edge[n-2], edge[n-1]);
+    else {
+      const p1 = segPerp(edge[i-1], edge[i]);
+      const p2 = segPerp(edge[i], edge[i+1]);
+      const ax2 = (p1.x+p2.x)/2, ay2 = (p1.y+p2.y)/2;
+      const al = Math.sqrt(ax2*ax2+ay2*ay2) || 1;
+      perp = { x: ax2/al, y: ay2/al };
+    }
+    const cos = Math.cos(pt.lat * Math.PI / 180);
+    return {
+      lat: pt.lat + side * perp.y * widthMeters / 111320,
+      lng: pt.lng + side * perp.x * widthMeters / (111320 * cos),
+    };
+  });
+}
+
+function computeRoadPolygon(edge, widthMeters) {
+  const other = perpOffsetEdge(edge, widthMeters, 1);
+  return [...edge, ...other.slice().reverse()];
+}
+
+function computeRoadCenterLine(edge, widthMeters) {
+  const offsets = perpOffsetEdge(edge, widthMeters * 0.5, 1);
+  return offsets;
+}
+
   /* ================= Projection overlay ================= */
   const projectionOverlayRef = useRef(null);
   const [projectionReady, setProjectionReady] = useState(false);
@@ -2256,6 +2326,18 @@ useEffect(() => {
   const [placedArrows, setPlacedArrows]           = useState([]);
   const [arrowHoveredId, setArrowHoveredId]       = useState(null);
 
+  /* ================= Roads tool ================= */
+  const [roadsPanelOpen, setRoadsPanelOpen]       = useState(false);
+  const [selectedRoadType, setSelectedRoadType]   = useState(ROAD_TYPES[0].id);
+  const [roads, setRoads]                         = useState([]);
+  const [selectedRoadId, setSelectedRoadId]       = useState(null);
+  const [isDrawingRoad, setIsDrawingRoad]         = useState(false);
+  const isDrawingRoadRef                          = useRef(false);
+  const [roadDraftPoints, setRoadDraftPoints]     = useState([]);
+  const roadDraftRef                              = useRef([]);
+  const [pendingRoadEdge, setPendingRoadEdge]     = useState(null); // edge drawn, awaiting width confirm
+  const [pendingRoadWidth, setPendingRoadWidth]   = useState("7.4");
+
   // ── Sync custom connector overlays whenever sign/stand data changes ─────────
   // Must be after placedSigns is declared.
   useEffect(() => {
@@ -2544,6 +2626,7 @@ const makeSnapshot = () => ({
   measurements,
   placedSigns,
   placedArrows,
+  roads,
 
   // Tools / Inserts
   legendBoxes,
@@ -2567,6 +2650,7 @@ const applySnapshot = (s) => {
     setConesFeatures(s.conesFeatures ?? []);
     setMeasurements(s.measurements ?? []);
     setPlacedSigns(s.placedSigns ?? []);
+    setRoads(s.roads ?? []);
     // Migrate legacy arrow data: point → points[], absolute pos → relative dLat/dLng
     setPlacedArrows((s.placedArrows ?? []).map((a) => {
       let pts = a.points ?? null;
@@ -2866,11 +2950,16 @@ function promptEditInsertText(obj) {
   function deactivateAllTools() {
     if (conesIsDrawing) cancelConesDrawing();
     if (measIsDrawing) cancelMeasDrawing();
+    isDrawingRoadRef.current = false;
+    setIsDrawingRoad(false);
+    setRoadDraftPoints([]);
+    roadDraftRef.current = [];
     setActiveTool(null);
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
     setSignsPanelOpen(false);
     setArrowPanelOpen(false);
+    setRoadsPanelOpen(false);
   }
   function initExportAreaFromViewport() {
   const map = mapRef.current;
@@ -2899,6 +2988,7 @@ function promptEditInsertText(obj) {
   measurements?.forEach((m)     => m.path?.forEach(push));
   workAreas?.forEach((wa)       => wa.path?.forEach(push));
   placedArrows?.forEach((a)     => a.points?.forEach(push));
+  roads?.forEach((r)            => r.edge?.forEach(push));
   northArrows?.forEach((na)     => push(na.pos));
   scales?.forEach((sc)          => push(sc.pos));
   legendBoxes?.forEach((lb)     => push(lb.pos));
@@ -4440,9 +4530,30 @@ setPanMode(false);
     setSignsPanelOpen(false);
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
+    setRoadsPanelOpen(false);
     if (conesIsDrawing) cancelConesDrawing();
     if (measIsDrawing) cancelMeasDrawing();
     setSelectedConeId(null);
+  }
+
+  function openRoadsTool() {
+    if (conesIsDrawing) cancelConesDrawing();
+    if (measIsDrawing) cancelMeasDrawing();
+    isDrawingRoadRef.current = false;
+    setIsDrawingRoad(false);
+    setRoadDraftPoints([]);
+    roadDraftRef.current = [];
+    setActiveTool("roads");
+    setRoadsPanelOpen(true);
+    setConesPanelOpen(false);
+    setMeasPanelOpen(false);
+    setSignsPanelOpen(false);
+    setArrowPanelOpen(false);
+    setSelectedConeId(null);
+  }
+
+  function closeRoadsPanel() {
+    setRoadsPanelOpen(false);
   }
 
   function closeConesPanel() {
@@ -4708,6 +4819,19 @@ function onMapMouseMove(e) {
   // WORK AREA hover preview (DO NOT redeclare ll)
 if (activeTool === "work_area" && isDrawingWorkArea) {
   setWorkHover(cur); // cur is already {lat, lng}
+}
+
+// ROADS freehand drawing — collect points while mouse button held
+if (activeTool === "roads" && isDrawingRoadRef.current) {
+  const prev = roadDraftRef.current;
+  if (prev.length === 0) return;
+  const last = prev[prev.length - 1];
+  const dx = (cur.lng - last.lng) * Math.cos(cur.lat * Math.PI / 180) * 111320;
+  const dy = (cur.lat - last.lat) * 111320;
+  if (dx*dx + dy*dy > 0.25) { // min ~0.5m movement
+    roadDraftRef.current = [...prev, cur];
+    setRoadDraftPoints([...roadDraftRef.current]);
+  }
 }
 
 
@@ -5285,7 +5409,13 @@ function onMapMouseDown(e) {
 
   if (activeTool === "work_area") return;
 
-  // other tools: do nothing here
+  if (activeTool === "roads" && !pendingRoadEdge) {
+    roadDraftRef.current = [p];
+    setRoadDraftPoints([p]);
+    isDrawingRoadRef.current = true;
+    setIsDrawingRoad(true);
+    return;
+  }
 }
 
 function onMapDblClick(e) {
@@ -5556,6 +5686,27 @@ useEffect(() => {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [uiDrag, conesIsDrawing, measIsDrawing, isSignsToolActive, activeTool, lineDraft, selectedWorkAreaId]);
+
+// ================= Road drawing: finalize on mouseup =================
+useEffect(() => {
+  function onMouseUp() {
+    if (!isDrawingRoadRef.current) return;
+    isDrawingRoadRef.current = false;
+    setIsDrawingRoad(false);
+    const raw = roadDraftRef.current;
+    roadDraftRef.current = [];
+    setRoadDraftPoints([]);
+    if (raw.length < 2) return;
+    const simplified = rdpSimplify(raw, 0.000003);
+    if (simplified.length < 2) return;
+    const roadType = ROAD_TYPES.find(r => r.id === selectedRoadType) ?? ROAD_TYPES[0];
+    setPendingRoadEdge(simplified);
+    setPendingRoadWidth(String(roadType.defaultWidth));
+  }
+  window.addEventListener("mouseup", onMouseUp);
+  return () => window.removeEventListener("mouseup", onMouseUp);
+}, [selectedRoadType]);
+
 // ================= Keyboard shortcuts: Undo / Redo / Delete =================
 useEffect(() => {
   const onKeyDown = (e) => {
@@ -8272,6 +8423,7 @@ const tileIconStyle = {
 <RibbonTextButton label="Measurements" active={isMeasToolActive} onClick={openMeasTool} variant="outline" />
 <RibbonTextButton label="Work Area" active={activeTool === "work_area"} onClick={openWorkAreaTool} variant="outline" />
 <RibbonTextButton label="Arrow" active={isArrowToolActive} onClick={openArrowTool} variant="outline" />
+<RibbonTextButton label="Roads" active={activeTool === "roads"} onClick={openRoadsTool} variant="outline" />
 
 
               </RibbonGroup>
@@ -9048,6 +9200,170 @@ const tileIconStyle = {
           </div>
         )}
 
+        {/* ===== Roads Panel ===== */}
+        {roadsPanelOpen && activeTab === "Plan Elements" && (
+          <div className="no-print" style={{
+            position: "absolute", top: 12, bottom: 20, left: 12, width: 220,
+            background: "#fff", border: "1px solid #e0e0e0", borderRadius: 12,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.12)", zIndex: 50,
+            display: "flex", flexDirection: "column", overflow: "hidden",
+          }}>
+            <div style={{
+              display: "flex", alignItems: "center",
+              padding: "10px 12px 8px", borderBottom: "1px solid #f0f0f0", flexShrink: 0,
+            }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: "#111", flex: 1 }}>Roads</span>
+              <button type="button" onClick={closeRoadsPanel} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 16, color: "#999", lineHeight: 1, padding: "0 2px",
+              }}>✕</button>
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 10px 12px" }}>
+              {/* Road type selector */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Road Type</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+                {ROAD_TYPES.map((rt) => {
+                  const active = selectedRoadType === rt.id;
+                  return (
+                    <button key={rt.id} type="button"
+                      onClick={() => setSelectedRoadType(rt.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "7px 10px",
+                        border: active ? "2px solid #1e3a5f" : "1.5px solid #e5e5e5",
+                        borderRadius: 8, background: active ? "#f0f4ff" : "#fff",
+                        cursor: "pointer", textAlign: "left",
+                      }}>
+                      {/* Road marking preview */}
+                      <div style={{ width: 36, height: 20, background: "#4a4a4a", borderRadius: 3, flexShrink: 0, position: "relative", overflow: "hidden" }}>
+                        {/* edge lines */}
+                        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "#fff" }} />
+                        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 2, background: "#fff" }} />
+                        {/* center marking */}
+                        {rt.id === "one_way" && (
+                          <div style={{ position: "absolute", top: "50%", left: 2, right: 2, height: 2, marginTop: -1, background: "#fff", opacity: 0.6,
+                            backgroundImage: "linear-gradient(90deg,#fff 60%,transparent 60%)", backgroundSize: "8px 2px" }} />
+                        )}
+                        {rt.id === "two_way_dashed" && (
+                          <div style={{ position: "absolute", top: "50%", left: 2, right: 2, height: 2, marginTop: -1,
+                            backgroundImage: "linear-gradient(90deg,#fff 60%,transparent 60%)", backgroundSize: "8px 2px" }} />
+                        )}
+                        {(rt.id === "two_way_solid_yellow" || rt.id === "two_way_dashed_yellow") && (
+                          <div style={{ position: "absolute", top: "50%", left: 2, right: 2, height: 2, marginTop: -1, background: rt.id === "two_way_dashed_yellow" ? "none" : "#f5c518",
+                            backgroundImage: rt.id === "two_way_dashed_yellow" ? "linear-gradient(90deg,#f5c518 60%,transparent 60%)" : "none", backgroundSize: "8px 2px" }} />
+                        )}
+                        {rt.id === "two_way_double_yellow" && (
+                          <>
+                            <div style={{ position: "absolute", top: "calc(50% - 2px)", left: 2, right: 2, height: 1.5, background: "#f5c518" }} />
+                            <div style={{ position: "absolute", top: "calc(50% + 1px)", left: 2, right: 2, height: 1.5, background: "#f5c518" }} />
+                          </>
+                        )}
+                        {rt.id === "multi_lane" && (
+                          <>
+                            <div style={{ position: "absolute", top: "33%", left: 2, right: 2, height: 1.5, background: "#fff", opacity: 0.5,
+                              backgroundImage: "linear-gradient(90deg,#fff 60%,transparent 60%)", backgroundSize: "6px 1px" }} />
+                            <div style={{ position: "absolute", top: "66%", left: 2, right: 2, height: 1.5, background: "#fff", opacity: 0.5,
+                              backgroundImage: "linear-gradient(90deg,#fff 60%,transparent 60%)", backgroundSize: "6px 1px" }} />
+                          </>
+                        )}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{rt.label}</div>
+                        <div style={{ fontSize: 10, color: "#888" }}>{rt.defaultWidth}m wide · {rt.lanes} lane{rt.lanes > 1 ? "s" : ""}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Instructions or pending width confirm */}
+              {pendingRoadEdge ? (
+                <div style={{ background: "#f0f4ff", border: "1px solid #c7d5f5", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a5f", marginBottom: 8 }}>Set Road Width</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                    <input
+                      type="number" min="1" max="40" step="0.1"
+                      value={pendingRoadWidth}
+                      onChange={(e) => setPendingRoadWidth(e.target.value)}
+                      style={{ width: 70, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 6, fontSize: 13 }}
+                    />
+                    <span style={{ fontSize: 12, color: "#555" }}>metres</span>
+                  </div>
+                  <button type="button"
+                    onClick={() => {
+                      const w = parseFloat(pendingRoadWidth);
+                      if (!pendingRoadEdge || isNaN(w) || w < 1) return;
+                      pushHistory();
+                      setRoads((prev) => [...prev, {
+                        id: crypto.randomUUID(),
+                        type: selectedRoadType,
+                        edge: pendingRoadEdge,
+                        widthMeters: w,
+                        showArrows: false,
+                      }]);
+                      setPendingRoadEdge(null);
+                    }}
+                    style={{
+                      width: "100%", padding: "7px 0", background: "#1e3a5f",
+                      color: "#fff", border: "none", borderRadius: 8,
+                      cursor: "pointer", fontSize: 12, fontWeight: 700, marginBottom: 6,
+                    }}>Add Road</button>
+                  <button type="button"
+                    onClick={() => setPendingRoadEdge(null)}
+                    style={{
+                      width: "100%", padding: "6px 0", background: "#fff",
+                      color: "#666", border: "1px solid #ddd", borderRadius: 8,
+                      cursor: "pointer", fontSize: 12,
+                    }}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ background: "#f8f9fa", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "#666", lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 700, color: "#444", marginBottom: 4 }}>How to draw:</div>
+                  <div>1. Select road type above</div>
+                  <div>2. Click and drag on the map to draw one edge</div>
+                  <div>3. Release to set the width</div>
+                  <div style={{ marginTop: 6, color: "#888" }}>Roads sit beneath all other elements</div>
+                </div>
+              )}
+
+              {/* List of placed roads */}
+              {roads.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Placed Roads</div>
+                  {roads.map((r) => {
+                    const rt = ROAD_TYPES.find(x => x.id === r.type) ?? ROAD_TYPES[0];
+                    return (
+                      <div key={r.id} style={{
+                        display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
+                        border: selectedRoadId === r.id ? "1.5px solid #1e3a5f" : "1px solid #eee",
+                        borderRadius: 8, background: selectedRoadId === r.id ? "#f0f4ff" : "#fff",
+                        marginBottom: 4, cursor: "pointer",
+                      }} onClick={() => setSelectedRoadId(selectedRoadId === r.id ? null : r.id)}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#111" }}>{rt.label}</div>
+                          <div style={{ fontSize: 10, color: "#888" }}>{r.widthMeters}m</div>
+                        </div>
+                        <button type="button" title="Toggle arrows"
+                          onClick={(ev) => { ev.stopPropagation(); pushHistory(); setRoads((prev) => prev.map(x => x.id === r.id ? { ...x, showArrows: !x.showArrows } : x)); }}
+                          style={{ background: r.showArrows ? "#1e3a5f" : "#f0f0f0", color: r.showArrows ? "#fff" : "#666",
+                            border: "none", borderRadius: 5, padding: "2px 6px", cursor: "pointer", fontSize: 10, fontWeight: 700 }}>
+                          ↑
+                        </button>
+                        <button type="button" title="Delete road"
+                          onClick={(ev) => { ev.stopPropagation(); pushHistory(); setRoads((prev) => prev.filter(x => x.id !== r.id)); if (selectedRoadId === r.id) setSelectedRoadId(null); }}
+                          style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 14, padding: "0 2px" }}>
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ===== Map wrapper (relative) so Title Boxes can be absolute above it ===== */}
  <div
   ref={exportOverlayRef}
@@ -9206,7 +9522,9 @@ draggingCursor:
       ? "grabbing"
     : signHoveredId
       ? "pointer"
-      : (activeTool || isConesToolActive || isMeasToolActive || isSignsToolActive)
+      : (activeTool === "roads")
+        ? (isDrawingRoad ? "crosshair" : "crosshair")
+        : (activeTool || isConesToolActive || isMeasToolActive || isSignsToolActive)
         ? "crosshair"
         : mapCursor,
 
@@ -9466,6 +9784,128 @@ draggingCursor:
                   </React.Fragment>
                 );
               })}
+              {/* =========================
+    Roads (drawn) — rendered below all other elements
+========================= */}
+{roads.map((road) => {
+  if (!road.edge || road.edge.length < 2) return null;
+  const poly = computeRoadPolygon(road.edge, road.widthMeters);
+  const center = computeRoadCenterLine(road.edge, road.widthMeters);
+  const isSelected = selectedRoadId === road.id;
+
+  // Center line options by road type
+  let centerLines = null;
+  const basePolyOpts = { geodesic: true, clickable: false };
+
+  if (road.type === "one_way") {
+    // no center line, just edge lines
+  } else if (road.type === "two_way_dashed") {
+    centerLines = [(
+      <PolylineF key="c" path={center} options={{
+        ...basePolyOpts, strokeColor: "#fff", strokeWeight: 2, strokeOpacity: 0.9,
+        icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3.5 }, offset: "0", repeat: "18px" }],
+      }} />
+    )];
+  } else if (road.type === "two_way_solid_yellow") {
+    centerLines = [(
+      <PolylineF key="c" path={center} options={{ ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2.5, strokeOpacity: 1 }} />
+    )];
+  } else if (road.type === "two_way_double_yellow") {
+    const innerOff = perpOffsetEdge(center, 0.3, 1);
+    const outerOff = perpOffsetEdge(center, 0.3, -1);
+    centerLines = [
+      <PolylineF key="c1" path={innerOff} options={{ ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2, strokeOpacity: 1 }} />,
+      <PolylineF key="c2" path={outerOff} options={{ ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2, strokeOpacity: 1 }} />,
+    ];
+  } else if (road.type === "two_way_dashed_yellow") {
+    centerLines = [(
+      <PolylineF key="c" path={center} options={{
+        ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2.5, strokeOpacity: 0,
+        icons: [{ icon: { path: "M 0,-1 0,1", strokeColor: "#f5c518", strokeOpacity: 1, scale: 3.5 }, offset: "0", repeat: "18px" }],
+      }} />
+    )];
+  } else if (road.type === "multi_lane") {
+    const q1 = computeRoadCenterLine(road.edge, road.widthMeters * 0.25);
+    const q3 = computeRoadCenterLine(road.edge, road.widthMeters * 0.75);
+    centerLines = [
+      <PolylineF key="c" path={center} options={{ ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2, strokeOpacity: 1 }} />,
+      <PolylineF key="q1" path={q1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.7,
+        icons: [{ icon: { path: "M 0,-1 0,1", scale: 3 }, offset: "0", repeat: "16px" }] }} />,
+      <PolylineF key="q3" path={q3} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.7,
+        icons: [{ icon: { path: "M 0,-1 0,1", scale: 3 }, offset: "0", repeat: "16px" }] }} />,
+    ];
+  }
+
+  // Direction arrows along center (every ~30m along path)
+  let arrowMarkers = null;
+  if (road.showArrows) {
+    const arrowPath = [];
+    for (let i = 0; i < center.length - 1; i++) {
+      const a = center[i], b = center[i+1];
+      const dx = (b.lng - a.lng) * Math.cos(a.lat * Math.PI / 180) * 111320;
+      const dy = (b.lat - a.lat) * 111320;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > 15) {
+        arrowPath.push({ lat: (a.lat+b.lat)/2, lng: (a.lng+b.lng)/2 });
+      }
+    }
+    arrowMarkers = (
+      <PolylineF path={center} options={{
+        ...basePolyOpts, strokeOpacity: 0,
+        icons: [{
+          icon: { path: window.google?.maps?.SymbolPath?.FORWARD_OPEN_ARROW ?? "M 0,0 -1,-2.5 0,-1 1,-2.5 z",
+            strokeColor: "#fff", strokeWeight: 2, scale: 3, fillOpacity: 0 },
+          repeat: "50px", offset: "25px",
+        }],
+      }} />
+    );
+  }
+
+  return (
+    <React.Fragment key={road.id}>
+      <PolygonF
+        path={poly}
+        options={{
+          fillColor: "#4a4a4a",
+          fillOpacity: isSelected ? 0.97 : 0.93,
+          strokeColor: isSelected ? "#f97316" : "#333",
+          strokeWeight: isSelected ? 2.5 : 1,
+          strokeOpacity: 1,
+          zIndex: 1,
+          clickable: activeTool === "roads",
+        }}
+        onClick={() => activeTool === "roads" && setSelectedRoadId(isSelected ? null : road.id)}
+      />
+      {/* edge lines (white) */}
+      <PolylineF path={road.edge} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
+      <PolylineF path={perpOffsetEdge(road.edge, road.widthMeters, 1)} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
+      {/* center markings */}
+      {centerLines}
+      {arrowMarkers}
+    </React.Fragment>
+  );
+})}
+
+{/* Road freehand draft preview */}
+{isDrawingRoad && roadDraftPoints.length > 1 && (
+  <PolylineF
+    path={roadDraftPoints}
+    options={{ strokeColor: "#f97316", strokeWeight: 3, strokeOpacity: 0.8, geodesic: true, zIndex: 9999, clickable: false }}
+  />
+)}
+
+{/* Pending road preview (after drawing, before confirming width) */}
+{pendingRoadEdge && pendingRoadEdge.length > 1 && (() => {
+  const w = parseFloat(pendingRoadWidth) || 7.4;
+  const poly = computeRoadPolygon(pendingRoadEdge, w);
+  return (
+    <PolygonF
+      path={poly}
+      options={{ fillColor: "#4a4a4a", fillOpacity: 0.7, strokeColor: "#f97316", strokeWeight: 2, strokeOpacity: 1, zIndex: 9998, clickable: false }}
+    />
+  );
+})()}
+
               {/* =========================
     Work Areas (saved)
 ========================= */}
