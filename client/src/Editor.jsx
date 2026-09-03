@@ -2313,6 +2313,7 @@ const [workHover, setWorkHover] = useState(null);
   const [selectedConeId, setSelectedConeId] = useState(null); // id of selected drawn cone (for vertex editing)
   const coneSelectionGuardRef = useRef(false); // true = next map click came from a cone polyline, skip it
   const roadPolygonClickGuardRef = useRef(false); // true = next map click came from a road polygon, skip road-draw start
+  const markingOverlayClickGuardRef = useRef(false); // true = next map click came from a placed marking overlay, skip all road logic
 
   /* ================= Measurements tool ================= */
   const [measPanelOpen, setMeasPanelOpen] = useState(false);
@@ -5149,6 +5150,11 @@ if (activeTool === "insert:line" && dblClickGuardRef.current) return;
     const ll = e?.latLng;
     if (!ll) return;
     const p = { lat: ll.lat(), lng: ll.lng() };
+// ROADS: skip if click originated from a placed marking overlay
+if (activeTool === "roads" && markingOverlayClickGuardRef.current) {
+  markingOverlayClickGuardRef.current = false;
+  return;
+}
 // ROADS: if a pavement marking type is selected, single click places it
 if (activeTool === "roads" && selectedRoadMarkingType) {
   const detail = e?.domEvent?.detail;
@@ -12620,11 +12626,13 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                           onClick={(ev) => {
                             ev.preventDefault(); ev.stopPropagation();
+                            markingOverlayClickGuardRef.current = true;
                             setSelectedRoadMarkingId(marking.id);
                             setSelectedRoadMarkingType(null);
                           }}
                           onPointerDown={(ev) => {
                             ev.preventDefault(); ev.stopPropagation();
+                            markingOverlayClickGuardRef.current = true;
                             ev.currentTarget.setPointerCapture?.(ev.pointerId);
                             setSelectedRoadMarkingId(marking.id);
                             setSelectedRoadMarkingType(null);
