@@ -5583,11 +5583,13 @@ if (activeTool === "roads" && roadVerticesRef.current.length > 0) {
     const roadType = ROAD_TYPES.find(r => r.id === selectedRoadType) ?? ROAD_TYPES[0];
     pushHistory();
     const newId = crypto.randomUUID();
+    const initPoly = computeRoadPolygon(verts, roadType.defaultWidth);
     setRoads((prev) => [...prev, {
       id: newId,
       type: selectedRoadType,
       edge: verts,
       widthMeters: roadType.defaultWidth,
+      poly: initPoly,
       showArrows: false,
     }]);
     setSelectedRoadId(newId);
@@ -6491,9 +6493,12 @@ useEffect(() => {
         if (!nextPos) return;
         setRoads((prev) => prev.map((r) => {
           if (r.id !== roadId) return r;
-          const edge = [...r.edge];
-          edge[vi] = nextPos;
-          return { ...r, edge };
+          // Update poly (authoritative). Also keep edge in sync (first half of poly).
+          const poly = r.poly ? [...r.poly] : computeRoadPolygon(r.edge, r.widthMeters);
+          poly[vi] = nextPos;
+          const n = Math.floor(poly.length / 2);
+          const edge = poly.slice(0, n);
+          return { ...r, poly, edge };
         }));
       } else if (uiDrag.type === "resizeRoadWidth") {
         const { roadId, startWidth } = uiDrag;
@@ -6523,7 +6528,12 @@ useEffect(() => {
         const metersPerPx = (156543.03392 * Math.cos(a.lat * Math.PI / 180)) / Math.pow(2, zoom);
         const deltaMeters = dot * metersPerPx;
         const newWidth = Math.max(1.5, Math.min(40, startWidth + deltaMeters));
-        setRoads((prev) => prev.map((r) => r.id !== roadId ? r : { ...r, widthMeters: Math.round(newWidth * 10) / 10 }));
+        const roundedWidth = Math.round(newWidth * 10) / 10;
+        setRoads((prev) => prev.map((r) => {
+          if (r.id !== roadId) return r;
+          const newPoly = computeRoadPolygon(r.edge, roundedWidth);
+          return { ...r, widthMeters: roundedWidth, poly: newPoly };
+        }));
       } else if (uiDrag.type === "moveRoadMarking") {
         const { markingId, offsetPx } = uiDrag;
         const newCenterPx = { x: curPx.x - offsetPx.x, y: curPx.y - offsetPx.y };
@@ -9572,7 +9582,7 @@ const tileIconStyle = {
                     <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>Width (metres)</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                       <button type="button"
-                        onClick={() => { pushHistory(); setRoads(prev => prev.map(r => r.id === selectedRoadId ? { ...r, widthMeters: Math.max(1.5, Math.round((r.widthMeters - 0.5) * 10) / 10) } : r)); }}
+                        onClick={() => { pushHistory(); setRoads(prev => prev.map(r => { if (r.id !== selectedRoadId) return r; const w = Math.max(1.5, Math.round((r.widthMeters - 0.5) * 10) / 10); return { ...r, widthMeters: w, poly: computeRoadPolygon(r.edge, w) }; })); }}
                         style={{ width: 28, height: 28, border: "1px solid #ccc", borderRadius: 6, cursor: "pointer", fontSize: 16, background: "#fff" }}>−</button>
                       <input
                         type="number" min="1.5" max="40" step="0.1"
@@ -9581,13 +9591,13 @@ const tileIconStyle = {
                         onChange={(e) => setEditingRoadWidth(e.target.value)}
                         onBlur={() => {
                           const w = parseFloat(editingRoadWidth);
-                          if (!isNaN(w) && w >= 1.5 && w <= 40) { pushHistory(); setRoads(prev => prev.map(r => r.id === selectedRoadId ? { ...r, widthMeters: Math.round(w * 10) / 10 } : r)); }
+                          if (!isNaN(w) && w >= 1.5 && w <= 40) { const rw = Math.round(w * 10) / 10; pushHistory(); setRoads(prev => prev.map(r => r.id === selectedRoadId ? { ...r, widthMeters: rw, poly: computeRoadPolygon(r.edge, rw) } : r)); }
                           setEditingRoadWidth("");
                         }}
                         style={{ width: 60, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 6, fontSize: 13, textAlign: "center" }}
                       />
                       <button type="button"
-                        onClick={() => { pushHistory(); setRoads(prev => prev.map(r => r.id === selectedRoadId ? { ...r, widthMeters: Math.min(40, Math.round((r.widthMeters + 0.5) * 10) / 10) } : r)); }}
+                        onClick={() => { pushHistory(); setRoads(prev => prev.map(r => { if (r.id !== selectedRoadId) return r; const w = Math.min(40, Math.round((r.widthMeters + 0.5) * 10) / 10); return { ...r, widthMeters: w, poly: computeRoadPolygon(r.edge, w) }; })); }}
                         style={{ width: 28, height: 28, border: "1px solid #ccc", borderRadius: 6, cursor: "pointer", fontSize: 16, background: "#fff" }}>+</button>
                       <span style={{ fontSize: 11, color: "#888" }}>m</span>
                     </div>
@@ -10073,8 +10083,16 @@ draggingCursor:
 ========================= */}
 {roads.map((road) => {
   if (!road.edge || road.edge.length < 2) return null;
-  const poly = computeRoadPolygon(road.edge, road.widthMeters);
-  const center = computeRoadCenterLine(road.edge, road.widthMeters);
+  // poly is authoritative when stored; fall back to edge+width for legacy roads
+  const poly = road.poly ?? computeRoadPolygon(road.edge, road.widthMeters);
+  const polyN = Math.floor(poly.length / 2);
+  // Derive edges and center from poly
+  const edge1 = poly.slice(0, polyN);
+  const edge2 = poly.slice(polyN).reverse();
+  const center = edge1.map((v, i) => ({
+    lat: (v.lat + edge2[i].lat) / 2,
+    lng: (v.lng + edge2[i].lng) / 2,
+  }));
   const isSelected = selectedRoadId === road.id;
 
   // Center line options by road type
@@ -10109,8 +10127,8 @@ draggingCursor:
       }} />
     )];
   } else if (road.type === "multi_lane") {
-    const q1 = perpOffsetEdge(road.edge, road.widthMeters * 0.25, 1);
-    const q3 = perpOffsetEdge(road.edge, road.widthMeters * 0.75, 1);
+    const q1 = edge1.map((v, i) => ({ lat: v.lat * 0.75 + edge2[i].lat * 0.25, lng: v.lng * 0.75 + edge2[i].lng * 0.25 }));
+    const q3 = edge1.map((v, i) => ({ lat: v.lat * 0.25 + edge2[i].lat * 0.75, lng: v.lng * 0.25 + edge2[i].lng * 0.75 }));
     centerLines = [
       <PolylineF key="c" path={center} options={{ ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2, strokeOpacity: 1 }} />,
       <PolylineF key="q1" path={q1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0,
@@ -10159,13 +10177,13 @@ draggingCursor:
         onClick={() => activeTool === "roads" && !roadIsDrawing && setSelectedRoadId(isSelected ? null : road.id)}
       />
       {/* edge lines (white) */}
-      <PolylineF path={road.edge} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
-      <PolylineF path={perpOffsetEdge(road.edge, road.widthMeters, 1)} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
+      <PolylineF path={edge1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
+      <PolylineF path={edge2} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
       {/* center markings */}
       {centerLines}
       {arrowMarkers}
-      {/* Vertex handles — only when selected */}
-      {isSelected && activeTool === "roads" && !roadIsDrawing && road.edge.map((v, vi) => (
+      {/* Vertex handles — all poly corners, only when selected */}
+      {isSelected && activeTool === "roads" && !roadIsDrawing && poly.map((v, vi) => (
         <OverlayViewF key={`vh-${vi}`} position={v} mapPaneName="overlayMouseTarget">
           <div
             style={{
