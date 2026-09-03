@@ -1938,6 +1938,89 @@ const ROAD_TYPES = [
   { id: "multi_lane",         label: "Multi-Lane",          lanes: 4, defaultWidth: 14.8 },
 ];
 
+// BC MUTCD pavement marking types (white on asphalt)
+const ROAD_MARKING_TYPES = [
+  {
+    id: "marking_left",
+    label: "Left Arrow",
+    defaultW: 40,
+    defaultH: 90,
+    viewBox: "0 0 60 100",
+    // curved shaft from bottom-center, curves left, arrowhead pointing left
+    svgEl: (
+      <g>
+        <path d="M 30,100 L 30,58 Q 30,26 8,26" fill="none" stroke="white" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
+        <polygon points="0,26 20,10 20,42" fill="white"/>
+      </g>
+    ),
+  },
+  {
+    id: "marking_right",
+    label: "Right Arrow",
+    defaultW: 40,
+    defaultH: 90,
+    viewBox: "0 0 60 100",
+    // curved shaft from bottom-center, curves right, arrowhead pointing right
+    svgEl: (
+      <g>
+        <path d="M 30,100 L 30,58 Q 30,26 52,26" fill="none" stroke="white" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
+        <polygon points="60,26 40,10 40,42" fill="white"/>
+      </g>
+    ),
+  },
+  {
+    id: "marking_straight",
+    label: "Straight Arrow",
+    defaultW: 30,
+    defaultH: 90,
+    viewBox: "0 0 40 100",
+    svgEl: (
+      <g>
+        <line x1="20" y1="100" x2="20" y2="28" stroke="white" strokeWidth="13" strokeLinecap="round"/>
+        <polygon points="20,0 2,32 38,32" fill="white"/>
+      </g>
+    ),
+  },
+  {
+    id: "marking_cycle",
+    label: "Cycle Lane",
+    defaultW: 55,
+    defaultH: 90,
+    viewBox: "0 0 70 110",
+    // BC/MUTCD-style bicycle pavement marking (white)
+    svgEl: (
+      <g stroke="white" fill="none" strokeLinecap="round" strokeLinejoin="round">
+        {/* Head */}
+        <circle cx="52" cy="12" r="8" fill="white" stroke="none"/>
+        {/* Body leaning forward */}
+        <line x1="52" y1="20" x2="46" y2="46" strokeWidth="4"/>
+        {/* Arms to handlebar */}
+        <line x1="49" y1="32" x2="55" y2="46" strokeWidth="4"/>
+        {/* Handlebar */}
+        <line x1="49" y1="46" x2="62" y2="46" strokeWidth="4"/>
+        {/* Seat */}
+        <line x1="26" y1="52" x2="42" y2="52" strokeWidth="4"/>
+        {/* Seatpost (seat tube) */}
+        <line x1="34" y1="52" x2="32" y2="70" strokeWidth="4"/>
+        {/* Frame: top tube (seat to head tube) */}
+        <line x1="34" y1="52" x2="56" y2="60" strokeWidth="4"/>
+        {/* Frame: down tube (head tube to BB) */}
+        <line x1="56" y1="60" x2="32" y2="70" strokeWidth="4"/>
+        {/* Frame: chain stay (BB to rear axle) */}
+        <line x1="32" y1="70" x2="14" y2="92" strokeWidth="4"/>
+        {/* Frame: seat stay (seat lug to rear axle) */}
+        <line x1="34" y1="52" x2="14" y2="92" strokeWidth="4"/>
+        {/* Fork */}
+        <line x1="56" y1="60" x2="58" y2="92" strokeWidth="4"/>
+        {/* Rear wheel */}
+        <circle cx="14" cy="92" r="14" strokeWidth="3.5"/>
+        {/* Front wheel */}
+        <circle cx="58" cy="92" r="14" strokeWidth="3.5"/>
+      </g>
+    ),
+  },
+];
+
 function rdpSimplify(pts, eps = 0.000003) {
   if (pts.length < 3) return pts;
   const last = pts.length - 1;
@@ -2327,9 +2410,12 @@ useEffect(() => {
   const [arrowHoveredId, setArrowHoveredId]       = useState(null);
 
   /* ================= Roads tool ================= */
-  const [roadsPanelOpen, setRoadsPanelOpen]       = useState(false);
-  const [selectedRoadType, setSelectedRoadType]   = useState(ROAD_TYPES[0].id);
-  const [roads, setRoads]                         = useState([]);
+  const [roadsPanelOpen, setRoadsPanelOpen]         = useState(false);
+  const [selectedRoadType, setSelectedRoadType]     = useState(ROAD_TYPES[0].id);
+  const [roads, setRoads]                           = useState([]);
+  const [placedRoadMarkings, setPlacedRoadMarkings] = useState([]);
+  const [selectedRoadMarkingId, setSelectedRoadMarkingId] = useState(null);
+  const [selectedRoadMarkingType, setSelectedRoadMarkingType] = useState(null);
   const [selectedRoadId, setSelectedRoadId]       = useState(null);
   const [roadIsDrawing, setRoadIsDrawing]         = useState(false);
   const roadVerticesRef                           = useRef([]);
@@ -2626,6 +2712,7 @@ const makeSnapshot = () => ({
   placedSigns,
   placedArrows,
   roads,
+  placedRoadMarkings,
 
   // Tools / Inserts
   legendBoxes,
@@ -2650,6 +2737,7 @@ const applySnapshot = (s) => {
     setMeasurements(s.measurements ?? []);
     setPlacedSigns(s.placedSigns ?? []);
     setRoads(s.roads ?? []);
+    setPlacedRoadMarkings(s.placedRoadMarkings ?? []);
     // Migrate legacy arrow data: point → points[], absolute pos → relative dLat/dLng
     setPlacedArrows((s.placedArrows ?? []).map((a) => {
       let pts = a.points ?? null;
@@ -2869,6 +2957,14 @@ const doDelete = React.useCallback(() => {
     return;
   }
 
+  // delete selected road marking
+  if (selectedRoadMarkingId) {
+    pushHistory();
+    setPlacedRoadMarkings((prev) => prev.filter((m) => m.id !== selectedRoadMarkingId));
+    setSelectedRoadMarkingId(null);
+    return;
+  }
+
   // delete “Tools / Signs / Arrow / Scale” via selectedEntity
   if (!selectedEntity) return;
 
@@ -2897,7 +2993,7 @@ const doDelete = React.useCallback(() => {
   }
 
   setSelectedEntity(null);
-}, [selectedInsertId, selectedWorkAreaId, selectedEntity]);
+}, [selectedInsertId, selectedWorkAreaId, selectedEntity, selectedRoadMarkingId]);
 
 
 
@@ -2988,6 +3084,7 @@ function promptEditInsertText(obj) {
   workAreas?.forEach((wa)       => wa.path?.forEach(push));
   placedArrows?.forEach((a)     => a.points?.forEach(push));
   roads?.forEach((r)            => r.edge?.forEach(push));
+  placedRoadMarkings?.forEach((m) => push(m.pos));
   northArrows?.forEach((na)     => push(na.pos));
   scales?.forEach((sc)          => push(sc.pos));
   legendBoxes?.forEach((lb)     => push(lb.pos));
@@ -5061,6 +5158,28 @@ if (activeTool === "insert:line" && dblClickGuardRef.current) return;
     const ll = e?.latLng;
     if (!ll) return;
     const p = { lat: ll.lat(), lng: ll.lng() };
+// ROADS: if a pavement marking type is selected, single click places it
+if (activeTool === "roads" && selectedRoadMarkingType) {
+  const detail = e?.domEvent?.detail;
+  if (detail === 2) return;
+  const mt = ROAD_MARKING_TYPES.find(m => m.id === selectedRoadMarkingType);
+  if (mt) {
+    pushHistory();
+    const newId = crypto.randomUUID();
+    setPlacedRoadMarkings(prev => [...prev, {
+      id: newId,
+      type: selectedRoadMarkingType,
+      pos: p,
+      wPx: mt.defaultW,
+      hPx: mt.defaultH,
+      rotDeg: 0,
+      zRef: zoomNow,
+    }]);
+    setSelectedRoadMarkingId(newId);
+  }
+  return;
+}
+
 // ROADS: click-to-place vertices (use ref for drawing state — avoids stale closure)
 if (activeTool === "roads") {
   const detail = e?.domEvent?.detail;
@@ -5963,7 +6082,10 @@ useEffect(() => {
         uiDrag.type === "resizeArrow" ||
         uiDrag.type === "rotateArrow" ||
         uiDrag.type === "moveArrowPoint" ||
-        uiDrag.type === "rotateArrowPoint"
+        uiDrag.type === "rotateArrowPoint" ||
+        uiDrag.type === "moveRoadMarking" ||
+        uiDrag.type === "resizeRoadMarking" ||
+        uiDrag.type === "rotateRoadMarking"
       ) {
         pushHistory();
       }
@@ -5982,7 +6104,10 @@ useEffect(() => {
         uiDrag.type === "moveArrowPoint" ||
         uiDrag.type === "rotateArrowPoint" ||
         uiDrag.type === "moveRoadVertex" ||
-        uiDrag.type === "resizeRoadWidth"
+        uiDrag.type === "resizeRoadWidth" ||
+        uiDrag.type === "moveRoadMarking" ||
+        uiDrag.type === "resizeRoadMarking" ||
+        uiDrag.type === "rotateRoadMarking"
       ) {
         lockMapInteractions(false);
       }
@@ -6039,7 +6164,9 @@ useEffect(() => {
       t !== "resizeExportArea" &&
       t !== "moveExportArea" &&
       t !== "moveRoadVertex" &&
-      t !== "resizeRoadWidth"
+      t !== "resizeRoadWidth" &&
+      t !== "moveRoadMarking" &&
+      t !== "resizeRoadMarking"
     ) {
       return;
     }
@@ -6406,6 +6533,33 @@ useEffect(() => {
         const deltaMeters = dot * metersPerPx;
         const newWidth = Math.max(1.5, Math.min(40, startWidth + deltaMeters));
         setRoads((prev) => prev.map((r) => r.id !== roadId ? r : { ...r, widthMeters: Math.round(newWidth * 10) / 10 }));
+      } else if (uiDrag.type === "moveRoadMarking") {
+        const { markingId, offsetPx } = uiDrag;
+        const newCenterPx = { x: curPx.x - offsetPx.x, y: curPx.y - offsetPx.y };
+        const nextPos = pxToLatLng(newCenterPx);
+        if (!nextPos) return;
+        setPlacedRoadMarkings((prev) =>
+          prev.map((m) => (m.id === markingId ? { ...m, pos: nextPos } : m))
+        );
+      } else if (uiDrag.type === "resizeRoadMarking") {
+        const { markingId, corner, startSize, startPointerPx } = uiDrag;
+        const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
+        const dx = curPx.x - startPointerPx.x;
+        const dy = curPx.y - startPointerPx.y;
+        const rotDeg = startSize?.rotDeg ?? 0;
+        const { dlx, dly } = signPointerDeltaToLocalDxDy(dx, dy, rotDeg);
+        const w0f = scalePx(startSize.wPx, zRef);
+        const h0f = scalePx(startSize.hPx, zRef);
+        let { wf, hf } = signApplyCornerDeltaToVisualWH(corner, w0f, h0f, dlx * 2, dly * 2);
+        const vmin = scalePx(20, zRef);
+        const vmax = scalePx(300, zRef);
+        wf = clamp(wf, vmin, vmax);
+        hf = clamp(hf, vmin, vmax);
+        const w = clamp(Math.round(unscalePx(wf, zRef)), 20, 300);
+        const h = clamp(Math.round(unscalePx(hf, zRef)), 20, 300);
+        setPlacedRoadMarkings((prev) =>
+          prev.map((m) => (m.id !== markingId ? m : { ...m, wPx: w, hPx: h }))
+        );
       }
     }
 
@@ -6536,6 +6690,50 @@ useEffect(() => {
       const nextDeg = (drag.startAngleDeg ?? 0) + live.accumulatedDeg;
       setPlacedArrows((prev) =>
         prev.map((a) => (a.id === drag.arrowId ? { ...a, rotDeg: nextDeg } : a))
+      );
+      if (ev.cancelable) ev.preventDefault();
+    }
+    function handleUp() {
+      lockMapInteractions(false);
+      pushHistory();
+      setUiDrag(null);
+    }
+    const tgt = document;
+    tgt.addEventListener("pointermove", handleMove, { passive: false, capture: true });
+    tgt.addEventListener("pointerup", handleUp, true);
+    tgt.addEventListener("pointercancel", handleUp, true);
+    return () => {
+      tgt.removeEventListener("pointermove", handleMove, true);
+      tgt.removeEventListener("pointerup", handleUp, true);
+      tgt.removeEventListener("pointercancel", handleUp, true);
+    };
+  }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
+
+  /* ================= Road Marking rotate ================= */
+  useEffect(() => {
+    if (!uiDrag || uiDrag.type !== "rotateRoadMarking") return;
+    if (!projectionReady) return;
+    const drag = uiDrag;
+    const { centerPx } = drag;
+    if (!centerPx) return;
+    const live = { lastAngleDeg: 0, accumulatedDeg: 0 };
+    function handleMove(ev) {
+      const srcEv = ev?.type === "pointermove" && typeof ev.getCoalescedEvents === "function"
+        ? (ev.getCoalescedEvents().slice(-1)[0] || ev) : ev;
+      const clientX = srcEv.clientX ?? srcEv.touches?.[0]?.clientX;
+      const clientY = srcEv.clientY ?? srcEv.touches?.[0]?.clientY;
+      if (clientX == null || clientY == null) return;
+      const curPx = clientToDivPx(clientX, clientY);
+      if (!curPx) return;
+      const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
+      let delta = angleNow - live.lastAngleDeg;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      live.lastAngleDeg = angleNow;
+      live.accumulatedDeg += delta;
+      const nextDeg = (drag.startAngleDeg ?? 0) + live.accumulatedDeg;
+      setPlacedRoadMarkings((prev) =>
+        prev.map((m) => (m.id === drag.markingId ? { ...m, rotDeg: nextDeg } : m))
       );
       if (ev.cancelable) ev.preventDefault();
     }
@@ -9338,6 +9536,39 @@ const tileIconStyle = {
                   );
                 })}
               </div>
+
+              {/* ── Pavement Markings ── */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 8, marginTop: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Pavement Markings</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
+                {ROAD_MARKING_TYPES.map((mt) => {
+                  const active = selectedRoadMarkingType === mt.id;
+                  return (
+                    <button key={mt.id} type="button"
+                      onClick={() => setSelectedRoadMarkingType(active ? null : mt.id)}
+                      style={{
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+                        padding: "8px 6px",
+                        border: active ? "2px solid #1e3a5f" : "1.5px solid #e5e5e5",
+                        borderRadius: 8, background: active ? "#f0f4ff" : "#fff",
+                        cursor: "pointer", textAlign: "center",
+                      }}>
+                      {/* SVG preview on asphalt */}
+                      <div style={{ width: 36, height: 52, background: "#3a3a3a", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <svg viewBox={mt.viewBox} width={mt.id === "marking_cycle" ? 28 : 24} height={mt.id === "marking_cycle" ? 44 : 44} style={{ display: "block" }}>
+                          {mt.svgEl}
+                        </svg>
+                      </div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: active ? "#1e3a5f" : "#444", lineHeight: 1.2 }}>{mt.label}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedRoadMarkingType && (
+                <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "7px 10px", marginBottom: 10, fontSize: 11, color: "#92400e" }}>
+                  Click anywhere on the map to place. Click again to add more.
+                  <button type="button" onClick={() => setSelectedRoadMarkingType(null)} style={{ display: "block", marginTop: 4, background: "none", border: "none", color: "#1e3a5f", fontWeight: 700, cursor: "pointer", fontSize: 11, padding: 0 }}>✕ Stop placing</button>
+                </div>
+              )}
 
               {selectedRoadId && (() => {
                 // Selected road properties editor
@@ -12303,6 +12534,196 @@ height: pendingPictureTool.hPx * elementScale,
                         </React.Fragment>
                       );
                     })}
+                  </React.Fragment>
+                );
+              })}
+
+              {/* ========================= ROAD MARKINGS ========================= */}
+              {placedRoadMarkings.map((marking) => {
+                const isSelected = selectedRoadMarkingId === marking.id;
+                const mt = ROAD_MARKING_TYPES.find(m => m.id === marking.type);
+                if (!mt) return null;
+                const markZRef = marking.zRef ?? ELEMENT_BASE_ZOOM;
+                const liveZoom = mapRef.current?.getZoom?.() ?? zoomNow;
+                const markW = Math.round((marking.wPx ?? mt.defaultW) * Math.pow(2, liveZoom - markZRef));
+                const markH = Math.round((marking.hPx ?? mt.defaultH) * Math.pow(2, liveZoom - markZRef));
+                const isMoving = uiDrag?.type === "moveRoadMarking" && uiDrag.markingId === marking.id;
+                const isResizing = uiDrag?.type === "resizeRoadMarking" && uiDrag.markingId === marking.id;
+                let resizeTx = 0, resizeTy = 0;
+                if (isResizing) {
+                  const _c = uiDrag.corner ?? "se";
+                  const _dW = markW - (uiDrag.startMarkW ?? markW);
+                  const _dH = markH - (uiDrag.startMarkH ?? markH);
+                  const pin = signResizeCenterOffsetPx(_c, _dW, _dH, marking.rotDeg ?? 0);
+                  resizeTx = pin.x; resizeTy = pin.y;
+                }
+                const HANDLE = 12, OFF = -6;
+                const corners = [
+                  { key: "nw", x: 0,     y: 0,     cursor: "nwse-resize" },
+                  { key: "ne", x: markW, y: 0,     cursor: "nesw-resize" },
+                  { key: "sw", x: 0,     y: markH, cursor: "nesw-resize" },
+                  { key: "se", x: markW, y: markH, cursor: "nwse-resize" },
+                ];
+                const isRotatingThis = uiDrag?.type === "rotateRoadMarking" && uiDrag.markingId === marking.id;
+                return (
+                  <React.Fragment key={marking.id}>
+                    <OverlayViewF
+                      position={marking.pos}
+                      mapPaneName="overlayMouseTarget"
+                      zIndex={93000}
+                    >
+                      <div style={{
+                        transform: `translate(calc(-50% + ${resizeTx}px), calc(-50% + ${resizeTy}px))`,
+                        position: "relative",
+                        display: "inline-block",
+                        overflow: "visible",
+                      }}>
+                        <div
+                          style={{
+                            transform: `rotate(${marking.rotDeg ?? 0}deg)`,
+                            transformOrigin: "center center",
+                            width: markW,
+                            height: markH,
+                            pointerEvents: "auto",
+                            cursor: isMoving ? "grabbing" : "pointer",
+                            userSelect: "none",
+                            position: "relative",
+                          }}
+                          onClick={(ev) => {
+                            ev.preventDefault(); ev.stopPropagation();
+                            setSelectedRoadMarkingId(prev => prev === marking.id ? null : marking.id);
+                            setSelectedRoadMarkingType(null);
+                          }}
+                          onPointerDown={(ev) => {
+                            ev.preventDefault(); ev.stopPropagation();
+                            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+                            setSelectedRoadMarkingId(marking.id);
+                            setSelectedRoadMarkingType(null);
+                            if (!projectionReady) return;
+                            const centerPx = latLngToPx(marking.pos);
+                            if (!centerPx) return;
+                            const grabPx = clientToDivPx(ev.clientX, ev.clientY);
+                            if (!grabPx) return;
+                            lockMapInteractions(true);
+                            setUiDrag({
+                              type: "moveRoadMarking",
+                              markingId: marking.id,
+                              offsetPx: { x: grabPx.x - centerPx.x, y: grabPx.y - centerPx.y },
+                            });
+                          }}
+                        >
+                          {/* SVG marking */}
+                          <svg
+                            viewBox={mt.viewBox}
+                            width={markW}
+                            height={markH}
+                            style={{ display: "block", pointerEvents: "none" }}
+                          >
+                            {mt.svgEl}
+                          </svg>
+
+                          {/* Selection handles */}
+                          {isSelected && projectionReady && (
+                            <div style={{
+                              position: "absolute", left: 0, top: 0,
+                              width: markW, height: markH,
+                              overflow: "visible", pointerEvents: "none",
+                            }}>
+                              {/* Border */}
+                              <div style={{
+                                position: "absolute", left: 0, top: 0,
+                                width: markW, height: markH,
+                                border: "2px solid #7C3AED", borderRadius: 2,
+                                boxSizing: "border-box", pointerEvents: "none",
+                              }} />
+
+                              {/* Corner resize handles */}
+                              {corners.map((hnd) => (
+                                <div
+                                  key={hnd.key}
+                                  style={{
+                                    position: "absolute",
+                                    left: hnd.x + OFF, top: hnd.y + OFF,
+                                    width: HANDLE, height: HANDLE,
+                                    background: "#fff", border: "1.5px solid #7C3AED",
+                                    borderRadius: 2, cursor: hnd.cursor,
+                                    pointerEvents: "auto", zIndex: 100,
+                                  }}
+                                  onPointerDown={(e) => {
+                                    e.preventDefault(); e.stopPropagation();
+                                    e.currentTarget.setPointerCapture?.(e.pointerId);
+                                    if (!projectionReady) return;
+                                    const startPointerPx = clientToDivPx(e.clientX, e.clientY);
+                                    if (!startPointerPx) return;
+                                    lockMapInteractions(true);
+                                    setUiDrag({
+                                      type: "resizeRoadMarking",
+                                      markingId: marking.id,
+                                      corner: hnd.key,
+                                      startSize: { wPx: marking.wPx, hPx: marking.hPx, zRef: markZRef, rotDeg: marking.rotDeg ?? 0 },
+                                      startPointerPx,
+                                      startMarkW: markW,
+                                      startMarkH: markH,
+                                    });
+                                  }}
+                                />
+                              ))}
+
+                              {/* Rotate handle */}
+                              <div
+                                style={{
+                                  position: "absolute", left: "50%", top: markH + 8,
+                                  transform: "translate(-50%, 0)",
+                                  width: 28, height: 28, borderRadius: 999,
+                                  border: isRotatingThis ? "1.5px solid #2563EB" : "1px solid rgba(17,24,39,0.25)",
+                                  background: isRotatingThis ? "rgba(37,99,235,0.12)" : "rgba(255,255,255,0.92)",
+                                  display: "grid", placeItems: "center",
+                                  cursor: isRotatingThis ? "grabbing" : "grab",
+                                  pointerEvents: "auto",
+                                  boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+                                  zIndex: 100, touchAction: "none", userSelect: "none",
+                                }}
+                                onPointerDown={(e) => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                                  if (!projectionReady) return;
+                                  const centerPx = latLngToPx(marking.pos);
+                                  if (!centerPx) return;
+                                  lockMapInteractions(true);
+                                  setUiDrag({
+                                    type: "rotateRoadMarking",
+                                    markingId: marking.id,
+                                    centerPx,
+                                    startAngleDeg: marking.rotDeg ?? 0,
+                                  });
+                                }}
+                              >
+                                <RotateIcon active={isRotatingThis} />
+                              </div>
+
+                              {/* Delete button */}
+                              <div
+                                style={{
+                                  position: "absolute", top: -8, right: -8,
+                                  width: 18, height: 18, borderRadius: "50%",
+                                  background: "#EF4444", color: "#fff",
+                                  fontSize: 11, fontWeight: "bold",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  cursor: "pointer", pointerEvents: "auto", zIndex: 101,
+                                }}
+                                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                onClick={(e) => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  pushHistory();
+                                  setPlacedRoadMarkings((prev) => prev.filter((m) => m.id !== marking.id));
+                                  setSelectedRoadMarkingId(null);
+                                }}
+                              >×</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </OverlayViewF>
                   </React.Fragment>
                 );
               })}
