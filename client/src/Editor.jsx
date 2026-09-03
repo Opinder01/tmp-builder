@@ -2335,8 +2335,6 @@ useEffect(() => {
   const roadVerticesRef                           = useRef([]);
   const [roadVerticesState, setRoadVerticesState] = useState([]);
   const [roadHoverPoint, setRoadHoverPoint]       = useState(null);
-  const [pendingRoadEdge, setPendingRoadEdge]     = useState(null);
-  const [pendingRoadWidth, setPendingRoadWidth]   = useState("7.4");
   const [editingRoadWidth, setEditingRoadWidth]   = useState("");
 
   // ── Sync custom connector overlays whenever sign/stand data changes ─────────
@@ -5064,7 +5062,7 @@ if (activeTool === "insert:line" && dblClickGuardRef.current) return;
     if (!ll) return;
     const p = { lat: ll.lat(), lng: ll.lng() };
 // ROADS: click-to-place vertices
-if (activeTool === "roads" && !pendingRoadEdge) {
+if (activeTool === "roads") {
   const detail = e?.domEvent?.detail;
   if (detail === 2) return; // ignore 2nd click of dblclick
   if (!roadIsDrawing) {
@@ -5469,8 +5467,16 @@ if (activeTool === "roads" && roadIsDrawing) {
   setRoadHoverPoint(null);
   if (verts.length >= 2) {
     const roadType = ROAD_TYPES.find(r => r.id === selectedRoadType) ?? ROAD_TYPES[0];
-    setPendingRoadEdge(verts);
-    setPendingRoadWidth(String(roadType.defaultWidth));
+    pushHistory();
+    const newId = crypto.randomUUID();
+    setRoads((prev) => [...prev, {
+      id: newId,
+      type: selectedRoadType,
+      edge: verts,
+      widthMeters: roadType.defaultWidth,
+      showArrows: false,
+    }]);
+    setSelectedRoadId(newId);
   }
   return;
 }
@@ -9324,49 +9330,7 @@ const tileIconStyle = {
                 })}
               </div>
 
-              {/* Pending width confirm after drawing */}
-              {pendingRoadEdge ? (
-                <div style={{ background: "#f0f4ff", border: "1px solid #c7d5f5", borderRadius: 8, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a5f", marginBottom: 8 }}>Set Road Width</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                    <input
-                      type="number" min="1" max="40" step="0.1"
-                      value={pendingRoadWidth}
-                      onChange={(e) => setPendingRoadWidth(e.target.value)}
-                      style={{ width: 70, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 6, fontSize: 13 }}
-                    />
-                    <span style={{ fontSize: 12, color: "#555" }}>metres</span>
-                  </div>
-                  <button type="button"
-                    onClick={() => {
-                      const w = parseFloat(pendingRoadWidth);
-                      if (!pendingRoadEdge || isNaN(w) || w < 1) return;
-                      pushHistory();
-                      const newId = crypto.randomUUID();
-                      setRoads((prev) => [...prev, {
-                        id: newId,
-                        type: selectedRoadType,
-                        edge: pendingRoadEdge,
-                        widthMeters: w,
-                        showArrows: false,
-                      }]);
-                      setPendingRoadEdge(null);
-                      setSelectedRoadId(newId);
-                    }}
-                    style={{
-                      width: "100%", padding: "7px 0", background: "#1e3a5f",
-                      color: "#fff", border: "none", borderRadius: 8,
-                      cursor: "pointer", fontSize: 12, fontWeight: 700, marginBottom: 6,
-                    }}>Add Road</button>
-                  <button type="button"
-                    onClick={() => setPendingRoadEdge(null)}
-                    style={{
-                      width: "100%", padding: "6px 0", background: "#fff",
-                      color: "#666", border: "1px solid #ddd", borderRadius: 8,
-                      cursor: "pointer", fontSize: 12,
-                    }}>Cancel</button>
-                </div>
-              ) : selectedRoadId && (() => {
+              {selectedRoadId && (() => {
                 // Selected road properties editor
                 const selRoad = roads.find(r => r.id === selectedRoadId);
                 if (!selRoad) return null;
@@ -9884,7 +9848,7 @@ draggingCursor:
 
   // Center line options by road type
   let centerLines = null;
-  const basePolyOpts = { geodesic: true, clickable: false };
+  const basePolyOpts = { geodesic: true, clickable: false, zIndex: 3 };
 
   if (road.type === "one_way") {
     // no center line, just edge lines
@@ -9914,14 +9878,14 @@ draggingCursor:
       }} />
     )];
   } else if (road.type === "multi_lane") {
-    const q1 = computeRoadCenterLine(road.edge, road.widthMeters * 0.25);
-    const q3 = computeRoadCenterLine(road.edge, road.widthMeters * 0.75);
+    const q1 = perpOffsetEdge(road.edge, road.widthMeters * 0.25, 1);
+    const q3 = perpOffsetEdge(road.edge, road.widthMeters * 0.75, 1);
     centerLines = [
       <PolylineF key="c" path={center} options={{ ...basePolyOpts, strokeColor: "#f5c518", strokeWeight: 2, strokeOpacity: 1 }} />,
-      <PolylineF key="q1" path={q1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.7,
-        icons: [{ icon: { path: "M 0,-1 0,1", scale: 3 }, offset: "0", repeat: "16px" }] }} />,
-      <PolylineF key="q3" path={q3} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.7,
-        icons: [{ icon: { path: "M 0,-1 0,1", scale: 3 }, offset: "0", repeat: "16px" }] }} />,
+      <PolylineF key="q1" path={q1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0,
+        icons: [{ icon: { path: "M 0,-1 0,1", strokeColor: "#fff", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "16px" }] }} />,
+      <PolylineF key="q3" path={q3} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0,
+        icons: [{ icon: { path: "M 0,-1 0,1", strokeColor: "#fff", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "16px" }] }} />,
     ];
   }
 
@@ -10040,17 +10004,6 @@ draggingCursor:
   );
 })()}
 
-{/* Pending road preview (after drawing, before confirming width) */}
-{pendingRoadEdge && pendingRoadEdge.length > 1 && (() => {
-  const w = parseFloat(pendingRoadWidth) || 7.4;
-  const poly = computeRoadPolygon(pendingRoadEdge, w);
-  return (
-    <PolygonF
-      path={poly}
-      options={{ fillColor: "#4a4a4a", fillOpacity: 0.7, strokeColor: "#f97316", strokeWeight: 2, strokeOpacity: 1, zIndex: 9998, clickable: false }}
-    />
-  );
-})()}
 
               {/* =========================
     Work Areas (saved)
