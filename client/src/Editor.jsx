@@ -5171,9 +5171,11 @@ if (activeTool === "roads" && selectedRoadMarkingType) {
   return;
 }
 
-// ROADS: clicking empty map deselects any selected marking
+// ROADS: clicking empty map deselects any selected marking — return so the
+// click does NOT also fall through into the road-drawing block below
 if (activeTool === "roads" && selectedRoadMarkingId) {
   setSelectedRoadMarkingId(null);
+  return;
 }
 
 // ROADS: click-to-place vertices (use ref for drawing state — avoids stale closure)
@@ -9558,7 +9560,7 @@ const tileIconStyle = {
                   const active = selectedRoadMarkingType === mt.id;
                   return (
                     <button key={mt.id} type="button"
-                      onClick={() => setSelectedRoadMarkingType(active ? null : mt.id)}
+                      onClick={() => { setSelectedRoadMarkingType(active ? null : mt.id); setSelectedRoadMarkingId(null); }}
                       style={{
                         display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
                         padding: "8px 6px",
