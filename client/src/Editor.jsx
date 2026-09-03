@@ -9957,9 +9957,7 @@ draggingCursor:
         options={{
           fillColor: "#4a4a4a",
           fillOpacity: isSelected ? 0.97 : 0.93,
-          strokeColor: isSelected ? "#f97316" : "#333",
-          strokeWeight: isSelected ? 2.5 : 1,
-          strokeOpacity: 1,
+          strokeOpacity: 0,
           zIndex: 1,
           clickable: activeTool === "roads",
         }}
