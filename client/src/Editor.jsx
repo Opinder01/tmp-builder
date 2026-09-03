@@ -5061,11 +5061,11 @@ if (activeTool === "insert:line" && dblClickGuardRef.current) return;
     const ll = e?.latLng;
     if (!ll) return;
     const p = { lat: ll.lat(), lng: ll.lng() };
-// ROADS: click-to-place vertices
+// ROADS: click-to-place vertices (use ref for drawing state — avoids stale closure)
 if (activeTool === "roads") {
   const detail = e?.domEvent?.detail;
   if (detail === 2) return; // ignore 2nd click of dblclick
-  if (!roadIsDrawing) {
+  if (roadVerticesRef.current.length === 0) {
     setSelectedRoadId(null);
     roadVerticesRef.current = [p];
     setRoadVerticesState([p]);
@@ -5452,8 +5452,8 @@ if (measEdit) return;
   const ll = e?.latLng;
   const p = ll ? { lat: ll.lat(), lng: ll.lng() } : null;
 
-// ROADS: double-click finalizes the edge
-if (activeTool === "roads" && roadIsDrawing) {
+// ROADS: double-click finalizes the edge (use ref — avoids stale closure from rapid clicks)
+if (activeTool === "roads" && roadVerticesRef.current.length > 0) {
   let verts = [...roadVerticesRef.current];
   // remove the duplicate last vertex that single-click added just before dblclick
   if (verts.length >= 2) {
@@ -5466,7 +5466,11 @@ if (activeTool === "roads" && roadIsDrawing) {
   setRoadVerticesState([]);
   setRoadIsDrawing(false);
   setRoadHoverPoint(null);
-  if (verts.length >= 2) {
+  // require at least 2 vertices with meaningful separation (~1m) to prevent degenerate placeholders
+  const minD2 = (1 / 111320) ** 2;
+  const hasSpan = verts.length >= 2 && verts.some((v, i) => i > 0 &&
+    (v.lat - verts[0].lat)**2 + (v.lng - verts[0].lng)**2 > minD2);
+  if (hasSpan) {
     const roadType = ROAD_TYPES.find(r => r.id === selectedRoadType) ?? ROAD_TYPES[0];
     pushHistory();
     const newId = crypto.randomUUID();
