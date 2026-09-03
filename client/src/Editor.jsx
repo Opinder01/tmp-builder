@@ -1981,44 +1981,6 @@ const ROAD_MARKING_TYPES = [
       </g>
     ),
   },
-  {
-    id: "marking_cycle",
-    label: "Cycle Lane",
-    defaultW: 55,
-    defaultH: 90,
-    viewBox: "0 0 70 110",
-    // BC/MUTCD-style bicycle pavement marking (white)
-    svgEl: (
-      <g stroke="white" fill="none" strokeLinecap="round" strokeLinejoin="round">
-        {/* Head */}
-        <circle cx="52" cy="12" r="8" fill="white" stroke="none"/>
-        {/* Body leaning forward */}
-        <line x1="52" y1="20" x2="46" y2="46" strokeWidth="4"/>
-        {/* Arms to handlebar */}
-        <line x1="49" y1="32" x2="55" y2="46" strokeWidth="4"/>
-        {/* Handlebar */}
-        <line x1="49" y1="46" x2="62" y2="46" strokeWidth="4"/>
-        {/* Seat */}
-        <line x1="26" y1="52" x2="42" y2="52" strokeWidth="4"/>
-        {/* Seatpost (seat tube) */}
-        <line x1="34" y1="52" x2="32" y2="70" strokeWidth="4"/>
-        {/* Frame: top tube (seat to head tube) */}
-        <line x1="34" y1="52" x2="56" y2="60" strokeWidth="4"/>
-        {/* Frame: down tube (head tube to BB) */}
-        <line x1="56" y1="60" x2="32" y2="70" strokeWidth="4"/>
-        {/* Frame: chain stay (BB to rear axle) */}
-        <line x1="32" y1="70" x2="14" y2="92" strokeWidth="4"/>
-        {/* Frame: seat stay (seat lug to rear axle) */}
-        <line x1="34" y1="52" x2="14" y2="92" strokeWidth="4"/>
-        {/* Fork */}
-        <line x1="56" y1="60" x2="58" y2="92" strokeWidth="4"/>
-        {/* Rear wheel */}
-        <circle cx="14" cy="92" r="14" strokeWidth="3.5"/>
-        {/* Front wheel */}
-        <circle cx="58" cy="92" r="14" strokeWidth="3.5"/>
-      </g>
-    ),
-  },
 ];
 
 function rdpSimplify(pts, eps = 0.000003) {
