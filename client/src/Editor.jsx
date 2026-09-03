@@ -5150,49 +5150,50 @@ if (activeTool === "insert:line" && dblClickGuardRef.current) return;
     const ll = e?.latLng;
     if (!ll) return;
     const p = { lat: ll.lat(), lng: ll.lng() };
-// ROADS: skip if click originated from a placed marking overlay
-if (activeTool === "roads" && markingOverlayClickGuardRef.current) {
-  markingOverlayClickGuardRef.current = false;
-  return;
-}
-// ROADS: if a pavement marking type is selected, single click places it
-if (activeTool === "roads" && selectedRoadMarkingType) {
-  const detail = e?.domEvent?.detail;
-  if (detail === 2) return;
-  const mt = ROAD_MARKING_TYPES.find(m => m.id === selectedRoadMarkingType);
-  if (mt) {
-    pushHistory();
-    const newId = crypto.randomUUID();
-    setPlacedRoadMarkings(prev => [...prev, {
-      id: newId,
-      type: selectedRoadMarkingType,
-      pos: p,
-      wPx: mt.defaultW,
-      hPx: mt.defaultH,
-      rotDeg: 0,
-      zRef: zoomNow,
-    }]);
-    setSelectedRoadMarkingId(newId);
-  }
-  return;
-}
-
-// ROADS: clicking empty map deselects any selected marking — return so the
-// click does NOT also fall through into the road-drawing block below
-if (activeTool === "roads" && selectedRoadMarkingId) {
-  setSelectedRoadMarkingId(null);
-  return;
-}
-
-// ROADS: click-to-place vertices (use ref for drawing state — avoids stale closure)
 if (activeTool === "roads") {
-  // Skip if this click came from a road polygon (polygon onClick already handled selection)
+  const detail = e?.domEvent?.detail;
+  if (detail === 2) return; // ignore double-click
+
+  // If click came from a marking overlay (guard set in onPointerDown) — skip everything
+  if (markingOverlayClickGuardRef.current) {
+    markingOverlayClickGuardRef.current = false;
+    return;
+  }
+
+  // If click came from a road polygon (guard set in polygon onClick) — skip road-draw start
   if (roadPolygonClickGuardRef.current) {
     roadPolygonClickGuardRef.current = false;
     return;
   }
-  const detail = e?.domEvent?.detail;
-  if (detail === 2) return; // ignore 2nd click of dblclick
+
+  // Pavement marking placement — takes priority over road drawing
+  if (selectedRoadMarkingType) {
+    const mt = ROAD_MARKING_TYPES.find(m => m.id === selectedRoadMarkingType);
+    if (mt) {
+      pushHistory();
+      const newId = crypto.randomUUID();
+      setPlacedRoadMarkings(prev => [...prev, {
+        id: newId,
+        type: selectedRoadMarkingType,
+        pos: p,
+        wPx: mt.defaultW,
+        hPx: mt.defaultH,
+        rotDeg: 0,
+        zRef: zoomNow,
+      }]);
+      setSelectedRoadMarkingId(newId);
+    }
+    return;
+  }
+
+  // Clicking empty map deselects any selected marking, then stops so road
+  // drawing doesn't also fire on the same click
+  if (selectedRoadMarkingId) {
+    setSelectedRoadMarkingId(null);
+    return;
+  }
+
+  // Road vertex placement / drawing
   if (roadVerticesRef.current.length === 0) {
     setSelectedRoadId(null);
     roadVerticesRef.current = [p];
@@ -9509,7 +9510,7 @@ const tileIconStyle = {
                   const active = selectedRoadType === rt.id;
                   return (
                     <button key={rt.id} type="button"
-                      onClick={() => setSelectedRoadType(rt.id)}
+                      onClick={() => { setSelectedRoadType(rt.id); setSelectedRoadMarkingType(null); setSelectedRoadMarkingId(null); }}
                       style={{
                         display: "flex", alignItems: "center", gap: 10,
                         padding: "7px 10px",
@@ -12626,7 +12627,6 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                           onClick={(ev) => {
                             ev.preventDefault(); ev.stopPropagation();
-                            markingOverlayClickGuardRef.current = true;
                             setSelectedRoadMarkingId(marking.id);
                             setSelectedRoadMarkingType(null);
                           }}
