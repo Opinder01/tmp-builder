@@ -5181,7 +5181,7 @@ if (activeTool === "roads") {
         rotDeg: 0,
         zRef: zoomNow,
       }]);
-      setSelectedRoadMarkingId(newId);
+      setSelectedRoadMarkingId(null); // don't auto-select — user is still placing
     }
     return;
   }
