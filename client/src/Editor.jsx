@@ -4162,6 +4162,167 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     pdf.setLineWidth(0.5);
   }
 
+  // ── Roads: filled polygon + edge lines + center markings ──
+  {
+    const toPdf = (px) => {
+      if (!px) return null;
+      return { x: mapRect.x + (px.x / imgW) * mapRect.w, y: mapRect.y + (px.y / imgH) * mapRect.h };
+    };
+    const polyMoves = (pts) => {
+      const moves = [];
+      for (let i = 1; i < pts.length; i++)
+        moves.push([pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y]);
+      return moves;
+    };
+
+    for (const road of roads || []) {
+      if (!road.edge || road.edge.length < 2) continue;
+      const poly = road.poly ?? computeRoadPolygon(road.edge, road.widthMeters);
+      const polyN = Math.floor(poly.length / 2);
+      const edge1 = poly.slice(0, polyN);
+      const edge2 = poly.slice(polyN).reverse();
+      const center = edge1.map((v, i) => ({
+        lat: (v.lat + edge2[i].lat) / 2,
+        lng: (v.lng + edge2[i].lng) / 2,
+      }));
+
+      const pdfPoly = poly.map(ll => toPdf(project(toPlainLL(ll)))).filter(Boolean);
+      const pdfEdge1 = edge1.map(ll => toPdf(project(toPlainLL(ll)))).filter(Boolean);
+      const pdfEdge2 = edge2.map(ll => toPdf(project(toPlainLL(ll)))).filter(Boolean);
+      const pdfCenter = center.map(ll => toPdf(project(toPlainLL(ll)))).filter(Boolean);
+      if (pdfPoly.length < 3) continue;
+
+      // Filled road body
+      pdf.setFillColor(74, 74, 74);
+      pdf.setDrawColor(74, 74, 74);
+      pdf.setLineWidth(0.1);
+      pdf.lines(polyMoves(pdfPoly), pdfPoly[0].x, pdfPoly[0].y, [1,1], "FD", true);
+
+      // White edge lines
+      pdf.setDrawColor(255, 255, 255);
+      pdf.setLineWidth(0.4);
+      if (pdfEdge1.length >= 2) pdf.lines(polyMoves(pdfEdge1), pdfEdge1[0].x, pdfEdge1[0].y, [1,1], "S", false);
+      if (pdfEdge2.length >= 2) pdf.lines(polyMoves(pdfEdge2), pdfEdge2[0].x, pdfEdge2[0].y, [1,1], "S", false);
+
+      // Center line / lane markings by type
+      const drawLine = (pts, color, lw, dash) => {
+        if (pts.length < 2) return;
+        pdf.setDrawColor(...color);
+        pdf.setLineWidth(lw);
+        pdf.setLineDashPattern(dash, 0);
+        pdf.lines(polyMoves(pts), pts[0].x, pts[0].y, [1,1], "S", false);
+        pdf.setLineDashPattern([], 0);
+      };
+
+      if (road.type === "two_way_dashed") {
+        drawLine(pdfCenter, [255,255,255], 0.35, [1.2, 1.2]);
+      } else if (road.type === "two_way_solid_yellow") {
+        drawLine(pdfCenter, [245, 197, 24], 0.5, []);
+      } else if (road.type === "two_way_double_yellow") {
+        drawLine(pdfCenter, [245, 197, 24], 0.4, []);
+        // approximate offset — draw two lines side by side
+        const offset = 0.3;
+        const pdfInner = pdfCenter.map(pt => ({ x: pt.x + offset * 0.5, y: pt.y }));
+        const pdfOuter = pdfCenter.map(pt => ({ x: pt.x - offset * 0.5, y: pt.y }));
+        drawLine(pdfInner, [245, 197, 24], 0.4, []);
+        drawLine(pdfOuter, [245, 197, 24], 0.4, []);
+      } else if (road.type === "two_way_dashed_yellow") {
+        drawLine(pdfCenter, [245, 197, 24], 0.45, [1.2, 1.2]);
+      } else if (road.type === "multi_lane") {
+        drawLine(pdfCenter, [245, 197, 24], 0.5, []);
+        const q1 = edge1.map((v,i) => ({ lat: v.lat*0.75+edge2[i].lat*0.25, lng: v.lng*0.75+edge2[i].lng*0.25 }));
+        const q3 = edge1.map((v,i) => ({ lat: v.lat*0.25+edge2[i].lat*0.75, lng: v.lng*0.25+edge2[i].lng*0.75 }));
+        const pdfQ1 = q1.map(ll => toPdf(project(toPlainLL(ll)))).filter(Boolean);
+        const pdfQ3 = q3.map(ll => toPdf(project(toPlainLL(ll)))).filter(Boolean);
+        drawLine(pdfQ1, [255,255,255], 0.3, [1,1]);
+        drawLine(pdfQ3, [255,255,255], 0.3, [1,1]);
+      }
+    }
+
+    pdf.setDrawColor(0,0,0); pdf.setFillColor(0,0,0); pdf.setLineWidth(0.5);
+  }
+
+  // ── Placed road markings (pavement arrows) ──
+  {
+    const planPxMm = (wPx, zRef) =>
+      cssPlanPxRounded(wPx || 40, zRef ?? ELEMENT_BASE_ZOOM) * (mapW_mm / exportCssW);
+
+    for (const marking of placedRoadMarkings || []) {
+      const centerPx = project(toPlainLL(marking.pos));
+      if (!centerPx) continue;
+      const cx = mapRect.x + (centerPx.x / imgW) * mapRect.w;
+      const cy = mapRect.y + (centerPx.y / imgH) * mapRect.h;
+
+      const wMm = planPxMm(marking.wPx ?? 44, marking.zRef);
+      const hMm = planPxMm(marking.hPx ?? 100, marking.zRef);
+      const rot = (marking.rotDeg ?? 0) * Math.PI / 180;
+      const cos = Math.cos(rot), sin = Math.sin(rot);
+
+      // Rotate helper: local (lx, ly) relative to center
+      const R = (lx, ly) => ({ x: cx + lx*cos - ly*sin, y: cy + lx*sin + ly*cos });
+
+      // Dark background rectangle
+      pdf.saveGraphicsState();
+      const hw = wMm/2, hh = hMm/2;
+      const corners = [R(-hw,-hh), R(hw,-hh), R(hw,hh), R(-hw,hh)];
+      pdf.setFillColor(32, 32, 32);
+      pdf.setDrawColor(32, 32, 32);
+      const mv = corners.slice(1).map((p,i) => [p.x-corners[i].x, p.y-corners[i].y]);
+      pdf.lines(mv, corners[0].x, corners[0].y, [1,1], "F", true);
+      pdf.restoreGraphicsState();
+
+      // White arrow — scale from SVG viewBox to wMm×hMm
+      const type = marking.type;
+      pdf.setFillColor(255,255,255);
+      pdf.setDrawColor(255,255,255);
+
+      if (type === "marking_straight") {
+        // viewBox 0 0 48 110: stem x1=24,y1=106 x2=24,y2=34; head polygon 24,4 6,38 42,38
+        const vbW=48, vbH=110;
+        const sx = wMm/vbW, sy = hMm/vbH;
+        const toR = (vx,vy) => R((vx-vbW/2)*sx, (vy-vbH/2)*sy);
+        // Stem as thick line
+        const stemTop = toR(24,34), stemBot = toR(24,106);
+        const stemW = Math.max(0.2, 12*sx);
+        const stemLen = Math.hypot(stemBot.x-stemTop.x, stemBot.y-stemTop.y);
+        if (stemLen > 0.1) {
+          const ux=(stemBot.x-stemTop.x)/stemLen, uy=(stemBot.y-stemTop.y)/stemLen;
+          const px2=-uy*stemW/2, py2=ux*stemW/2;
+          const sv=[toR(24-6,34),toR(24+6,34),toR(24+6,106),toR(24-6,106)];
+          pdf.lines([[sv[1].x-sv[0].x,sv[1].y-sv[0].y],[sv[2].x-sv[1].x,sv[2].y-sv[1].y],[sv[3].x-sv[2].x,sv[3].y-sv[2].y]],sv[0].x,sv[0].y,[1,1],"F",true);
+        }
+        // Arrowhead triangle
+        const p1=toR(24,4), p2=toR(6,38), p3=toR(42,38);
+        pdf.lines([[p2.x-p1.x,p2.y-p1.y],[p3.x-p2.x,p3.y-p2.y]],p1.x,p1.y,[1,1],"F",true);
+      } else if (type === "marking_left") {
+        // viewBox 0 0 60 110: path M30,106 L30,62 Q30,28 8,28; head polygon 0,28 20,11 20,45
+        const vbW=60, vbH=110;
+        const toR = (vx,vy) => R((vx-vbW/2)*wMm/vbW, (vy-vbH/2)*hMm/vbH);
+        // Draw stem as rectangle strip
+        const stemPts=[toR(24,106),toR(36,106),toR(36,62),toR(24,62)];
+        pdf.lines([[stemPts[1].x-stemPts[0].x,stemPts[1].y-stemPts[0].y],[stemPts[2].x-stemPts[1].x,stemPts[2].y-stemPts[1].y],[stemPts[3].x-stemPts[2].x,stemPts[3].y-stemPts[2].y]],stemPts[0].x,stemPts[0].y,[1,1],"F",true);
+        // Curved horizontal arm as rectangle (approximation)
+        const armPts=[toR(8,22),toR(36,22),toR(36,34),toR(8,34)];
+        pdf.lines([[armPts[1].x-armPts[0].x,armPts[1].y-armPts[0].y],[armPts[2].x-armPts[1].x,armPts[2].y-armPts[1].y],[armPts[3].x-armPts[2].x,armPts[3].y-armPts[2].y]],armPts[0].x,armPts[0].y,[1,1],"F",true);
+        // Arrowhead
+        const p1=toR(0,28), p2=toR(20,11), p3=toR(20,45);
+        pdf.lines([[p2.x-p1.x,p2.y-p1.y],[p3.x-p2.x,p3.y-p2.y]],p1.x,p1.y,[1,1],"F",true);
+      } else if (type === "marking_right") {
+        // viewBox 0 0 60 110: path M30,106 L30,62 Q30,28 52,28; head polygon 60,28 40,11 40,45
+        const vbW=60, vbH=110;
+        const toR = (vx,vy) => R((vx-vbW/2)*wMm/vbW, (vy-vbH/2)*hMm/vbH);
+        const stemPts=[toR(24,106),toR(36,106),toR(36,62),toR(24,62)];
+        pdf.lines([[stemPts[1].x-stemPts[0].x,stemPts[1].y-stemPts[0].y],[stemPts[2].x-stemPts[1].x,stemPts[2].y-stemPts[1].y],[stemPts[3].x-stemPts[2].x,stemPts[3].y-stemPts[2].y]],stemPts[0].x,stemPts[0].y,[1,1],"F",true);
+        const armPts=[toR(24,22),toR(52,22),toR(52,34),toR(24,34)];
+        pdf.lines([[armPts[1].x-armPts[0].x,armPts[1].y-armPts[0].y],[armPts[2].x-armPts[1].x,armPts[2].y-armPts[1].y],[armPts[3].x-armPts[2].x,armPts[3].y-armPts[2].y]],armPts[0].x,armPts[0].y,[1,1],"F",true);
+        const p1=toR(60,28), p2=toR(40,11), p3=toR(40,45);
+        pdf.lines([[p2.x-p1.x,p2.y-p1.y],[p3.x-p2.x,p3.y-p2.y]],p1.x,p1.y,[1,1],"F",true);
+      }
+    }
+
+    pdf.setDrawColor(0,0,0); pdf.setFillColor(0,0,0); pdf.setLineWidth(0.5);
+  }
+
   // ── Sign images for legend: reuse editor's pre-loaded data URLs (avoids CORS taint) ──
   // _editorSignDataUrls is loaded in a useEffect via crossOrigin canvas, so it's always ready.
   // Fall back to fresh load for any code missing from the editor cache.
