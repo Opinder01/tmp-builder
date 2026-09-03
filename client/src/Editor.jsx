@@ -2312,6 +2312,7 @@ const [workHover, setWorkHover] = useState(null);
   const [conesFeatures, setConesFeatures] = useState([]); // {id,typeId,path:[latlng...]}
   const [selectedConeId, setSelectedConeId] = useState(null); // id of selected drawn cone (for vertex editing)
   const coneSelectionGuardRef = useRef(false); // true = next map click came from a cone polyline, skip it
+  const roadPolygonClickGuardRef = useRef(false); // true = next map click came from a road polygon, skip road-draw start
 
   /* ================= Measurements tool ================= */
   const [measPanelOpen, setMeasPanelOpen] = useState(false);
@@ -5177,6 +5178,11 @@ if (activeTool === "roads" && selectedRoadMarkingId) {
 
 // ROADS: click-to-place vertices (use ref for drawing state — avoids stale closure)
 if (activeTool === "roads") {
+  // Skip if this click came from a road polygon (polygon onClick already handled selection)
+  if (roadPolygonClickGuardRef.current) {
+    roadPolygonClickGuardRef.current = false;
+    return;
+  }
   const detail = e?.domEvent?.detail;
   if (detail === 2) return; // ignore 2nd click of dblclick
   if (roadVerticesRef.current.length === 0) {
@@ -10181,7 +10187,12 @@ draggingCursor:
           zIndex: 1,
           clickable: activeTool === "roads" && !roadIsDrawing && !selectedRoadMarkingType,
         }}
-        onClick={() => activeTool === "roads" && !roadIsDrawing && !selectedRoadMarkingType && setSelectedRoadId(isSelected ? null : road.id)}
+        onClick={() => {
+          if (activeTool === "roads" && !roadIsDrawing && !selectedRoadMarkingType) {
+            roadPolygonClickGuardRef.current = true;
+            setSelectedRoadId(isSelected ? null : road.id);
+          }
+        }}
       />
       {/* edge lines (white) */}
       <PolylineF path={edge1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
