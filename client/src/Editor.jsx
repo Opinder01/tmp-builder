@@ -10179,9 +10179,9 @@ draggingCursor:
           fillOpacity: isSelected ? 0.97 : 0.93,
           strokeOpacity: 0,
           zIndex: 1,
-          clickable: activeTool === "roads" && !roadIsDrawing,
+          clickable: activeTool === "roads" && !roadIsDrawing && !selectedRoadMarkingType,
         }}
-        onClick={() => activeTool === "roads" && !roadIsDrawing && setSelectedRoadId(isSelected ? null : road.id)}
+        onClick={() => activeTool === "roads" && !roadIsDrawing && !selectedRoadMarkingType && setSelectedRoadId(isSelected ? null : road.id)}
       />
       {/* edge lines (white) */}
       <PolylineF path={edge1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
