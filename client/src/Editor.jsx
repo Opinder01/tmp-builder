@@ -6037,7 +6037,9 @@ useEffect(() => {
       t !== "createArrowPoint" &&
       t !== "resizeWorkArea" &&
       t !== "resizeExportArea" &&
-      t !== "moveExportArea"
+      t !== "moveExportArea" &&
+      t !== "moveRoadVertex" &&
+      t !== "resizeRoadWidth"
     ) {
       return;
     }
