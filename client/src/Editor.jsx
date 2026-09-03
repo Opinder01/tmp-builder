@@ -9369,27 +9369,6 @@ const tileIconStyle = {
                         style={{ width: 28, height: 28, border: "1px solid #ccc", borderRadius: 6, cursor: "pointer", fontSize: 16, background: "#fff" }}>+</button>
                       <span style={{ fontSize: 11, color: "#888" }}>m</span>
                     </div>
-                    {/* Lane arrows */}
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 5, marginTop: 6 }}>Lane Arrows</div>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-                      {[
-                        { value: null,            label: "None" },
-                        { value: "left",          label: "← Left" },
-                        { value: "right",         label: "Right →" },
-                        { value: "straight",      label: "↑ Straight" },
-                        { value: "left_straight", label: "↑← Str+L" },
-                        { value: "right_straight",label: "Str+R →↑" },
-                      ].map(({ value, label }) => (
-                        <button key={String(value)} type="button"
-                          onClick={() => { pushHistory(); setRoads(prev => prev.map(r => r.id === selectedRoadId ? { ...r, arrowMarking: value } : r)); }}
-                          style={{
-                            padding: "4px 8px", fontSize: 10, fontWeight: 600, cursor: "pointer",
-                            border: selRoad.arrowMarking === value ? "2px solid #1e3a5f" : "1px solid #ccc",
-                            borderRadius: 6, background: selRoad.arrowMarking === value ? "#1e3a5f" : "#fff",
-                            color: selRoad.arrowMarking === value ? "#fff" : "#333",
-                          }}>{label}</button>
-                      ))}
-                    </div>
                     <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
                       Drag the orange ↔ handle on map to resize, or drag vertices to reshape
                     </div>
@@ -10003,53 +9982,6 @@ draggingCursor:
                 setUiDrag({ type: "resizeRoadWidth", roadId: road.id, startWidth: road.widthMeters });
               }}
             >↔</div>
-          </OverlayViewF>
-        );
-      })()}
-      {/* Turn arrow markings */}
-      {road.arrowMarking && (() => {
-        const center = computeRoadCenterLine(road.edge, road.widthMeters);
-        if (center.length < 2) return null;
-        const midIdx = Math.floor(center.length / 2);
-        const midPt = center[midIdx];
-        const a = center[Math.max(0, midIdx - 1)];
-        const b = center[Math.min(center.length - 1, midIdx + 1)];
-        const cos = Math.cos(a.lat * Math.PI / 180);
-        const dx = (b.lng - a.lng) * cos;
-        const dy = b.lat - a.lat;
-        const angleDeg = Math.atan2(dx, dy) * 180 / Math.PI;
-        const sw = 3, sc = "white", sl = "round", lj = "round";
-        const arrowSvg = {
-          left: <g stroke={sc} strokeWidth={sw} strokeLinecap={sl} strokeLinejoin={lj}>
-            <path d="M 16,46 L 16,26 Q 16,11 4,11" />
-            <polyline points="0,7 4,3 8,11" />
-          </g>,
-          right: <g stroke={sc} strokeWidth={sw} strokeLinecap={sl} strokeLinejoin={lj}>
-            <path d="M 16,46 L 16,26 Q 16,11 28,11" />
-            <polyline points="32,7 28,3 24,11" />
-          </g>,
-          straight: <g stroke={sc} strokeWidth={sw} strokeLinecap={sl} strokeLinejoin={lj}>
-            <line x1="16" y1="46" x2="16" y2="12" />
-            <polyline points="10,19 16,8 22,19" />
-          </g>,
-          left_straight: <g stroke={sc} strokeWidth={sw} strokeLinecap={sl} strokeLinejoin={lj}>
-            <line x1="16" y1="46" x2="16" y2="26" />
-            <path d="M 16,26 Q 16,11 4,11" /><polyline points="0,7 4,3 8,11" />
-            <line x1="16" y1="26" x2="16" y2="10" /><polyline points="10,17 16,7 22,17" />
-          </g>,
-          right_straight: <g stroke={sc} strokeWidth={sw} strokeLinecap={sl} strokeLinejoin={lj}>
-            <line x1="16" y1="46" x2="16" y2="26" />
-            <path d="M 16,26 Q 16,11 28,11" /><polyline points="32,7 28,3 24,11" />
-            <line x1="16" y1="26" x2="16" y2="10" /><polyline points="10,17 16,7 22,17" />
-          </g>,
-        };
-        return (
-          <OverlayViewF key="arrow-marking" position={midPt} mapPaneName="overlayLayer">
-            <div style={{ transform: `translate(-50%,-50%) rotate(${angleDeg}deg)`, pointerEvents: "none" }}>
-              <svg width="32" height="48" viewBox="0 0 32 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                {arrowSvg[road.arrowMarking]}
-              </svg>
-            </div>
           </OverlayViewF>
         );
       })()}
