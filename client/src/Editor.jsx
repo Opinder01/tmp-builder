@@ -1009,7 +1009,7 @@ function DimensionSegment({
   // Scale line weight and arrows with zoom so they don't dominate when zoomed out.
   // Clamped: min 0.5 (readable at low zoom), max 4 (not overwhelming at high zoom).
   const s = Math.max(0.5, Math.min(4, scale));
-  const lineWeight = 1.4 * s;
+  const lineWeight = 0.9 * s;
 
   const isShort = pixelLen != null && pixelLen < 24;
 
@@ -1022,7 +1022,7 @@ function DimensionSegment({
     strokeLinecap: "round",
   };
 
-  const arrowScale = 2.4 * s;
+  const arrowScale = 1.6 * s;
   const arrowPath = window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW;
 
   const arrowIcon = {
@@ -1047,12 +1047,12 @@ function DimensionSegment({
   }
 
   if (isShort) {
-    // For very short spans, just a clean line
+    // Short span: just a clean line — leader line + label are handled by the caller
     return <PolylineF path={[a, b]} options={baseOptions} />;
   }
 
   // Trim a little space so arrows sit neatly at the ends
-  const trimPx = 10;
+  const trimPx = 5;
   const a2 = trimPoint(a, b, trimPx);
   const b2 = trimPoint(b, a, trimPx);
 
@@ -2670,7 +2670,7 @@ async function importAerialPhotoForFrame() {
   // legendExclusions declared earlier (before exportPlanDataRef useEffect) to avoid TDZ
   const [clipboard, setClipboard] = useState(null); // { kind, data }
   // Live rotation accumulator for signs (avoids stale closures + reattaching listeners)
-  const rotateSignLiveRef = useRef(null); // { lastAngleDeg: number, accumulatedDeg: number } | null
+  const rotationLiveRef = useRef(null); // { lastAngleDeg: number, accumulatedDeg: number } | null — shared by all rotation drags
   const lastPointerMoveTsRef = useRef(0);
   const lastMousePosRef = useRef({ x: 0, y: 0 }); // tracks cursor for paste-at-cursor
   // ================= SCALE SMOOTH DRAG (RAF throttle) =================
@@ -3065,8 +3065,9 @@ function promptEditInsertText(obj) {
 
   // Compute export bounds that enclose every placed plan element (cones, signs,
   // measurements, work areas, legend, title box, etc.) plus a small margin.
+  // Works entirely in lat/lng — no screen projection needed — so it is safe
+  // to call while the map is mid-pan (e.g. right after loading a saved file).
   function fitBoundsToAllPlanElements() {
-  if (!getProjection()) return null;
   const allLatLngs = [];
   const push = (ll) => { if (ll?.lat != null && ll?.lng != null) allLatLngs.push(ll); };
 
@@ -3083,7 +3084,7 @@ function promptEditInsertText(obj) {
   manifestBoxes?.forEach((mb)   => push(mb.pos));
   insertObjects?.forEach((o)    => push(o.pos));
 
-  if (allLatLngs.length === 0) return initExportAreaFromViewport();
+  if (allLatLngs.length === 0) return null;
 
   let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
   for (const ll of allLatLngs) {
@@ -3093,19 +3094,15 @@ function promptEditInsertText(obj) {
     if (ll.lng > maxLng) maxLng = ll.lng;
   }
 
-  // Convert to screen pixels and add 8% padding on each side
-  const nwPx = latLngToPx({ lat: maxLat, lng: minLng });
-  const sePx = latLngToPx({ lat: minLat, lng: maxLng });
-  if (!nwPx || !sePx) return initExportAreaFromViewport();
-
-  const padX = Math.max(40, Math.round((sePx.x - nwPx.x) * 0.08));
-  const padY = Math.max(40, Math.round((sePx.y - nwPx.y) * 0.08));
-  return rectPxToBounds({
-    x: nwPx.x - padX,
-    y: nwPx.y - padY,
-    w: (sePx.x - nwPx.x) + padX * 2,
-    h: (sePx.y - nwPx.y) + padY * 2,
-  });
+  // Add ~10% padding directly in lat/lng — no screen projection required.
+  const latSpan = Math.max(maxLat - minLat, 0.0005);
+  const lngSpan = Math.max(maxLng - minLng, 0.0005);
+  const padLat = Math.max(latSpan * 0.10, 0.0003);
+  const padLng = Math.max(lngSpan * 0.10, 0.0003);
+  return {
+    nw: { lat: maxLat + padLat, lng: minLng - padLng },
+    se: { lat: minLat - padLat, lng: maxLng + padLng },
+  };
 }
 
   function beginExportToPdf() {
@@ -3116,32 +3113,43 @@ function promptEditInsertText(obj) {
   setPrintAreaBounds(null);
   setExportLiveRect(null);
   exportBoundsForPdfRef.current = null;
-  let tryInitAttempts = 0;
-  const tryInit = () => {
-    // Auto-fit to all plan elements so the blue box always encloses everything.
-    // Fall back to 85% of viewport only when there are no elements yet.
-    const b = fitBoundsToAllPlanElements() ?? pageFrameBounds ?? initExportAreaFromViewport();
-    if (b) {
-      exportBoundsForPdfRef.current = b;
-      setPrintAreaBounds(b);
-      // Pan the map to centre on the computed export area.
-      const map = mapRef.current;
-      if (map) {
-        const centerLat = (b.nw.lat + b.se.lat) / 2;
-        const centerLng = (b.nw.lng + b.se.lng) / 2;
-        map.panTo({ lat: centerLat, lng: centerLng });
-      }
-    } else if (++tryInitAttempts < 200) {
-      setTimeout(tryInit, 50); // up to 10 s total
-    } else {
-      // Projection never became ready — cancel export and inform user
-      setExportMode(false);
-      alert("Could not start export: map not ready. Please wait a moment and try again.");
+  // fitBoundsToAllPlanElements works in pure lat/lng (no projection needed).
+  // Only fall back to initExportAreaFromViewport when there are truly no elements,
+  // and that fallback requires the projection — retry until ready.
+  const elemBounds = fitBoundsToAllPlanElements();
+  if (elemBounds) {
+    // We have element bounds immediately — no retry needed.
+    exportBoundsForPdfRef.current = elemBounds;
+    setPrintAreaBounds(elemBounds);
+    const map = mapRef.current;
+    if (map) {
+      const centerLat = (elemBounds.nw.lat + elemBounds.se.lat) / 2;
+      const centerLng = (elemBounds.nw.lng + elemBounds.se.lng) / 2;
+      map.panTo({ lat: centerLat, lng: centerLng });
     }
-  };
-  requestAnimationFrame(() => {
-    tryInit();
-  });
+  } else {
+    // No plan elements — wait for projection, then use viewport or pageFrameBounds.
+    let tryInitAttempts = 0;
+    const tryInit = () => {
+      const b = pageFrameBounds ?? initExportAreaFromViewport();
+      if (b) {
+        exportBoundsForPdfRef.current = b;
+        setPrintAreaBounds(b);
+        const map = mapRef.current;
+        if (map) {
+          const centerLat = (b.nw.lat + b.se.lat) / 2;
+          const centerLng = (b.nw.lng + b.se.lng) / 2;
+          map.panTo({ lat: centerLat, lng: centerLng });
+        }
+      } else if (++tryInitAttempts < 200) {
+        setTimeout(tryInit, 50);
+      } else {
+        setExportMode(false);
+        alert("Could not start export: map not ready. Please wait a moment and try again.");
+      }
+    };
+    requestAnimationFrame(() => { tryInit(); });
+  }
 }
 
 function cancelExportToPdf() {
@@ -5136,58 +5144,7 @@ if (activeTool === "roads" && roadIsDrawing) {
         return;
       }
 
-      // rotateSign is handled by the window-level move listener so it continues
-      // tracking even when pointer capture prevents map mousemove from firing.
-
-      if (uiDrag.type === "rotateNorthArrow") {
-        const { arrowId, centerPx, startAngleDeg, startPointerAngleDeg } = uiDrag;
-        const angleNow =
-          (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
-
-        const delta = angleNow - startPointerAngleDeg;
-        const nextDeg = startAngleDeg + delta;
-
-        setNorthArrows((prev) =>
-          prev.map((na) => (na.id === arrowId ? { ...na, rotDeg: nextDeg } : na))
-        );
-        return;
-      }
-
-      if (uiDrag.type === "rotateStand") {
-        const { signId, standId, centerPx, startAngleDeg, startPointerAngleDeg } = uiDrag;
-        const angleNow =
-          (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
-        const delta = angleNow - startPointerAngleDeg;
-        const nextDeg = startAngleDeg + delta;
-
-        setPlacedSigns((prev) =>
-          prev.map((s) => {
-            if (s.id !== signId) return s;
-            return {
-              ...s,
-              stands: (s.stands || []).map((st) =>
-                st.id === standId ? { ...st, rotDeg: nextDeg, rotationDeg: nextDeg } : st
-              ),
-            };
-          })
-        );
-        return;
-      }
-
-      if (uiDrag.type === "rotateArrowPoint") {
-        const { arrowId, pointId, centerPx, startAngleDeg, startPointerAngleDeg } = uiDrag;
-        const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
-        const nextDeg = startAngleDeg + (angleNow - startPointerAngleDeg);
-        setPlacedArrows((prev) =>
-          prev.map((a) => a.id !== arrowId ? a : {
-            ...a,
-            points: (a.points ?? []).map((pt) =>
-              pt.id !== pointId ? pt : { ...pt, rotDeg: nextDeg }
-            ),
-          })
-        );
-        return;
-      }
+      // All rotation types are now handled by the unified rotation useEffect (document pointermove).
 
       // resizeScale + moveScale are now handled by the dedicated window-level useEffect
 
@@ -6761,181 +6718,96 @@ useEffect(() => {
     };
   }, [uiDrag, projectionReady]);
 
-  /* ================= Sign rotate: dedicated pointer/mouse listener ================= */
+  /* ================= Unified rotation: one useEffect for every rotatable element ================= */
   useEffect(() => {
-    if (!uiDrag || uiDrag.type !== "rotateSign") return;
-    if (!projectionReady) return;
-  
+    if (!uiDrag) return;
+    const ROTATE_TYPES = [
+      "rotateSign", "rotateNorthArrow", "rotateStand",
+      "rotateArrow", "rotateArrowPoint",
+      "rotateRoadMarking", "rotateInsert",
+    ];
+    if (!ROTATE_TYPES.includes(uiDrag.type)) return;
+
     const drag = uiDrag;
     const { centerPx } = drag;
     if (!centerPx) return;
-  
+
+    // Ensure live state is initialised (onPointerDown seeds it with the correct starting angle).
+    if (!rotationLiveRef.current) {
+      rotationLiveRef.current = { lastAngleDeg: 0, accumulatedDeg: 0 };
+    }
+
     function handleMove(ev) {
-      if (
-        drag.pointerId != null &&
-        ev?.pointerId != null &&
-        ev.pointerId !== drag.pointerId
-      ) {
-        return;
-      }
-  
-      // Use the latest coalesced pointer event (smoother, less jitter)
-      const srcEv =
-        ev?.type === "pointermove" && typeof ev.getCoalescedEvents === "function"
-          ? (ev.getCoalescedEvents().slice(-1)[0] || ev)
-          : ev;
-  
+      // Honour per-pointer capture on signs
+      if (drag.pointerId != null && ev?.pointerId != null && ev.pointerId !== drag.pointerId) return;
+
+      // Use latest coalesced event for smoothest tracking
+      const srcEv = ev?.type === "pointermove" && typeof ev.getCoalescedEvents === "function"
+        ? (ev.getCoalescedEvents().slice(-1)[0] || ev) : ev;
       const clientX = srcEv.clientX ?? srcEv.touches?.[0]?.clientX;
       const clientY = srcEv.clientY ?? srcEv.touches?.[0]?.clientY;
       if (clientX == null || clientY == null) return;
-  
+
       const curPx = clientToDivPx(clientX, clientY);
       if (!curPx) return;
-  
-      const angleNow =
-        (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
-  
-      const live = rotateSignLiveRef.current;
+
+      const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
+      const live = rotationLiveRef.current;
       if (!live) return;
-  
+
+      // Normalize to shortest arc so rotation never jumps at ±180°
       let delta = angleNow - live.lastAngleDeg;
-  
-      // normalize to shortest path so rotation does not jump at ±180°
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
-  
       live.lastAngleDeg = angleNow;
       live.accumulatedDeg += delta;
-  
+
       const nextDeg = (drag.startAngleDeg ?? 0) + live.accumulatedDeg;
-  
-      setPlacedSigns((prev) =>
-        prev.map((s) =>
-          s.id === drag.signId ? { ...s, rotDeg: nextDeg } : s
-        )
-      );
-  
-      if (ev.cancelable) ev.preventDefault();
-    }
-  
-    function handleUp(ev) {
-      if (
-        drag.pointerId != null &&
-        ev?.type === "pointerup" &&
-        ev.pointerId != null &&
-        ev.pointerId !== drag.pointerId
-      ) {
-        return;
+
+      if (drag.type === "rotateSign") {
+        setPlacedSigns((prev) => prev.map((s) => s.id === drag.signId ? { ...s, rotDeg: nextDeg } : s));
+      } else if (drag.type === "rotateNorthArrow") {
+        setNorthArrows((prev) => prev.map((na) => na.id === drag.arrowId ? { ...na, rotDeg: nextDeg } : na));
+      } else if (drag.type === "rotateStand") {
+        setPlacedSigns((prev) => prev.map((s) => {
+          if (s.id !== drag.signId) return s;
+          return { ...s, stands: (s.stands || []).map((st) =>
+            st.id === drag.standId ? { ...st, rotDeg: nextDeg, rotationDeg: nextDeg } : st
+          )};
+        }));
+      } else if (drag.type === "rotateArrow") {
+        setPlacedArrows((prev) => prev.map((a) => a.id === drag.arrowId ? { ...a, rotDeg: nextDeg } : a));
+      } else if (drag.type === "rotateArrowPoint") {
+        setPlacedArrows((prev) => prev.map((a) => a.id !== drag.arrowId ? a : {
+          ...a,
+          points: (a.points ?? []).map((pt) => pt.id !== drag.pointId ? pt : { ...pt, rotDeg: nextDeg }),
+        }));
+      } else if (drag.type === "rotateRoadMarking") {
+        setPlacedRoadMarkings((prev) => prev.map((m) => m.id === drag.markingId ? { ...m, rotDeg: nextDeg } : m));
+      } else if (drag.type === "rotateInsert") {
+        setInsertObjects((prev) => prev.map((o) => o.id === drag.insertId ? { ...o, rotDeg: nextDeg } : o));
       }
-  
-      rotateSignLiveRef.current = null;
-      lockMapInteractions(false);
-      pushHistory();
-      setUiDrag(null);
-    }
-  
-    const tgt = document;
-    tgt.addEventListener("pointermove", handleMove, {
-      passive: false,
-      capture: true,
-    });
-    tgt.addEventListener("pointerup", handleUp, true);
-    tgt.addEventListener("pointercancel", handleUp, true);
-  
-    return () => {
-      tgt.removeEventListener("pointermove", handleMove, true);
-      tgt.removeEventListener("pointerup", handleUp, true);
-      tgt.removeEventListener("pointercancel", handleUp, true);
-    };
-  }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
 
-  /* ================= Arrow rotate: dedicated pointer listener ================= */
-  useEffect(() => {
-    if (!uiDrag || uiDrag.type !== "rotateArrow") return;
-    if (!projectionReady) return;
-    const drag = uiDrag;
-    const { centerPx } = drag;
-    if (!centerPx) return;
-    const live = { lastAngleDeg: 0, accumulatedDeg: 0 };
-    function handleMove(ev) {
-      const srcEv = ev?.type === "pointermove" && typeof ev.getCoalescedEvents === "function"
-        ? (ev.getCoalescedEvents().slice(-1)[0] || ev) : ev;
-      const clientX = srcEv.clientX ?? srcEv.touches?.[0]?.clientX;
-      const clientY = srcEv.clientY ?? srcEv.touches?.[0]?.clientY;
-      if (clientX == null || clientY == null) return;
-      const curPx = clientToDivPx(clientX, clientY);
-      if (!curPx) return;
-      const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
-      let delta = angleNow - live.lastAngleDeg;
-      if (delta > 180) delta -= 360;
-      if (delta < -180) delta += 360;
-      live.lastAngleDeg = angleNow;
-      live.accumulatedDeg += delta;
-      const nextDeg = (drag.startAngleDeg ?? 0) + live.accumulatedDeg;
-      setPlacedArrows((prev) =>
-        prev.map((a) => (a.id === drag.arrowId ? { ...a, rotDeg: nextDeg } : a))
-      );
       if (ev.cancelable) ev.preventDefault();
     }
-    function handleUp() {
-      lockMapInteractions(false);
-      pushHistory();
-      setUiDrag(null);
-    }
-    const tgt = document;
-    tgt.addEventListener("pointermove", handleMove, { passive: false, capture: true });
-    tgt.addEventListener("pointerup", handleUp, true);
-    tgt.addEventListener("pointercancel", handleUp, true);
-    return () => {
-      tgt.removeEventListener("pointermove", handleMove, true);
-      tgt.removeEventListener("pointerup", handleUp, true);
-      tgt.removeEventListener("pointercancel", handleUp, true);
-    };
-  }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
 
-  /* ================= Road Marking rotate ================= */
-  useEffect(() => {
-    if (!uiDrag || uiDrag.type !== "rotateRoadMarking") return;
-    if (!projectionReady) return;
-    const drag = uiDrag;
-    const { centerPx } = drag;
-    if (!centerPx) return;
-    const live = { lastAngleDeg: 0, accumulatedDeg: 0 };
-    function handleMove(ev) {
-      const srcEv = ev?.type === "pointermove" && typeof ev.getCoalescedEvents === "function"
-        ? (ev.getCoalescedEvents().slice(-1)[0] || ev) : ev;
-      const clientX = srcEv.clientX ?? srcEv.touches?.[0]?.clientX;
-      const clientY = srcEv.clientY ?? srcEv.touches?.[0]?.clientY;
-      if (clientX == null || clientY == null) return;
-      const curPx = clientToDivPx(clientX, clientY);
-      if (!curPx) return;
-      const angleNow = (Math.atan2(curPx.y - centerPx.y, curPx.x - centerPx.x) * 180) / Math.PI;
-      let delta = angleNow - live.lastAngleDeg;
-      if (delta > 180) delta -= 360;
-      if (delta < -180) delta += 360;
-      live.lastAngleDeg = angleNow;
-      live.accumulatedDeg += delta;
-      const nextDeg = (drag.startAngleDeg ?? 0) + live.accumulatedDeg;
-      setPlacedRoadMarkings((prev) =>
-        prev.map((m) => (m.id === drag.markingId ? { ...m, rotDeg: nextDeg } : m))
-      );
-      if (ev.cancelable) ev.preventDefault();
-    }
-    function handleUp() {
+    function handleUp(ev) {
+      if (drag.pointerId != null && ev?.type === "pointerup" && ev.pointerId != null && ev.pointerId !== drag.pointerId) return;
+      rotationLiveRef.current = null;
       lockMapInteractions(false);
       pushHistory();
       setUiDrag(null);
     }
-    const tgt = document;
-    tgt.addEventListener("pointermove", handleMove, { passive: false, capture: true });
-    tgt.addEventListener("pointerup", handleUp, true);
-    tgt.addEventListener("pointercancel", handleUp, true);
+
+    document.addEventListener("pointermove", handleMove, { passive: false, capture: true });
+    document.addEventListener("pointerup", handleUp, true);
+    document.addEventListener("pointercancel", handleUp, true);
     return () => {
-      tgt.removeEventListener("pointermove", handleMove, true);
-      tgt.removeEventListener("pointerup", handleUp, true);
-      tgt.removeEventListener("pointercancel", handleUp, true);
+      document.removeEventListener("pointermove", handleMove, true);
+      document.removeEventListener("pointerup", handleUp, true);
+      document.removeEventListener("pointercancel", handleUp, true);
     };
-  }, [uiDrag, projectionReady, clientToDivPx, lockMapInteractions, pushHistory]);
+  }, [uiDrag, clientToDivPx, lockMapInteractions, pushHistory]);
 
   /* ================= Legend resize: identical math to resizeInsert ================= */
   useEffect(() => {
@@ -7553,28 +7425,13 @@ useEffect(() => {
 /* ================= Insert resize/rotate: smooth window mousemove ================= */
 useEffect(() => {
   if (!uiDrag) return;
-  if (uiDrag.type !== "resizeInsert" && uiDrag.type !== "rotateInsert") return;
+  if (uiDrag.type !== "resizeInsert") return; // rotateInsert is handled by the unified rotation useEffect
 
   function onMove(ev) {
     const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
     if (!curPointerPx) return;
 
-    // --- ROTATE (stable 360) ---
-    if (uiDrag.type === "rotateInsert") {
-      const { insertId, centerPx, startAngleDeg, startPointerAngleDeg } = uiDrag;
-
-      const angleNow = angleDeg(curPointerPx, centerPx);
-      const delta = normDeltaDeg(angleNow - startPointerAngleDeg);
-      let nextDeg = startAngleDeg + delta;
-
-      // keep it tidy (optional)
-      nextDeg = ((nextDeg % 360) + 360) % 360;
-
-      setInsertObjects((prev) =>
-        prev.map((o) => (o.id === insertId ? { ...o, rotDeg: nextDeg } : o))
-      );
-      return;
-    }
+    // rotateInsert is handled by the unified rotation useEffect (document pointermove).
 
     // --- RESIZE (works correctly when rotated; uses scalePx/unscalePx for zoom) ---
     if (uiDrag.type === "resizeInsert") {
@@ -8380,7 +8237,7 @@ const beginMoveExportArea = (clientPt) => {
   });
 };
 
-// ================= Insert object rotate (stable 360°, no swing) =================
+// ================= Insert object rotate (smooth, 360°, unified handler) =================
 const beginRotateInsert = (insertId, clientPt) => {
   const startPointerPx = clientToDivPx(clientPt.x, clientPt.y);
   if (!startPointerPx) return;
@@ -8391,14 +8248,14 @@ const beginRotateInsert = (insertId, clientPt) => {
   const obj = insertObjects.find((o) => o.id === insertId);
   if (!obj) return;
 
-  const startPointerAngleDeg = angleDeg(startPointerPx, box.center);
+  const pointerAngleDeg = angleDeg(startPointerPx, box.center);
+  rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
 
   setUiDrag({
     type: "rotateInsert",
     insertId,
     centerPx: box.center,
     startAngleDeg: obj.rotDeg || 0,
-    startPointerAngleDeg,
   });
 };
 
@@ -10791,16 +10648,25 @@ onUnmount={(polygon) => {
                   const b = path[path.length - 1];
                   const d = distMetersLL(a, b);
                   if (d < MIN_SEGMENT_METERS) return null;
-                  const { pos: labelPos, rotateDeg } = getMeasLabelPlacement(a, b, 6);
+                  const pxLen = getPixelLen(a, b);
+                  const useLeader = pxLen != null && pxLen < 80;
+                  const midPt = midpointLatLng(a, b);
+                  const { pos: labelPos, rotateDeg } = useLeader
+                    ? { ...getSmallDistanceLabelPlacement(a, b, 38), rotateDeg: 0 }
+                    : getMeasLabelPlacement(a, b, 6);
                   const displayText = m.labelOverride ?? formatMeters(d);
+                  const leaderOpts = {
+                    strokeColor: "#111", strokeOpacity: 0.6, strokeWeight: 0.8,
+                    clickable: false, zIndex: 29,
+                    icons: [{ icon: { path: "M 0,0 0,1", strokeColor: "#111", strokeOpacity: 0.6, scale: 3 }, offset: "100%" }],
+                  };
                   return (
                     <React.Fragment key={m.id}>
-                      {/* Invisible hit area — click selects, right-click opens menu */}
                       <PolylineF path={[a, b]} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
-                      {/* Selection glow */}
                       {isSelected && <PolylineF path={[a, b]} options={selLineOptions} />}
-                      {/* Measurement visuals */}
-                      <DimensionSegment a={a} b={b} opacity={1} zIndex={30} scale={measureScale} pixelLen={getPixelLen(a, b)} />
+                      <DimensionSegment a={a} b={b} opacity={1} zIndex={30} scale={measureScale} pixelLen={pxLen} />
+                      {/* Leader line from midpoint to label when span is short */}
+                      {useLeader && <PolylineF path={[midPt, labelPos]} options={leaderOpts} />}
                       <MeasureLabel
                         position={labelPos}
                         text={displayText}
@@ -10813,7 +10679,6 @@ onUnmount={(polygon) => {
                         onEditCancel={cancelEditMeasureLabel}
                         onDblClick={() => startEditMeasureLabel(m.id, null, displayText)}
                       />
-                      {/* Draggable vertex handles (start + end point) */}
                       {vertexHandles}
                     </React.Fragment>
                   );
@@ -10821,16 +10686,27 @@ onUnmount={(polygon) => {
 
                 if (m.mode === "combined" && path.length >= 2) {
                   const segs = [];
+                  const leaderOpts = {
+                    strokeColor: "#111", strokeOpacity: 0.6, strokeWeight: 0.8,
+                    clickable: false, zIndex: 29,
+                    icons: [{ icon: { path: "M 0,0 0,1", strokeColor: "#111", strokeOpacity: 0.6, scale: 3 }, offset: "100%" }],
+                  };
                   for (let i = 0; i < path.length - 1; i++) {
                     const a = path[i];
                     const b = path[i + 1];
                     const d = distMetersLL(a, b);
                     if (d < MIN_SEGMENT_METERS) continue;
-                    const { pos: labelPos, rotateDeg } = getMeasLabelPlacement(a, b, 6);
+                    const pxLen = getPixelLen(a, b);
+                    const useLeader = pxLen != null && pxLen < 80;
+                    const midPt = midpointLatLng(a, b);
+                    const { pos: labelPos, rotateDeg } = useLeader
+                      ? { ...getSmallDistanceLabelPlacement(a, b, 38), rotateDeg: 0 }
+                      : getMeasLabelPlacement(a, b, 6);
                     const displayText = (m.segOverrides && m.segOverrides[i]) ?? formatMeters(d);
                     segs.push(
                       <React.Fragment key={`${m.id}_seg_${i}`}>
-                        <DimensionSegment a={a} b={b} opacity={1} scale={measureScale} pixelLen={getPixelLen(a, b)} />
+                        <DimensionSegment a={a} b={b} opacity={1} scale={measureScale} pixelLen={pxLen} />
+                        {useLeader && <PolylineF path={[midPt, labelPos]} options={leaderOpts} />}
                         <MeasureLabel
                           position={labelPos}
                           text={displayText}
@@ -10871,24 +10747,18 @@ onUnmount={(polygon) => {
                       const b = measPreviewPath[measPreviewPath.length - 1];
                       const d = distMetersLL(a, b);
                       if (d < MIN_SEGMENT_METERS) return null;
-                    
-                      const { pos: labelPos, rotateDeg } = getMeasLabelPlacement(a, b, 6);
+                      const pxLen = getPixelLen(a, b);
+                      const useLeader = pxLen != null && pxLen < 80;
+                      const midPt = midpointLatLng(a, b);
+                      const { pos: labelPos, rotateDeg } = useLeader
+                        ? { ...getSmallDistanceLabelPlacement(a, b, 38), rotateDeg: 0 }
+                        : getMeasLabelPlacement(a, b, 6);
+                      const leaderOpts = { strokeColor: "#111", strokeOpacity: 0.6, strokeWeight: 0.8, clickable: false, zIndex: 29 };
                       return (
                         <>
-                      <DimensionSegment
-  a={a}
-  b={b}
-  opacity={1}
-  scale={measureScale}
-    pixelLen={getPixelLen(a, b)}
-/>
-                  <MeasureLabel
-  position={labelPos}
-  text={formatMeters(d)}
-  fontScale={measureScale}
-  rotateDeg={rotateDeg}
-/>
-
+                          <DimensionSegment a={a} b={b} opacity={1} scale={measureScale} pixelLen={pxLen} />
+                          {useLeader && <PolylineF path={[midPt, labelPos]} options={leaderOpts} />}
+                          <MeasureLabel position={labelPos} text={formatMeters(d)} fontScale={measureScale} rotateDeg={rotateDeg} />
                         </>
                       );
                     })()}
@@ -10897,28 +10767,23 @@ onUnmount={(polygon) => {
                     (() => {
                       const pts = measPreviewPath;
                       const segs = [];
+                      const leaderOpts = { strokeColor: "#111", strokeOpacity: 0.6, strokeWeight: 0.8, clickable: false, zIndex: 29 };
                       for (let i = 0; i < pts.length - 1; i++) {
                         const a = pts[i];
                         const b = pts[i + 1];
                         const d = distMetersLL(a, b);
                         if (d < MIN_SEGMENT_METERS) continue;
-                        const { pos: labelPos, rotateDeg } = getMeasLabelPlacement(a, b, 6);
+                        const pxLen = getPixelLen(a, b);
+                        const useLeader = pxLen != null && pxLen < 80;
+                        const midPt = midpointLatLng(a, b);
+                        const { pos: labelPos, rotateDeg } = useLeader
+                          ? { ...getSmallDistanceLabelPlacement(a, b, 38), rotateDeg: 0 }
+                          : getMeasLabelPlacement(a, b, 6);
                         segs.push(
                           <React.Fragment key={`meas_preview_seg_${i}`}>
-                          <DimensionSegment
-  a={a}
-  b={b}
-  opacity={1}
-  zIndex={30}
-  scale={measureScale}
-   pixelLen={getPixelLen(a, b)}
-/>
-                            <MeasureLabel
-  position={labelPos}
-  text={formatMeters(d)}
-  fontScale={measureScale}
-  rotateDeg={rotateDeg}
-/>
+                            <DimensionSegment a={a} b={b} opacity={1} zIndex={30} scale={measureScale} pixelLen={pxLen} />
+                            {useLeader && <PolylineF path={[midPt, labelPos]} options={leaderOpts} />}
+                            <MeasureLabel position={labelPos} text={formatMeters(d)} fontScale={measureScale} rotateDeg={rotateDeg} />
                           </React.Fragment>
                         );
                       }
@@ -11675,12 +11540,13 @@ height: pendingPictureTool.hPx * elementScale,
                     180) /
                   Math.PI;
 
+                lockMapInteractions(true);
+                rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
                 setUiDrag({
                   type: "rotateNorthArrow",
                   arrowId: na.id,
                   centerPx,
-                  startAngleDeg: na.rotDeg,
-                  startPointerAngleDeg: pointerAngleDeg,
+                  startAngleDeg: na.rotDeg ?? 0,
                 });
               }}
             >
@@ -11935,11 +11801,11 @@ height: pendingPictureTool.hPx * elementScale,
                                       : "grab",
                                   pointerEvents: "auto",
                                 }}
-                                onMouseDown={(ev) => {
+                                onPointerDown={(ev) => {
                                   ev.preventDefault();
                                   ev.stopPropagation();
+                                  ev.currentTarget.setPointerCapture?.(ev.pointerId);
                                   rotateStandGuardRef.current = true;
-                                  // mirror sign + north-arrow behavior: let map mousemove drive rotation
                                   if (!projectionReady) return;
 
                                   const centerPx = latLngToPx(st.pos);
@@ -11956,13 +11822,14 @@ height: pendingPictureTool.hPx * elementScale,
                                       180) /
                                     Math.PI;
 
+                                  lockMapInteractions(true);
+                                  rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
                                   setUiDrag({
                                     type: "rotateStand",
                                     signId: s.id,
                                     standId: st.id,
                                     centerPx,
                                     startAngleDeg: st.rotDeg ?? st.rotationDeg ?? 0,
-                                    startPointerAngleDeg: pointerAngleDeg,
                                   });
                                 }}
                               >
@@ -12114,7 +11981,7 @@ height: pendingPictureTool.hPx * elementScale,
                                   Math.PI;
 
                                 lockMapInteractions(true);
-                                rotateSignLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
+                                rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
                                 setUiDrag({
                                   type: "rotateSign",
                                   signId: s.id,
@@ -12452,7 +12319,12 @@ height: pendingPictureTool.hPx * elementScale,
                                     if (!projectionReady) return;
                                     const centerPx = latLngToPx(arrow.pos);
                                     if (!centerPx) return;
+                                    const startPointerPx = clientToDivPx(e.clientX, e.clientY);
+                                    const pointerAngleDeg = startPointerPx
+                                      ? (Math.atan2(startPointerPx.y - centerPx.y, startPointerPx.x - centerPx.x) * 180) / Math.PI
+                                      : 0;
                                     lockMapInteractions(true);
+                                    rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
                                     setUiDrag({
                                       type: "rotateArrow",
                                       arrowId: arrow.id,
@@ -12699,9 +12571,10 @@ height: pendingPictureTool.hPx * elementScale,
                                     cursor: isRotatingThisPt ? "grabbing" : "grab",
                                     pointerEvents: "auto",
                                   }}
-                                  onMouseDown={(ev) => {
+                                  onPointerDown={(ev) => {
                                     ev.preventDefault();
                                     ev.stopPropagation();
+                                    ev.currentTarget.setPointerCapture?.(ev.pointerId);
                                     rotateStandGuardRef.current = true;
                                     if (!projectionReady) return;
                                     const centerPx = latLngToPx(ptPos);
@@ -12710,13 +12583,13 @@ height: pendingPictureTool.hPx * elementScale,
                                     if (!startPointerPx) return;
                                     const pointerAngleDeg = (Math.atan2(startPointerPx.y - centerPx.y, startPointerPx.x - centerPx.x) * 180) / Math.PI;
                                     lockMapInteractions(true);
+                                    rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
                                     setUiDrag({
                                       type: "rotateArrowPoint",
                                       arrowId: arrow.id,
                                       pointId: pt.id,
                                       centerPx,
                                       startAngleDeg: pt.rotDeg ?? 0,
-                                      startPointerAngleDeg: pointerAngleDeg,
                                     });
                                   }}
                                 >
@@ -12887,7 +12760,12 @@ height: pendingPictureTool.hPx * elementScale,
                                   if (!projectionReady) return;
                                   const centerPx = latLngToPx(marking.pos);
                                   if (!centerPx) return;
+                                  const startPointerPx = clientToDivPx(e.clientX, e.clientY);
+                                  const pointerAngleDeg = startPointerPx
+                                    ? (Math.atan2(startPointerPx.y - centerPx.y, startPointerPx.x - centerPx.x) * 180) / Math.PI
+                                    : 0;
                                   lockMapInteractions(true);
+                                  rotationLiveRef.current = { lastAngleDeg: pointerAngleDeg, accumulatedDeg: 0 };
                                   setUiDrag({
                                     type: "rotateRoadMarking",
                                     markingId: marking.id,
