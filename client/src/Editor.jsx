@@ -4906,8 +4906,6 @@ setPanMode(false);
           path,
         },
       ]);
-      setActiveTool(null);
-      setConesPanelOpen(false);
     }
 
     cancelConesDrawing();
