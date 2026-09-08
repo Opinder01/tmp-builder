@@ -5847,6 +5847,7 @@ if (measEdit) {
     roadVerticesRef.current = [];
     setRoadVerticesState([]);
     setRoadHoverPoint(null);
+    setSelectedRoadId(null);
     return;
   }
 
@@ -5959,6 +5960,7 @@ useEffect(() => {
           roadVerticesRef.current = [];
           setRoadVerticesState([]);
           setRoadHoverPoint(null);
+          setSelectedRoadId(null);
         }
         // Arrows: Esc turns off tool
         if (isArrowToolActive) {
