@@ -5998,10 +5998,67 @@ useEffect(() => {
           setSignsPanelOpen(false);
         }
       }
+
+      if (e.key === "Enter") {
+        // Roads: Enter finalizes road (same as dblclick but no duplicate vertex to strip)
+        if (activeTool === "roads" && roadIsDrawing && roadVerticesRef.current.length >= 2) {
+          const verts = [...roadVerticesRef.current];
+          roadVerticesRef.current = [];
+          setRoadVerticesState([]);
+          setRoadIsDrawing(false);
+          setRoadHoverPoint(null);
+          const minD2 = (1 / 111320) ** 2;
+          const hasSpan = verts.some((v, i) => i > 0 &&
+            (v.lat - verts[0].lat) ** 2 + (v.lng - verts[0].lng) ** 2 > minD2);
+          if (hasSpan) {
+            const roadType = ROAD_TYPES.find(r => r.id === selectedRoadType) ?? ROAD_TYPES[0];
+            pushHistory();
+            const newId = crypto.randomUUID();
+            setRoads((prev) => [...prev, {
+              id: newId, type: selectedRoadType, edge: verts,
+              widthMeters: roadType.defaultWidth,
+              poly: computeRoadPolygon(verts, roadType.defaultWidth),
+              showArrows: false,
+            }]);
+            setSelectedRoadId(newId);
+          }
+        }
+
+        // Work area: Enter finalizes polygon
+        if (activeTool === "work_area" && isDrawingWorkArea && workDraft.length >= 3) {
+          pushHistory();
+          setWorkAreas((prev) => [...prev, { id: crypto.randomUUID(), path: [...workDraft] }]);
+          setIsDrawingWorkArea(false);
+          setWorkDraft([]);
+          setWorkHover(null);
+        }
+
+        // Cones: Enter finalizes cones path
+        if (activeTool === "cones" && conesIsDrawing) {
+          finalizeConesDrawing(null);
+        }
+
+        // Measurements combined: Enter finalizes
+        if (isMeasToolActive && measIsDrawing && measMode === "combined") {
+          finalizeMeasDrawing(null);
+        }
+
+        // insert:line: Enter finalizes polyline
+        if (activeTool === "insert:line" && lineDraft?.points?.length >= 2) {
+          const finalPath = lineDraft.points;
+          const id = crypto.randomUUID();
+          setInsertObjects((prev) => [
+            ...prev,
+            { id, kind: "line", path: finalPath, stroke: "#111111", strokeWidth: 3 },
+          ]);
+          setSelectedInsertId(id);
+          setLineDraft(null);
+        }
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [uiDrag, conesIsDrawing, measIsDrawing, isSignsToolActive, isArrowToolActive, activeTool, lineDraft, selectedWorkAreaId, isDrawingWorkArea, roadIsDrawing]);
+  }, [uiDrag, conesIsDrawing, measIsDrawing, isSignsToolActive, isArrowToolActive, activeTool, lineDraft, selectedWorkAreaId, isDrawingWorkArea, roadIsDrawing, workDraft, measMode, isMeasToolActive, selectedRoadType, pushHistory]);
 
 // ================= Keyboard shortcuts: Undo / Redo / Delete =================
 useEffect(() => {
