@@ -5863,6 +5863,15 @@ if (measEdit) {
     return;
   }
 
+  // stop roads draft — keep tool active so user can keep drawing
+  if (activeTool === "roads") {
+    setRoadIsDrawing(false);
+    roadVerticesRef.current = [];
+    setRoadVerticesState([]);
+    setRoadHoverPoint(null);
+    return;
+  }
+
   // stop any insert tool
   if (activeTool) {
     setPictureGhostPos(null);
