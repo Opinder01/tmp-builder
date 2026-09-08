@@ -5963,10 +5963,29 @@ useEffect(() => {
     function onKeyDown(e) {
       if (e.key === "Escape") {
         if (activeTool === "insert:line" && lineDraft) {
-  setLineDraft(null);
-}
-        if (activeTool === "work_area" && selectedWorkAreaId) {
-          setSelectedWorkAreaId(null);
+          setLineDraft(null);
+        }
+        // Work area: Esc cancels active draft first, then deselects
+        if (activeTool === "work_area") {
+          if (isDrawingWorkArea) {
+            setIsDrawingWorkArea(false);
+            setWorkDraft([]);
+            setWorkHover(null);
+          } else if (selectedWorkAreaId) {
+            setSelectedWorkAreaId(null);
+          }
+        }
+        // Roads: Esc cancels current draft, keeps tool active
+        if (activeTool === "roads" && roadIsDrawing) {
+          setRoadIsDrawing(false);
+          roadVerticesRef.current = [];
+          setRoadVerticesState([]);
+          setRoadHoverPoint(null);
+        }
+        // Arrows: Esc turns off tool
+        if (isArrowToolActive) {
+          setActiveTool(null);
+          setArrowPanelOpen(false);
         }
 
         if (uiDrag) setUiDrag(null);
@@ -5982,7 +6001,7 @@ useEffect(() => {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [uiDrag, conesIsDrawing, measIsDrawing, isSignsToolActive, activeTool, lineDraft, selectedWorkAreaId]);
+  }, [uiDrag, conesIsDrawing, measIsDrawing, isSignsToolActive, isArrowToolActive, activeTool, lineDraft, selectedWorkAreaId, isDrawingWorkArea, roadIsDrawing]);
 
 // ================= Keyboard shortcuts: Undo / Redo / Delete =================
 useEffect(() => {
@@ -7546,7 +7565,12 @@ const mapCursor =
   isTitleToolActive ||
   isNorthArrowToolActive ||
   isInsertToolActive ||
-  activeTool === "work_area"
+  isArrowToolActive ||
+  activeTool === "roads" ||
+  activeTool === "work_area" ||
+  activeTool === "scale" ||
+  activeTool === "legend" ||
+  activeTool === "manifest"
     ? PENCIL_CURSOR
     : "grab";
 
