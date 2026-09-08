@@ -128,7 +128,6 @@ async function sendOtpEmail(email, otp) {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_DEVICES  = 2;
-const SESSION_DAYS = 30;
 const OTP_TTL_MS   = 10 * 60 * 1000;
 
 // ── Input validation ─────────────────────────────────────────────────────────
@@ -214,8 +213,6 @@ export default async function handler(req, res) {
     }
 
     // Create session — enforce device limit
-    const expiryDate = new Date(Date.now() - SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from("user_sessions").delete().eq("email", norm).lt("last_active", expiryDate);
 
     // If the browser already has a valid session for this account, reuse it (same device re-login)
     const { existingToken } = req.body || {};
