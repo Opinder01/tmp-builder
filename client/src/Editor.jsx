@@ -9578,38 +9578,6 @@ const tileIconStyle = {
                 })}
               </div>
 
-              {/* ── Pavement Markings ── */}
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 8, marginTop: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Pavement Markings</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
-                {ROAD_MARKING_TYPES.map((mt) => {
-                  const active = selectedRoadMarkingType === mt.id;
-                  return (
-                    <button key={mt.id} type="button"
-                      onClick={() => { setSelectedRoadMarkingType(active ? null : mt.id); setSelectedRoadMarkingId(null); }}
-                      style={{
-                        display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
-                        padding: "8px 6px",
-                        border: active ? "2px solid #1e3a5f" : "1.5px solid #e5e5e5",
-                        borderRadius: 8, background: active ? "#f0f4ff" : "#fff",
-                        cursor: "pointer", textAlign: "center",
-                      }}>
-                      {/* SVG preview — background included in renderPanel SVG */}
-                      <div style={{ width: 36, height: 52, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <svg viewBox={mt.viewBox} width={28} height={44} style={{ display: "block" }}>
-                          {mt.renderPanel()}
-                        </svg>
-                      </div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: active ? "#1e3a5f" : "#444", lineHeight: 1.2 }}>{mt.label}</div>
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedRoadMarkingType && (
-                <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "7px 10px", marginBottom: 10, fontSize: 11, color: "#92400e" }}>
-                  Click anywhere on the map to place. Click again to add more.
-                  <button type="button" onClick={() => setSelectedRoadMarkingType(null)} style={{ display: "block", marginTop: 4, background: "none", border: "none", color: "#1e3a5f", fontWeight: 700, cursor: "pointer", fontSize: 11, padding: 0 }}>✕ Stop placing</button>
-                </div>
-              )}
 
               {selectedRoadId && (() => {
                 // Selected road properties editor
