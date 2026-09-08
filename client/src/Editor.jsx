@@ -4733,6 +4733,7 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   setMeasPanelOpen(false);
   setSignsPanelOpen(false);
   setArrowPanelOpen(false);
+  setRoadsPanelOpen(false);
 }
 function openMeasTool() {
   if (conesIsDrawing) cancelConesDrawing();
@@ -4742,6 +4743,7 @@ function openMeasTool() {
   setConesPanelOpen(false);
   setSignsPanelOpen(false);
   setArrowPanelOpen(false);
+  setRoadsPanelOpen(false);
 }
 
   function openWorkAreaTool() {
@@ -4776,6 +4778,7 @@ setPanMode(false);
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
     setArrowPanelOpen(false);
+    setRoadsPanelOpen(false);
     if (conesIsDrawing) cancelConesDrawing();
     if (measIsDrawing) cancelMeasDrawing();
     setSelectedConeId(null);
