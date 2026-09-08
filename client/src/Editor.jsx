@@ -8791,12 +8791,12 @@ const tileIconStyle = {
           >
             {activeTab === "Plan Elements" && (
               <RibbonGroup>
-                <RibbonTextButton label="Cones" active={isConesToolActive} onClick={openConesTool} variant="outline" />
-<RibbonTextButton label="Signs" active={isSignsToolActive} onClick={openSignsTool} variant="outline" />
-<RibbonTextButton label="Measurements" active={isMeasToolActive} onClick={openMeasTool} variant="outline" />
-<RibbonTextButton label="Work Area" active={activeTool === "work_area"} onClick={openWorkAreaTool} variant="outline" />
-<RibbonTextButton label="Arrow" active={isArrowToolActive} onClick={openArrowTool} variant="outline" />
-<RibbonTextButton label="Roads" active={activeTool === "roads"} onClick={openRoadsTool} variant="outline" />
+                <RibbonTextButton label="Cones" active={isConesToolActive} onClick={isConesToolActive ? deactivateAllTools : openConesTool} variant="outline" />
+<RibbonTextButton label="Signs" active={isSignsToolActive} onClick={isSignsToolActive ? deactivateAllTools : openSignsTool} variant="outline" />
+<RibbonTextButton label="Measurements" active={isMeasToolActive} onClick={isMeasToolActive ? deactivateAllTools : openMeasTool} variant="outline" />
+<RibbonTextButton label="Work Area" active={activeTool === "work_area"} onClick={activeTool === "work_area" ? deactivateAllTools : openWorkAreaTool} variant="outline" />
+<RibbonTextButton label="Arrow" active={isArrowToolActive} onClick={isArrowToolActive ? deactivateAllTools : openArrowTool} variant="outline" />
+<RibbonTextButton label="Roads" active={activeTool === "roads"} onClick={activeTool === "roads" ? deactivateAllTools : openRoadsTool} variant="outline" />
 
 
               </RibbonGroup>
