@@ -25,10 +25,11 @@ export default function Login() {
     let sessionToken = null;
 
     try {
+      const existingToken = localStorage.getItem("sessionToken") || null;
       const res = await fetch("/api/auth?action=login", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ email, password }),
+        body:    JSON.stringify({ email, password, existingToken }),
       });
 
       const data = await res.json().catch(() => ({}));

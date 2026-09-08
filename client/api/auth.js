@@ -217,6 +217,24 @@ export default async function handler(req, res) {
     const expiryDate = new Date(Date.now() - SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
     await supabase.from("user_sessions").delete().eq("email", norm).lt("last_active", expiryDate);
 
+    // If the browser already has a valid session for this account, reuse it (same device re-login)
+    const { existingToken } = req.body || {};
+    if (existingToken) {
+      const { data: existing } = await supabase
+        .from("user_sessions").select("id").eq("email", norm).eq("session_token", existingToken).maybeSingle();
+      if (existing) {
+        await supabase.from("user_sessions").update({ last_active: new Date().toISOString() })
+          .eq("session_token", existingToken);
+        return json(res, 200, {
+          email:       user.email,
+          fullName:    user.full_name,
+          companyName: user.company_name,
+          phone:       user.phone,
+          sessionToken: existingToken,
+        });
+      }
+    }
+
     const { data: sessions } = await supabase
       .from("user_sessions").select("id").eq("email", norm);
 
