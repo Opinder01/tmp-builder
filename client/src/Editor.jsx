@@ -10258,6 +10258,9 @@ draggingCursor:
             setSelectedRoadId(isSelected ? null : road.id);
           }
         }}
+        onRightClick={() => {
+          setSelectedRoadId(null);
+        }}
       />
       {/* edge lines (white) */}
       <PolylineF path={edge1} options={{ ...basePolyOpts, strokeColor: "#fff", strokeWeight: 1.5, strokeOpacity: 0.8, zIndex: 2 }} />
