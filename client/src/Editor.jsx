@@ -5357,29 +5357,6 @@ const latLng = e.latLng?.toJSON?.() ?? null;
 
 
 
-      // ===== PICTURE placement =====
-if (activeTool === "insert:picture" && pendingPictureTool) {
-  const id = String(Date.now()) + "-" + Math.random();
-  setInsertObjects((prev) => [
-    ...prev,
-    {
-      id,
-      kind: "picture",
-      pos: p,
-      wPx: pendingPictureTool.wPx,
-      hPx: pendingPictureTool.hPx,
-      zRef: ELEMENT_BASE_ZOOM,
-      dataUrl: pendingPictureTool.dataUrl,
-      rotDeg: 0,
-    },
-  ]);
-
-  setPendingPictureTool(null);
-  setPictureGhostPos(null);
-  setActiveTool(null);
-  return;
-}
-
 // TABLE placement
 if (activeTool === "insert:table") {
   const id = String(Date.now() + Math.random());
@@ -5532,11 +5509,8 @@ if (activeTool?.startsWith("insert:")) {
 
     setInsertObjects((prev) => [...prev, obj]);
     setSelectedInsertId(id);
-
     setPendingPictureTool(null);
-    // keep tool ON if you want repeated placement:
-    // setActiveTool("insert:picture");
-    // or turn it off:
+    setPictureGhostPos(null);
     setActiveTool(null);
     return;
   }
