@@ -155,10 +155,14 @@ export default function Subscribe() {
 
     try {
       console.log("[Stripe] Sending POST /api/stripe/create-checkout-session …");
+      const sessionToken = localStorage.getItem("sessionToken") || "";
       const res = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: plan.id, email: user?.email }),
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify({ plan: plan.id }),
       });
 
       console.log("[Stripe] Response status:", res.status, res.ok ? "OK" : "ERROR");

@@ -1,6 +1,11 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+const ALLOWED_ORIGINS = new Set([
+  "https://tmpbuilder.ca", "https://www.tmpbuilder.ca",
+  "http://localhost:3000", "http://localhost:5173", "http://localhost:4173",
+]);
+
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
@@ -8,9 +13,13 @@ function json(res, status, body) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers?.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return json(res, 204, {});
 
   if (req.method !== "POST") {
@@ -18,24 +27,32 @@ export default async function handler(req, res) {
     return json(res, 405, { error: "Method not allowed" });
   }
 
-  const { plan, email } = req.body || {};
+  // ── Session authentication ─────────────────────────────────────────────────
+  const authHeader = req.headers?.authorization || "";
+  const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  if (!sessionToken) return json(res, 401, { error: "Authentication required." });
 
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return json(res, 500, { error: "Server configuration error." });
+
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  const { data: session } = await supabase
+    .from("user_sessions").select("email")
+    .eq("session_token", sessionToken).maybeSingle();
+  if (!session) return json(res, 401, { error: "Invalid or expired session." });
+
+  // Use the session's email as the authoritative identity — ignore body email
+  const normalizedEmail = session.email;
+
+  const { plan } = req.body || {};
   if (!plan || !["monthly", "yearly"].includes(plan)) {
     return json(res, 400, { error: 'Invalid plan. Must be "monthly" or "yearly".' });
   }
-  if (!email || !email.includes("@")) {
-    return json(res, 400, { error: "email is required." });
-  }
-
-  const normalizedEmail = email.toLowerCase().trim();
 
   const secretKey   = process.env.STRIPE_SECRET_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!secretKey) {
-    return json(res, 500, { error: "Stripe secret key not configured." });
-  }
+  if (!secretKey) return json(res, 500, { error: "Payment service not configured." });
 
   const priceId =
     plan === "monthly"
@@ -43,7 +60,7 @@ export default async function handler(req, res) {
       : process.env.STRIPE_PRICE_YEARLY;
 
   if (!priceId) {
-    return json(res, 500, { error: `Price ID for plan "${plan}" not configured.` });
+    return json(res, 500, { error: "Plan pricing not configured." });
   }
 
   const appUrl = (process.env.APP_URL || "https://tmpbuilder.ca").replace(/\/$/, "");
@@ -52,40 +69,34 @@ export default async function handler(req, res) {
   // ── Find or create a valid Stripe Customer ──────────────────────────────────
   let customerId = null;
 
-  // Helper: verify a customer ID still exists in Stripe
   async function isValidCustomer(id) {
     if (!id) return false;
     try {
       const c = await stripe.customers.retrieve(id);
       return !c.deleted;
     } catch {
-      return false; // "No such customer" or network error
+      return false;
     }
   }
 
   try {
     // 1. Check Supabase for a saved customer ID
-    if (supabaseUrl && serviceKey) {
-      const supabase = createClient(supabaseUrl, serviceKey);
-      const { data } = await supabase
-        .from("subscriptions")
-        .select("stripe_customer_id")
-        .eq("email", normalizedEmail)
-        .maybeSingle();
+    const { data: subData } = await supabase
+      .from("subscriptions")
+      .select("stripe_customer_id")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
 
-      if (data?.stripe_customer_id) {
-        // Verify the customer still exists in Stripe before trusting it
-        if (await isValidCustomer(data.stripe_customer_id)) {
-          customerId = data.stripe_customer_id;
-          console.log("[checkout] found valid customer in Supabase:", customerId);
-        } else {
-          console.log("[checkout] Supabase customer ID is stale/deleted — will create new one:", data.stripe_customer_id);
-          // Clear the stale customer ID from Supabase
-          await supabase
-            .from("subscriptions")
-            .update({ stripe_customer_id: null, stripe_subscription_id: null })
-            .eq("email", normalizedEmail);
-        }
+    if (subData?.stripe_customer_id) {
+      if (await isValidCustomer(subData.stripe_customer_id)) {
+        customerId = subData.stripe_customer_id;
+        console.log("[checkout] found valid customer in Supabase:", customerId);
+      } else {
+        console.log("[checkout] stale customer ID — will create new one:", subData.stripe_customer_id);
+        await supabase
+          .from("subscriptions")
+          .update({ stripe_customer_id: null, stripe_subscription_id: null })
+          .eq("email", normalizedEmail);
       }
     }
 
@@ -107,8 +118,7 @@ export default async function handler(req, res) {
     }
 
     // 4. Persist the valid customer ID to Supabase
-    if (supabaseUrl && serviceKey && customerId) {
-      const supabase = createClient(supabaseUrl, serviceKey);
+    if (customerId) {
       await supabase
         .from("subscriptions")
         .upsert(
@@ -121,16 +131,15 @@ export default async function handler(req, res) {
     // Non-fatal — fall back to customer_email
   }
 
-  // ── Check if customer already used their free trial ───────────────────────
+  // ── Check if customer already used their free trial ─────────────────────────
   let hadTrial = false;
   if (customerId) {
     try {
       const allSubs = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 10 });
-      // If ANY past subscription exists (including cancelled), trial was already used
       hadTrial = allSubs.data.length > 0;
       console.log("[checkout] hadTrial:", hadTrial, "for customer:", customerId);
     } catch (err) {
-      console.warn("[checkout] Could not check trial history:", err.message);
+      console.warn("[checkout] could not check trial history:", err.message);
     }
   }
 
@@ -150,11 +159,11 @@ export default async function handler(req, res) {
       sessionParams.customer_email = normalizedEmail;
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
-    console.log("[checkout] ✅ session created:", session.id);
-    return json(res, 200, { url: session.url });
+    const checkoutSession = await stripe.checkout.sessions.create(sessionParams);
+    console.log("[checkout] ✅ session created:", checkoutSession.id);
+    return json(res, 200, { url: checkoutSession.url });
   } catch (err) {
     console.error("[checkout] Stripe error:", err.message);
-    return json(res, 500, { error: err.message || "Failed to create checkout session." });
+    return json(res, 500, { error: "Failed to create checkout session." });
   }
 }

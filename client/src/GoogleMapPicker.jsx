@@ -3,7 +3,6 @@ import { Autocomplete, GoogleMap, Marker, useLoadScript } from "@react-google-ma
 
 export default function GoogleMapPicker({ onConfirm }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-   console.log("GOOGLE KEY:", apiKey);   // ✅ correct place
 
   const libraries = useMemo(() => ["places", "geometry"], []);
   const { isLoaded, loadError } = useLoadScript({

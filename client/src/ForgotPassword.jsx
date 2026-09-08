@@ -55,7 +55,7 @@ export default function ForgotPassword() {
     e.preventDefault();
     setError(""); setSuccess("");
     if (!otpSent)                         { setError("Please send OTP first."); return; }
-    if (!otpToken)                        { setError("No account found with that email address."); return; }
+    if (!otpToken)                        { setError("No reset code was issued. Please click 'Send OTP' first."); return; }
     if (!otp)                             { setError("Please enter the OTP."); return; }
     if (!newPassword || !confirmPassword) { setError("Please enter and confirm your new password."); return; }
     if (newPassword.length < 6)           { setError("Password must be at least 6 characters."); return; }

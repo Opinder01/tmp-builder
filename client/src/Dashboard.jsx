@@ -111,10 +111,14 @@ useEffect(() => {
     setPortalLoading(true);
     setPortalError("");
     try {
+      const sessionToken = localStorage.getItem("sessionToken") || "";
       const res = await fetch("/api/stripe/billing-portal", {
         method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ email: user?.email }),
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${sessionToken}`,
+        },
+        body:    JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Could not open billing portal.");

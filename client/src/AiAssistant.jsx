@@ -63,9 +63,13 @@ export default function AiAssistant() {
     setLoading(true);
 
     try {
+      const sessionToken = localStorage.getItem("sessionToken") || "";
       const res  = await fetch("/api/ai-assistant", {
         method:  "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${sessionToken}`,
+        },
         body:    JSON.stringify({ messages: next }),
       });
       const data = await res.json();

@@ -13,8 +13,15 @@ function json(res, status, body) {
  * the customer ID, subscription ID, plan, and trial-end date to localStorage.
  */
 export default async function handler(req, res) {
-  // Allow CORS for local dev
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const ALLOWED_ORIGINS = new Set([
+    "https://tmpbuilder.ca", "https://www.tmpbuilder.ca",
+    "http://localhost:3000", "http://localhost:5173", "http://localhost:4173",
+  ]);
+  const origin = req.headers?.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return json(res, 204, {});
@@ -89,6 +96,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("[get-session] error:", err.message);
-    return json(res, 500, { error: err.message });
+    return json(res, 500, { error: "Failed to retrieve session." });
   }
 }

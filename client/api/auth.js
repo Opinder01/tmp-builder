@@ -44,7 +44,8 @@ function rateLimit(ip, key, maxAttempts, windowSec) {
   return e.n > maxAttempts;
 }
 function getIp(req) {
-  return (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+  return req.headers["x-real-ip"]
+    || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
     || req.socket?.remoteAddress || "unknown";
 }
 
@@ -157,6 +158,10 @@ export default async function handler(req, res) {
   // ── REGISTER ──────────────────────────────────────────────────────────────
   if (action === "register") {
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+
+    // Rate limit: 5 registrations per IP per hour
+    if (rateLimit(ip, "register", 5, 3600))
+      return json(res, 429, { error: "Too many registration attempts. Please wait an hour and try again." });
 
     const { email, password, fullName, companyName, phone } = req.body || {};
     if (!email || !password || !fullName || !companyName || !phone)
@@ -275,8 +280,8 @@ export default async function handler(req, res) {
     // Check existence — but return a generic success even if not found to prevent enumeration
     const { data: user } = await supabase.from("app_users").select("email").eq("email", norm).maybeSingle();
     if (!user) {
-      // No account found — return success without sending email (prevents email bombing + user enumeration)
-      return json(res, 200, { otpToken: null, noAccount: true });
+      // No account found — return generic success without sending email (prevents user enumeration)
+      return json(res, 200, { ok: true });
     }
 
     const otp      = String(crypto.randomInt(100_000, 1_000_000));

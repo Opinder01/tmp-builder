@@ -1,6 +1,13 @@
 // AI Assistant API — BC TMM MOTI Traffic Management Plan helper
 // Uses OpenAI GPT-4o-mini. Set OPENAI_API_KEY in Vercel env vars.
 
+import { createClient } from "@supabase/supabase-js";
+
+const ALLOWED_ORIGINS = new Set([
+  "https://tmpbuilder.ca", "https://www.tmpbuilder.ca",
+  "http://localhost:3000", "http://localhost:5173", "http://localhost:4173",
+]);
+
 // System prompt built from the 2020 BC Traffic Management Manual for Work on Roadways (BC TMM MOTI)
 const SYSTEM_PROMPT = `You are a professional Traffic Management Plan (TMP) assistant specialising in BC Ministry of Transportation and Infrastructure (MOTI) standards and the 2020 BC Traffic Management Manual for Work on Roadways (BC TMM).
 
@@ -229,6 +236,21 @@ For tapers: use sequential synchronized flashing lights or steady-burn lights fr
 7. Always base device spacing and taper lengths on the regular posted speed limit, not the construction speed limit.
 `;
 
+// In-memory rate limiter (best-effort; clears on cold start)
+const _rl = new Map();
+function rateLimit(ip, maxAttempts, windowSec) {
+  const now = Date.now();
+  const e = _rl.get(ip);
+  if (!e || now > e.r) { _rl.set(ip, { n: 1, r: now + windowSec * 1000 }); return false; }
+  e.n++;
+  return e.n > maxAttempts;
+}
+function getIp(req) {
+  return req.headers["x-real-ip"]
+    || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+    || req.socket?.remoteAddress || "unknown";
+}
+
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
@@ -236,15 +258,42 @@ function json(res, status, body) {
 }
 
 export default async function handler(req, res) {
+  const origin = req.headers?.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return json(res, 204, {});
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return json(res, 405, { error: "Method not allowed" });
   }
 
+  // ── Session authentication ─────────────────────────────────────────────────
+  const authHeader = req.headers?.authorization || "";
+  const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  if (!sessionToken) return json(res, 401, { error: "Authentication required." });
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return json(res, 500, { error: "Server configuration error." });
+
+  const supabase = createClient(supabaseUrl, serviceKey);
+  const { data: session } = await supabase
+    .from("user_sessions").select("email")
+    .eq("session_token", sessionToken).maybeSingle();
+  if (!session) return json(res, 401, { error: "Invalid or expired session." });
+
+  // ── Rate limit: 30 AI requests per user per hour ───────────────────────────
+  const ip = getIp(req);
+  if (rateLimit(`ai:${session.email}:${ip}`, 30, 3600))
+    return json(res, 429, { error: "Too many AI requests. Please wait before sending more." });
+
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return json(res, 500, { error: "OPENAI_API_KEY not configured." });
-  }
+  if (!apiKey) return json(res, 500, { error: "AI service not configured." });
 
   const { messages } = req.body || {};
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -278,7 +327,7 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       console.error("[ai-assistant] OpenAI error:", JSON.stringify(data));
-      return json(res, 500, { error: data?.error?.message || "AI request failed." });
+      return json(res, 500, { error: "AI request failed." });
     }
 
     const reply = data?.choices?.[0]?.message?.content || "";
@@ -286,6 +335,6 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("[ai-assistant] unexpected error:", err.message);
-    return json(res, 500, { error: "AI request failed: " + err.message });
+    return json(res, 500, { error: "AI request failed." });
   }
 }
