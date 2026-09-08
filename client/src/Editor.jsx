@@ -4756,6 +4756,7 @@ if (measIsDrawing) cancelMeasDrawing();
   setMeasPanelOpen(false);
   setSignsPanelOpen(false);
   setArrowPanelOpen(false);
+  setRoadsPanelOpen(false);
 setPanMode(false);
 
   // reset work area draft when starting fresh
