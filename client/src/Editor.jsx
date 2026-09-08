@@ -2957,6 +2957,30 @@ const doDelete = React.useCallback(() => {
     return;
   }
 
+  // delete selected road
+  if (selectedRoadId) {
+    pushHistory();
+    setRoads((prev) => prev.filter((r) => r.id !== selectedRoadId));
+    setSelectedRoadId(null);
+    return;
+  }
+
+  // delete selected cone path
+  if (selectedConeId) {
+    pushHistory();
+    setConesFeatures((prev) => prev.filter((c) => c.id !== selectedConeId));
+    setSelectedConeId(null);
+    return;
+  }
+
+  // delete selected measurement
+  if (selectedMeasId) {
+    pushHistory();
+    setMeasurements((prev) => prev.filter((m) => m.id !== selectedMeasId));
+    setSelectedMeasId(null);
+    return;
+  }
+
   // delete “Tools / Signs / Arrow / Scale” via selectedEntity
   if (!selectedEntity) return;
 
@@ -2982,10 +3006,15 @@ const doDelete = React.useCallback(() => {
     setPlacedSigns((prev) => prev.filter((s) => s.id !== selectedEntity.id));
   } else if (selectedEntity.kind === "arrow") {
     setPlacedArrows((prev) => prev.filter((a) => a.id !== selectedEntity.id));
+  } else if (selectedEntity.kind === "stand") {
+    setPlacedSigns((prev) => prev.map((s) => ({
+      ...s,
+      stands: (s.stands || []).filter((st) => st.id !== selectedEntity.id),
+    })));
   }
 
   setSelectedEntity(null);
-}, [selectedInsertId, selectedWorkAreaId, selectedEntity, selectedRoadMarkingId]);
+}, [selectedInsertId, selectedWorkAreaId, selectedEntity, selectedRoadMarkingId, selectedRoadId, selectedConeId, selectedMeasId]);
 
 
 
@@ -3041,6 +3070,10 @@ function promptEditInsertText(obj) {
     roadVerticesRef.current = [];
     setRoadVerticesState([]);
     setRoadHoverPoint(null);
+    setIsDrawingWorkArea(false);
+    setWorkDraft([]);
+    setWorkHover(null);
+    setLineDraft(null);
     setActiveTool(null);
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
@@ -4757,7 +4790,6 @@ if (measIsDrawing) cancelMeasDrawing();
   setSignsPanelOpen(false);
   setArrowPanelOpen(false);
   setRoadsPanelOpen(false);
-setPanMode(false);
 
   // reset work area draft when starting fresh
   setIsDrawingWorkArea(false);
@@ -4969,6 +5001,7 @@ setPanMode(false);
     if (measMode === "combined" && path.length >= 2) {
       const cleaned = normalizeCombinedPath(path);
       if (cleaned.length >= 2) {
+        pushHistory();
         setMeasurements((prev) => [
           ...prev,
           {
@@ -5671,9 +5704,9 @@ if (measEdit) return;
   }
 
   // block the synthetic click that follows dblclick
-  if (dblClickGuardRef?.current) dblClickGuardRef.current = true;
+  if (dblClickGuardRef) dblClickGuardRef.current = true;
   setTimeout(() => {
-    if (dblClickGuardRef?.current) dblClickGuardRef.current = false;
+    if (dblClickGuardRef) dblClickGuardRef.current = false;
   }, 0);
 
   const ll = e?.latLng;
@@ -5856,10 +5889,12 @@ if (measEdit) {
   // stop any insert tool
   if (activeTool) {
     setPictureGhostPos(null);
+    setLineDraft(null);
     setActiveTool(null);
     setConesPanelOpen(false);
     setMeasPanelOpen(false);
     setSignsPanelOpen(false);
+    setArrowPanelOpen(false);
     return;
   }
 
@@ -5874,57 +5909,56 @@ if (measEdit) {
 useEffect(() => {
   const deselect = () => setSelectedWorkAreaId(null);
   window.addEventListener("contextmenu", deselect, true); // capture phase
-  window.addEventListener("pointerup", (e) => { if (e.button === 2) deselect(); });
+  const onPointerUp = (e) => { if (e.button === 2) deselect(); };
+  window.addEventListener("pointerup", onPointerUp);
   return () => {
     window.removeEventListener("contextmenu", deselect, true);
+    window.removeEventListener("pointerup", onPointerUp);
   };
 }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 // ── Mutual exclusion: only one thing selected at a time ─────────────────────
 useEffect(() => {
   if (selectedWorkAreaId != null) {
-    setSelectedInsertId(null);
-    setSelectedEntity(null);
-    setSelectedConeId(null);
-    setSelectedMeasId(null);
+    setSelectedInsertId(null); setSelectedEntity(null);
+    setSelectedConeId(null); setSelectedMeasId(null); setSelectedRoadId(null);
   }
 }, [selectedWorkAreaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 useEffect(() => {
   if (selectedInsertId != null) {
-    setSelectedWorkAreaId(null);
-    setSelectedEntity(null);
-    setSelectedConeId(null);
-    setSelectedMeasId(null);
+    setSelectedWorkAreaId(null); setSelectedEntity(null);
+    setSelectedConeId(null); setSelectedMeasId(null); setSelectedRoadId(null);
   }
 }, [selectedInsertId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 useEffect(() => {
   if (selectedEntity != null) {
-    setSelectedWorkAreaId(null);
-    setSelectedInsertId(null);
-    setSelectedConeId(null);
-    setSelectedMeasId(null);
+    setSelectedWorkAreaId(null); setSelectedInsertId(null);
+    setSelectedConeId(null); setSelectedMeasId(null); setSelectedRoadId(null);
   }
 }, [selectedEntity]); // eslint-disable-line react-hooks/exhaustive-deps
 
 useEffect(() => {
   if (selectedConeId != null) {
-    setSelectedWorkAreaId(null);
-    setSelectedInsertId(null);
-    setSelectedEntity(null);
-    setSelectedMeasId(null);
+    setSelectedWorkAreaId(null); setSelectedInsertId(null);
+    setSelectedEntity(null); setSelectedMeasId(null); setSelectedRoadId(null);
   }
 }, [selectedConeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 useEffect(() => {
   if (selectedMeasId != null) {
-    setSelectedWorkAreaId(null);
-    setSelectedInsertId(null);
-    setSelectedEntity(null);
-    setSelectedConeId(null);
+    setSelectedWorkAreaId(null); setSelectedInsertId(null);
+    setSelectedEntity(null); setSelectedConeId(null); setSelectedRoadId(null);
   }
 }, [selectedMeasId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+useEffect(() => {
+  if (selectedRoadId != null) {
+    setSelectedWorkAreaId(null); setSelectedInsertId(null);
+    setSelectedEntity(null); setSelectedConeId(null); setSelectedMeasId(null);
+  }
+}, [selectedRoadId]); // eslint-disable-line react-hooks/exhaustive-deps
 // ────────────────────────────────────────────────────────────────────────────
 
 useEffect(() => {
@@ -5946,7 +5980,7 @@ useEffect(() => {
         if (activeTool === "insert:line" && lineDraft) {
           setLineDraft(null);
         }
-        // Work area: Esc cancels active draft first, then deselects
+        // Work area: Esc cancels draft → then deselects → then turns off tool
         if (activeTool === "work_area") {
           if (isDrawingWorkArea) {
             setIsDrawingWorkArea(false);
@@ -5954,6 +5988,8 @@ useEffect(() => {
             setWorkHover(null);
           } else if (selectedWorkAreaId) {
             setSelectedWorkAreaId(null);
+          } else {
+            setActiveTool(null);
           }
         }
         // Roads: Esc cancels current draft, keeps tool active
@@ -6284,7 +6320,9 @@ useEffect(() => {
         uiDrag.type === "rotateArrowPoint" ||
         uiDrag.type === "moveRoadMarking" ||
         uiDrag.type === "resizeRoadMarking" ||
-        uiDrag.type === "rotateRoadMarking"
+        uiDrag.type === "rotateRoadMarking" ||
+        uiDrag.type === "moveRoadVertex" ||
+        uiDrag.type === "resizeRoadWidth"
       ) {
         pushHistory();
       }
@@ -6325,9 +6363,6 @@ useEffect(() => {
       }
       if (uiDrag.type === "moveExportArea") {
         setExportLiveRect(null);
-      }
-      if (uiDrag.type === "moveRoadVertex" || uiDrag.type === "resizeRoadWidth") {
-        pushHistory();
       }
       setUiDrag(null);
     }
@@ -7718,10 +7753,6 @@ const mapCursor =
 
   /* ================= helpers for selecting & drags ================= */
   const onSelectSign = (id) => {
-    // If user clicks an existing sign while the Signs tool is active,
-    // disable placement so the click/drag doesn't place a new sign on the map.
-    setActiveTool(null);
-    setSignsPanelOpen(false);
     setSelectedEntity({ kind: "sign", id });
   };
   const onSelectStand = (signId, standId) => {
