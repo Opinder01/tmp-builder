@@ -5568,9 +5568,13 @@ return;
 }
 
 
-      // SIGNS place repeatedly
+      // SIGNS: deselect first if a sign is selected, otherwise place
       if (isSignsToolActive) {
-        placeSignAt(p);
+        if (selectedEntity?.kind === "sign") {
+          setSelectedEntity(null);
+        } else {
+          placeSignAt(p);
+        }
         return;
       }
 
@@ -12268,12 +12272,11 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                           onMouseEnter={() => setArrowHoveredId(arrow.id)}
                           onMouseLeave={() => setArrowHoveredId(null)}
-                          onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setSelectedEntity({ kind: "arrow", id: arrow.id }); setActiveTool(null); setArrowPanelOpen(false); }}
+                          onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setSelectedEntity({ kind: "arrow", id: arrow.id }); }}
                           onPointerDown={(ev) => {
                             ev.preventDefault(); ev.stopPropagation();
                             ev.currentTarget.setPointerCapture?.(ev.pointerId);
                             setSelectedEntity({ kind: "arrow", id: arrow.id });
-                            setActiveTool(null); setArrowPanelOpen(false);
                             if (!projectionReady) return;
                             const centerPx = latLngToPx(arrow.pos);
                             if (!centerPx) return;
