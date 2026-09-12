@@ -13,7 +13,7 @@ export const SIGN_CATALOG_GENERATED = [
   { id: "B-C-004-Tc", label: "B-C-004-Tc", category: "general", src: "/signs/B-C-004-Tc.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "B-C-020", label: "B-C-020", category: "general", src: "/signs/B-C-020.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "B-C-020-T", label: "B-C-020-T", category: "general", src: "/signs/B-C-020-T.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
-  { id: "C-001-1", label: "C-001-1", category: "general", src: "/signs/C-001-1.png", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
+  { id: "C-001-1", label: "C-001-1", category: "general", src: "/signs/C-001-1.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "C-001-2", label: "C-001-2", category: "general", src: "/signs/C-001-2.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "C-002-1", label: "C-002-1", category: "general", src: "/signs/C-002-1.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "C-002-1OL", label: "C-002-1OL", category: "general", src: "/signs/C-002-1OL.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
@@ -277,7 +277,6 @@ export const SIGN_CATALOG_GENERATED = [
   { id: "R-90",  label: "R-90",  category: "general", src: "/signs/R-90.svg",  defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "W-132-1Tu", label: "W-132-1Tu", category: "general", src: "/signs/W-132-1Tu.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
   { id: "W-132-1u", label: "W-132-1u", category: "general", src: "/signs/W-132-1u.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
-  { id: "Zx-030", label: "Zx-030", category: "general", src: "/signs/Zx-030.svg", defaultWidth: 64, defaultHeight: 64, supportsTripod: true, supportsWindmaster: true, supportsRotation: true },
 ];
 
 export const GENERATED_AT = "2026-05-05T09:51:49.669Z";
