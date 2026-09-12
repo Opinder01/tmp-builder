@@ -87,7 +87,7 @@ function ParticleCanvas() {
 // ── Real sign images scattered in background ──────────────────────────────────
 const SIGNS = [
   // sign src, size, top, left/right, animation delay, rotate start
-  { src: "/signs/C-001-1.png",   size: 110, top: "8%",  left: "4%",   delay: "0s",    dur: "18s", rot: "-8deg"  },
+  { src: "/signs/C-001-1.svg",   size: 110, top: "8%",  left: "4%",   delay: "0s",    dur: "18s", rot: "-8deg"  },
   { src: "/signs/C-018-1A.png",  size: 100, top: "12%", right: "5%",  delay: "3s",    dur: "22s", rot: "7deg"   },
   { src: "/signs/W-132-1u.svg",  size: 90,  top: "55%", left: "2%",   delay: "1.5s",  dur: "20s", rot: "-5deg"  },
   { src: "/signs/B-C-004-1L.svg",size: 120, top: "60%", right: "3%",  delay: "5s",    dur: "24s", rot: "4deg"   },
