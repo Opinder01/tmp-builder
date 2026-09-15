@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { supabase } from "./supabaseClient.js";
 
 const AuthContext = createContext(null);
@@ -7,6 +7,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined); // undefined = loading
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const lastProfileUserId = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
@@ -19,9 +20,18 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!session) {
       setProfile(null);
+      lastProfileUserId.current = null;
       return;
     }
-    setProfileLoading(true);
+    // Supabase fires onAuthStateChange (e.g. TOKEN_REFRESHED) on things like
+    // the tab regaining focus — which happens constantly on mobile when a
+    // worker switches to the camera app to take a timesheet photo and comes
+    // back. Only show a blocking loading state for a genuine sign-in/account
+    // switch, not a silent background token refresh for the same user —
+    // otherwise the whole route tree below unmounts and wipes in-progress
+    // form state (typed times, selected photo) whenever that fires.
+    const isNewUser = lastProfileUserId.current !== session.user.id;
+    if (isNewUser) setProfileLoading(true);
     supabase
       .from("profiles")
       .select("*")
@@ -30,6 +40,7 @@ export function AuthProvider({ children }) {
       .then(({ data }) => {
         setProfile(data);
         setProfileLoading(false);
+        lastProfileUserId.current = session.user.id;
       });
   }, [session]);
 
