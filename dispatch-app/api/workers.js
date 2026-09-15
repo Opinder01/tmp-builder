@@ -8,18 +8,6 @@ export default async function handler(req, res) {
 
   const action = req.query.action;
 
-  // TEMPORARY — reports this function's outbound IP for the Intuit production
-  // app hosting-location questionnaire. Remove after.
-  if (action === "diag-ip" && req.method === "GET") {
-    try {
-      const r = await fetch("https://api.ipify.org?format=json");
-      const data = await r.json();
-      return json(res, 200, { ip: data.ip, region: process.env.VERCEL_REGION || null });
-    } catch (err) {
-      return json(res, 200, { error: err.message });
-    }
-  }
-
   if (action === "list" && req.method === "GET") {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
