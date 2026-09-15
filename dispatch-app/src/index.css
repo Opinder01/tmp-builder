@@ -154,6 +154,12 @@ input, select, textarea, button {
   display: block;
 }
 
+.header-logo-full {
+  height: 52px;
+  width: auto;
+  display: block;
+}
+
 .app-header nav {
   display: flex;
   gap: 1rem;
@@ -315,8 +321,8 @@ th, td {
   gap: 0.6rem;
 }
 
-.worker-header .header-logo {
-  height: 30px;
+.worker-header .header-logo-full {
+  height: 44px;
 }
 
 .worker-main {
