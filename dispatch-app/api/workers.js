@@ -41,13 +41,31 @@ export default async function handler(req, res) {
     const supabase = getSupabaseAdmin();
     try {
       const result = await supabase.auth.getUser(token);
+      const userId = result.data?.user?.id;
+      let profileResult = null;
+      if (userId) {
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .single();
+        profileResult = {
+          hasProfileError: !!profileError,
+          profileErrorMessage: profileError?.message,
+          profileErrorCode: profileError?.code,
+          profileErrorDetails: profileError?.details,
+          hasProfile: !!profile,
+          profileRole: profile?.role,
+        };
+      }
       return json(res, 200, {
         hasError: !!result.error,
         errorMessage: result.error?.message,
         errorStatus: result.error?.status,
         errorName: result.error?.name,
         hasUser: !!result.data?.user,
-        userId: result.data?.user?.id,
+        userId,
+        profileResult,
       });
     } catch (err) {
       return json(res, 200, { threw: true, message: err.message, name: err.name, stack: err.stack });
