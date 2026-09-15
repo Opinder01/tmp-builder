@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../lib/AuthContext.jsx";
+import crownMark from "../../assets/crown-mark.png";
 
 export default function AdminLayout() {
   const { profile, signOut } = useAuth();
@@ -7,9 +8,12 @@ export default function AdminLayout() {
   return (
     <div>
       <header className="app-header">
-        <div>
-          <strong>Crown Traffic Management Ltd.</strong>
-          <span className="subtle"> — Admin</span>
+        <div className="app-header-brand">
+          <img src={crownMark} alt="" className="header-logo" />
+          <div>
+            <strong>Crown Traffic Management Ltd.</strong>
+            <span className="subtle"> — Admin</span>
+          </div>
         </div>
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>

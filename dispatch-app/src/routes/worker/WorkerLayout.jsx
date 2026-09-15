@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import crownMark from "../../assets/crown-mark.png";
 
 const icons = {
   dispatch: (
@@ -33,6 +34,7 @@ export default function WorkerLayout() {
   return (
     <div className="worker-shell">
       <header className="worker-header">
+        <img src={crownMark} alt="" className="header-logo" />
         <strong>Crown Traffic Management Ltd.</strong>
       </header>
 

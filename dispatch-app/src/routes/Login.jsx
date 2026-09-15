@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
+import crownLogo from "../assets/crown-logo.png";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -25,34 +26,38 @@ export default function Login() {
 
   return (
     <div className="login-screen">
-      <h1>Crown Traffic Management Ltd.</h1>
-      <form onSubmit={handleSubmit}>
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
-      <p className="hint">
-        Accounts are created by your admin — there is no public sign-up.
-      </p>
+      <div className="login-card">
+        <img src={crownLogo} alt="Crown Traffic Management Ltd." className="login-logo" />
+        <h1>Welcome to Crown Traffic</h1>
+        <p className="login-subtitle">Dispatch &amp; Timesheet Portal</p>
+        <form onSubmit={handleSubmit}>
+          <label>
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </label>
+          {error && <p className="error">{error}</p>}
+          <button type="submit" disabled={loading}>
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+        <p className="hint">
+          Accounts are created by your admin — there is no public sign-up.
+        </p>
+      </div>
     </div>
   );
 }
