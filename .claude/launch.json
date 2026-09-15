@@ -2,6 +2,26 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "mover-app-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--web", "--port", "19006"],
+      "port": 19006,
+      "cwd": "."
+    },
+    {
+      "name": "admin-dashboard",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "C:/Users/info/moving-island/admin", "--listen", "4500", "--no-clipboard"],
+      "port": 4500
+    },
+    {
+      "name": "fashionfinder-app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
+      "port": 5176,
+      "cwd": ".claude/worktrees/naughty-moore-c0c17d/fashionfinder-app"
+    },
+    {
       "name": "TMP Builder Client (Vite)",
       "runtimeExecutable": "node",
       "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5173"],
@@ -14,6 +34,13 @@
       "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5174"],
       "port": 5174,
       "cwd": "."
+    },
+    {
+      "name": "dispatch-app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5175"],
+      "port": 5175,
+      "cwd": "dispatch-app"
     }
   ]
 }
