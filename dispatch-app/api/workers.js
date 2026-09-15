@@ -8,6 +8,29 @@ export default async function handler(req, res) {
 
   const action = req.query.action;
 
+  // TEMPORARY diagnostic — no secrets exposed, just structural facts about
+  // env vars, to debug a production-only 401. Remove after diagnosing.
+  if (action === "diag" && req.method === "GET") {
+    function probe(name) {
+      const v = process.env[name];
+      if (v === undefined) return { set: false };
+      return {
+        set: true,
+        length: v.length,
+        trimmedLength: v.trim().length,
+        hasLeadingOrTrailingWhitespace: v.length !== v.trim().length,
+        hasNewline: /[\r\n]/.test(v),
+        first6: v.slice(0, 6),
+        last6: v.slice(-6),
+      };
+    }
+    return json(res, 200, {
+      SUPABASE_URL: probe("SUPABASE_URL"),
+      SUPABASE_SERVICE_ROLE_KEY: probe("SUPABASE_SERVICE_ROLE_KEY"),
+      nodeVersion: process.version,
+    });
+  }
+
   if (action === "list" && req.method === "GET") {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
