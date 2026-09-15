@@ -31,6 +31,29 @@ export default async function handler(req, res) {
     });
   }
 
+  // TEMPORARY — calls supabase.auth.getUser(token) directly and returns the
+  // raw error, to see exactly why it's failing in production. Remove after.
+  if (action === "diag2" && req.method === "GET") {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return json(res, 400, { error: "Send Authorization: Bearer <token>" });
+
+    const supabase = getSupabaseAdmin();
+    try {
+      const result = await supabase.auth.getUser(token);
+      return json(res, 200, {
+        hasError: !!result.error,
+        errorMessage: result.error?.message,
+        errorStatus: result.error?.status,
+        errorName: result.error?.name,
+        hasUser: !!result.data?.user,
+        userId: result.data?.user?.id,
+      });
+    } catch (err) {
+      return json(res, 200, { threw: true, message: err.message, name: err.name, stack: err.stack });
+    }
+  }
+
   if (action === "list" && req.method === "GET") {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
