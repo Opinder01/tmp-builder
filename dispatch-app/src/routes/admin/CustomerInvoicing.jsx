@@ -42,7 +42,7 @@ export default function CustomerInvoicing() {
     setError("");
     setResult(null);
     api
-      .get(`/api/quickbooks/customer-invoice?action=unbilled&client_company_id=${companyId}&from=${from}&to=${to}`)
+      .get(`/api/quickbooks/data?resource=customer-invoice&action=unbilled&client_company_id=${companyId}&from=${from}&to=${to}`)
       .then((data) => {
         setTimesheets(data.timesheets);
         setSelected(new Set(data.timesheets.map((t) => t.id)));
@@ -63,7 +63,7 @@ export default function CustomerInvoicing() {
     setBusy(true);
     setError("");
     try {
-      const data = await api.post("/api/quickbooks/customer-invoice?action=create", {
+      const data = await api.post("/api/quickbooks/data?resource=customer-invoice&action=create", {
         client_company_id: companyId,
         timesheet_ids: [...selected],
       });

@@ -37,7 +37,7 @@ export default function DispatchForm() {
       .catch((err) => setError(err.message));
     // QuickBooks may not be connected yet — that's fine, billing fields are optional.
     api
-      .get("/api/quickbooks/items?action=list")
+      .get("/api/quickbooks/data?resource=items&action=list")
       .then((data) => setQboItems(data.items))
       .catch(() => setQboItems([]));
   }, []);

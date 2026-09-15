@@ -10,9 +10,9 @@ export default function QboSettings() {
   const [busyId, setBusyId] = useState(null);
 
   function load() {
-    api.get("/api/quickbooks/status").then(setStatus).catch((err) => setError(err.message));
+    api.get("/api/quickbooks/data?resource=status").then(setStatus).catch((err) => setError(err.message));
     api
-      .get("/api/quickbooks/sync-log?action=list")
+      .get("/api/quickbooks/data?resource=sync-log&action=list")
       .then((data) => setSyncLog(data.log))
       .catch(() => setSyncLog([]));
   }
@@ -21,7 +21,7 @@ export default function QboSettings() {
 
   async function connect() {
     try {
-      const { url } = await api.get("/api/quickbooks/connect");
+      const { url } = await api.get("/api/quickbooks/data?resource=connect");
       window.location.href = url;
     } catch (err) {
       setError(err.message);

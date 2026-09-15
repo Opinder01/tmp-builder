@@ -33,7 +33,7 @@ export default function ContractorBilling() {
     setError("");
     setResult(null);
     api
-      .get(`/api/quickbooks/contractor-bill?action=unbilled&worker_id=${workerId}&from=${from}&to=${to}`)
+      .get(`/api/quickbooks/data?resource=contractor-bill&action=unbilled&worker_id=${workerId}&from=${from}&to=${to}`)
       .then((data) => {
         setTimesheets(data.timesheets);
         setTotalHours(data.totalHours);
@@ -55,7 +55,7 @@ export default function ContractorBilling() {
     setBusy(true);
     setError("");
     try {
-      const data = await api.post("/api/quickbooks/contractor-bill?action=create", {
+      const data = await api.post("/api/quickbooks/data?resource=contractor-bill&action=create", {
         worker_id: workerId,
         timesheet_ids: [...selected],
       });

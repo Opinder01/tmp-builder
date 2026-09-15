@@ -16,7 +16,7 @@ export default function CustomerSearch({ onSelect, selected }) {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       api
-        .get(`/api/quickbooks/customers?action=search&q=${encodeURIComponent(query)}`)
+        .get(`/api/quickbooks/data?resource=customers&action=search&q=${encodeURIComponent(query)}`)
         .then((data) => setResults(data.customers))
         .catch(() => setResults([]));
     }, 300);

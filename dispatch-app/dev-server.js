@@ -21,14 +21,8 @@ const routes = {
   "/api/uploads": () => import("./api/uploads.js"),
   "/api/push": () => import("./api/push.js"),
   "/api/cron/reminders": () => import("./api/cron/reminders.js"),
-  "/api/quickbooks/connect": () => import("./api/quickbooks/connect.js"),
   "/api/quickbooks/callback": () => import("./api/quickbooks/callback.js"),
-  "/api/quickbooks/status": () => import("./api/quickbooks/status.js"),
-  "/api/quickbooks/customers": () => import("./api/quickbooks/customers.js"),
-  "/api/quickbooks/items": () => import("./api/quickbooks/items.js"),
-  "/api/quickbooks/sync-log": () => import("./api/quickbooks/sync-log.js"),
-  "/api/quickbooks/contractor-bill": () => import("./api/quickbooks/contractor-bill.js"),
-  "/api/quickbooks/customer-invoice": () => import("./api/quickbooks/customer-invoice.js"),
+  "/api/quickbooks/data": () => import("./api/quickbooks/data.js"),
 };
 
 function readBody(req) {

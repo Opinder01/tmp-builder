@@ -1,6 +1,6 @@
-import { getSupabaseAdmin } from "../_lib/supabase.js";
-import { qboFetch, qboQuery } from "../_lib/qbo.js";
-import { splitShiftHours, hoursToHM } from "../_lib/overtime.js";
+import { getSupabaseAdmin } from "./supabase.js";
+import { qboFetch, qboQuery } from "./qbo.js";
+import { splitShiftHours, hoursToHM } from "./overtime.js";
 
 async function alreadySynced(timesheetId, target) {
   const supabase = getSupabaseAdmin();
@@ -81,9 +81,9 @@ async function getContractorExpenseAccountId() {
 //
 // Neither customer invoicing nor contractor pay is synced here — both are
 // batched (see createCustomerInvoice / createContractorBill below and
-// api/quickbooks/customer-invoice.js / contractor-bill.js), matching how
-// Crown actually invoices (multiple shifts combined onto one invoice/bill),
-// not one per shift.
+// api/quickbooks/data.js's contractor-bill/customer-invoice resources),
+// matching how Crown actually invoices (multiple shifts combined onto one
+// invoice/bill), not one per shift.
 export async function syncApprovedTimesheet(timesheet, dispatch, worker) {
   const results = { payroll: null };
 
@@ -156,7 +156,7 @@ export async function syncApprovedTimesheet(timesheet, dispatch, worker) {
 // Batches every given (already-approved, not-yet-billed) timesheet for one
 // contractor into a single QuickBooks Bill — one line per timesheet, same
 // pattern as Crown's existing customer invoices (one line per "Timesheet#").
-// Called from api/quickbooks/contractor-bill.js's admin-triggered ?action=create.
+// Called from api/quickbooks/data.js's admin-triggered contractor-bill?action=create.
 export async function createContractorBill(worker, timesheets) {
   if (!timesheets.length) throw new Error("No timesheets to bill.");
   if (worker.contractor_bill_rate == null) {
@@ -206,7 +206,7 @@ export async function createContractorBill(worker, timesheets) {
 // one invoice line per portion that actually has a rate item configured on
 // its dispatch — a portion with hours but no matching item/rate is skipped
 // (not billed at $0) and reported back so the admin can see what was left out.
-// Called from api/quickbooks/customer-invoice.js's admin-triggered ?action=create.
+// Called from api/quickbooks/data.js's admin-triggered customer-invoice?action=create.
 export async function createCustomerInvoice(customerId, timesheets) {
   if (!timesheets.length) throw new Error("No timesheets to invoice.");
 

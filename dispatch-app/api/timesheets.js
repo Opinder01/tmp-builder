@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { getSessionProfile, requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
-import { syncApprovedTimesheet } from "./quickbooks/sync.js";
+import { syncApprovedTimesheet } from "./_lib/qboSync.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
