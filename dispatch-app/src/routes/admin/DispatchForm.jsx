@@ -10,7 +10,7 @@ export default function DispatchForm() {
   const [qboItems, setQboItems] = useState([]);
   const [form, setForm] = useState({
     job_number: "",
-    worker_id: "",
+    worker_ids: [],
     location: "",
     start_time: "",
     notes: "",
@@ -46,6 +46,15 @@ export default function DispatchForm() {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
+  function toggleWorker(workerId) {
+    setForm((f) => ({
+      ...f,
+      worker_ids: f.worker_ids.includes(workerId)
+        ? f.worker_ids.filter((id) => id !== workerId)
+        : [...f.worker_ids, workerId],
+    }));
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
@@ -60,6 +69,11 @@ export default function DispatchForm() {
       const selectedOtItem = qboItems.find((i) => i.id === form.qbo_ot_item_id);
       const selectedDtItem = qboItems.find((i) => i.id === form.qbo_dt_item_id);
       const selectedContractor = contractors.find((c) => c.id === form.client_company_id);
+      if (form.worker_ids.length === 0) {
+        setError("Select at least one worker.");
+        setSubmitting(false);
+        return;
+      }
       await api.post("/api/dispatches?action=create", {
         ...form,
         start_time: new Date(form.start_time).toISOString(),
@@ -102,19 +116,20 @@ export default function DispatchForm() {
         </label>
 
         <label>
-          Worker
-          <select
-            required
-            value={form.worker_id}
-            onChange={(e) => update("worker_id", e.target.value)}
-          >
-            <option value="">Select a worker...</option>
+          Workers
+          <span className="subtle">Select one or more — everyone gets their own dispatch and timesheet for this job.</span>
+          <div className="worker-checklist">
             {workers.map((w) => (
-              <option key={w.id} value={w.id}>
+              <label key={w.id} className="worker-checklist-item">
+                <input
+                  type="checkbox"
+                  checked={form.worker_ids.includes(w.id)}
+                  onChange={() => toggleWorker(w.id)}
+                />
                 {w.full_name} ({w.worker_type})
-              </option>
+              </label>
             ))}
-          </select>
+          </div>
         </label>
 
         <label>

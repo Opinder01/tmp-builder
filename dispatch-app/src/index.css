@@ -257,6 +257,30 @@ th, td {
   font-size: 1rem;
 }
 
+.worker-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.worker-checklist-item {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.worker-checklist-item input {
+  width: auto;
+}
+
 .section-heading {
   font-size: 0.75rem;
   font-weight: 700;
