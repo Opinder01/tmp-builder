@@ -107,9 +107,8 @@ export default function DispatchForm() {
       <h1>New Dispatch</h1>
       <form onSubmit={handleSubmit} className="form">
         <label>
-          Job number
+          Job number (optional)
           <input
-            required
             value={form.job_number}
             onChange={(e) => update("job_number", e.target.value)}
           />

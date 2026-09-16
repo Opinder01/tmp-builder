@@ -28,7 +28,8 @@ export default function TimesheetHistory() {
       {timesheets?.map((t) => (
         <div key={t.id} className="dispatch-card">
           <p>
-            <strong>Job {t.dispatch?.job_number}</strong> — {t.dispatch?.location}
+            <strong>{t.dispatch?.job_number ? `Job ${t.dispatch.job_number}` : t.dispatch?.location}</strong>
+            {t.dispatch?.job_number && ` — ${t.dispatch.location}`}
           </p>
           <p className="subtle">{t.dispatch?.start_time && new Date(t.dispatch.start_time).toLocaleDateString()}</p>
           <p>

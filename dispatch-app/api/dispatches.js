@@ -29,13 +29,13 @@ export default async function handler(req, res) {
     const ids = Array.isArray(worker_ids) && worker_ids.length > 0
       ? [...new Set(worker_ids)]
       : worker_id ? [worker_id] : [];
-    if (!job_number || !location || !start_time || ids.length === 0) {
-      return json(res, 400, { error: "job_number, location, start_time, and at least one worker are required" });
+    if (!location || !start_time || ids.length === 0) {
+      return json(res, 400, { error: "location, start_time, and at least one worker are required" });
     }
 
     const supabase = getSupabaseAdmin();
     const baseRow = {
-      job_number,
+      job_number: job_number || null,
       location,
       start_time,
       notes: notes || null,
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
 
           await sendPushToWorker(d.worker_id, {
             title: "New dispatch",
-            body: `Job ${job_number} — ${location}`,
+            body: job_number ? `Job ${job_number} — ${location}` : location,
             url: "/",
             badgeCount,
           });

@@ -17,7 +17,8 @@ function DispatchCard({ d, status }) {
   return (
     <div className="dispatch-card">
       <p>
-        <strong>Job {d.job_number}</strong> — {d.location}
+        <strong>{d.job_number ? `Job ${d.job_number}` : d.location}</strong>
+        {d.job_number && ` — ${d.location}`}
       </p>
       <p className="subtle">{new Date(d.start_time).toLocaleString()}</p>
       {d.notes && <p>{d.notes}</p>}

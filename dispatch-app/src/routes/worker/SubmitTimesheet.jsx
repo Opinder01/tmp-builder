@@ -75,7 +75,8 @@ export default function SubmitTimesheet() {
       <h1>Submit Timesheet</h1>
       {dispatch && (
         <p className="subtle">
-          Job {dispatch.job_number} — {dispatch.location} — {new Date(dispatch.start_time).toLocaleDateString()}
+          {dispatch.job_number && `Job ${dispatch.job_number} — `}
+          {dispatch.location} — {new Date(dispatch.start_time).toLocaleDateString()}
         </p>
       )}
       <form onSubmit={handleSubmit} className="form">

@@ -53,7 +53,9 @@ export default function ApprovalQueue() {
           </div>
           <div className="review-card-details">
             <p>
-              <strong>{t.worker?.full_name}</strong> — Job {t.dispatch?.job_number} at {t.dispatch?.location}
+              <strong>{t.worker?.full_name}</strong> —{" "}
+              {t.dispatch?.job_number && `Job ${t.dispatch.job_number} at `}
+              {t.dispatch?.location}
             </p>
             <p className="subtle">
               Dispatched: {t.dispatch?.start_time && new Date(t.dispatch.start_time).toLocaleString()}
