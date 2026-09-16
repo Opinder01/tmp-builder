@@ -99,6 +99,18 @@ export default function MyDispatches() {
   const needsAction = dispatches?.filter((d) => statusFor(d).actionable) || [];
   const past = dispatches?.filter((d) => !statusFor(d).actionable) || [];
 
+  // Keeps the home-screen icon badge in sync whenever the app is opened —
+  // covers submitting a timesheet (count should drop) and opening without a
+  // push having fired. The push itself also sets this on arrival.
+  useEffect(() => {
+    if (!dispatches || !("setAppBadge" in navigator)) return;
+    if (needsAction.length > 0) {
+      navigator.setAppBadge(needsAction.length).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }, [dispatches, needsAction.length]);
+
   return (
     <div>
       <h1>My Dispatches</h1>

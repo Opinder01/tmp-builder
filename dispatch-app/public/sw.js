@@ -43,11 +43,19 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
   event.waitUntil(
-    self.registration.showNotification(data.title || "Dispatch update", {
-      body: data.body || "",
-      icon: "/icons/icon-192.png",
-      data: { url: data.url || "/" },
-    })
+    Promise.all([
+      self.registration.showNotification(data.title || "Dispatch update", {
+        body: data.body || "",
+        icon: "/icons/icon-192.png",
+        data: { url: data.url || "/" },
+      }),
+      // Badges the home-screen icon with a count (e.g. dispatches still
+      // needing a timesheet) so it's visible without opening the app.
+      // Not supported by every browser -- fails silently where it isn't.
+      "setAppBadge" in navigator && typeof data.badgeCount === "number"
+        ? (data.badgeCount > 0 ? navigator.setAppBadge(data.badgeCount) : navigator.clearAppBadge()).catch(() => {})
+        : Promise.resolve(),
+    ])
   );
 });
 

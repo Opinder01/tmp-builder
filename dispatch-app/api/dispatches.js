@@ -67,10 +67,17 @@ export default async function handler(req, res) {
     // (or a missing VAPID config) just means the notification is skipped;
     // the dispatch is still saved and visible in the app.
     try {
+      const { data: workerDispatches } = await supabase
+        .from("dispatches")
+        .select("id, timesheets(id)")
+        .eq("worker_id", worker_id);
+      const badgeCount = (workerDispatches || []).filter((d) => !d.timesheets).length;
+
       await sendPushToWorker(worker_id, {
         title: "New dispatch",
         body: `Job ${job_number} — ${location}`,
         url: "/",
+        badgeCount,
       });
     } catch (err) {
       console.error("[dispatches] push notify failed:", err.message);

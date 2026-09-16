@@ -76,6 +76,7 @@ export default async function handler(req, res) {
           ? `You have 1 shift (Job ${workerDispatches[0].job_number}) missing a timesheet.`
           : `You have ${count} shifts missing timesheets.`,
       url: "/",
+      badgeCount: count,
     });
     notified++;
 
