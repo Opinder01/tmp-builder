@@ -1,33 +1,12 @@
 import { getSupabaseAdmin } from "./_lib/supabase.js";
-import { getSessionProfile, requireRole } from "./_lib/auth.js";
+import { getSessionProfile } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
-import { sendPushToWorker } from "./_lib/push.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
   if (req.method === "OPTIONS") { res.statusCode = 204; return res.end(); }
 
   const action = req.query?.action;
-
-  // TEMPORARY — sends a real test push to a given worker and surfaces the
-  // raw result/error, to confirm VAPID keys are configured correctly in
-  // production. Remove after diagnosing.
-  if (action === "diag-send" && req.method === "GET") {
-    const admin = await requireRole(req, res, "admin");
-    if (!admin) return;
-    const workerId = req.query.worker_id;
-    if (!workerId) return json(res, 400, { error: "worker_id query param required" });
-    try {
-      const result = await sendPushToWorker(workerId, {
-        title: "Test notification",
-        body: "This is a diagnostic push from the admin.",
-        url: "/",
-      });
-      return json(res, 200, { result });
-    } catch (err) {
-      return json(res, 200, { threw: true, message: err.message });
-    }
-  }
 
   if (action === "subscribe" && req.method === "POST") {
     const profile = await getSessionProfile(req);
