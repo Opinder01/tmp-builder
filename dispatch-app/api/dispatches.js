@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { getSessionProfile, requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
+import { sendPushToWorker } from "./_lib/push.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -60,6 +61,19 @@ export default async function handler(req, res) {
       }));
       const { error: attError } = await supabase.from("dispatch_attachments").insert(rows);
       if (attError) return json(res, 500, { error: attError.message });
+    }
+
+    // Never blocks dispatch creation — a worker with no push subscription
+    // (or a missing VAPID config) just means the notification is skipped;
+    // the dispatch is still saved and visible in the app.
+    try {
+      await sendPushToWorker(worker_id, {
+        title: "New dispatch",
+        body: `Job ${job_number} — ${location}`,
+        url: "/",
+      });
+    } catch (err) {
+      console.error("[dispatches] push notify failed:", err.message);
     }
 
     return json(res, 201, { dispatch });
