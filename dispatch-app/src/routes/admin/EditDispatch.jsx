@@ -52,8 +52,7 @@ export default function EditDispatch() {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function save(notify) {
     setError("");
     setSubmitting(true);
     try {
@@ -78,6 +77,7 @@ export default function EditDispatch() {
         qbo_dt_item_name: selectedDtItem?.name || null,
         client_company_id: form.client_company_id || null,
         client_company_name: selectedContractor?.name || null,
+        notify,
       });
       navigate("/");
     } catch (err) {
@@ -113,7 +113,7 @@ export default function EditDispatch() {
   return (
     <div>
       <h1>Edit Dispatch</h1>
-      <form onSubmit={handleSubmit} className="form">
+      <form onSubmit={(e) => { e.preventDefault(); save(false); }} className="form">
         <label>
           Job number (optional)
           <input value={form.job_number} onChange={(e) => update("job_number", e.target.value)} />
@@ -241,6 +241,9 @@ export default function EditDispatch() {
         <div className="review-card-actions">
           <button type="submit" disabled={submitting || deleting}>
             {submitting ? "Saving..." : "Save Changes"}
+          </button>
+          <button type="button" disabled={submitting || deleting} onClick={() => save(true)}>
+            {submitting ? "Saving..." : "Save & Notify Worker"}
           </button>
           <button type="button" className="button-danger" disabled={submitting || deleting} onClick={handleDelete}>
             {deleting ? "Deleting..." : "Delete Dispatch"}

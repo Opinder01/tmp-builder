@@ -123,7 +123,7 @@ export default async function handler(req, res) {
     if (!admin) return;
 
     const {
-      id, job_number, location, start_time, notes, worker_id,
+      id, job_number, location, start_time, notes, worker_id, notify,
       customer_qbo_id, qbo_customer_name, qbo_item_id, qbo_item_name, rate,
       qbo_ot_item_id, qbo_ot_item_name, ot_rate,
       qbo_dt_item_id, qbo_dt_item_name, dt_rate,
@@ -178,6 +178,25 @@ export default async function handler(req, res) {
       .select()
       .single();
     if (error) return json(res, 500, { error: error.message });
+
+    if (notify) {
+      try {
+        const { data: workerDispatches } = await supabase
+          .from("dispatches")
+          .select("id, timesheets(id)")
+          .eq("worker_id", worker_id);
+        const badgeCount = (workerDispatches || []).filter((wd) => !wd.timesheets).length;
+
+        await sendPushToWorker(worker_id, {
+          title: "Dispatch updated",
+          body: job_number ? `Job ${job_number} — ${location}` : location,
+          url: "/",
+          badgeCount,
+        });
+      } catch (err) {
+        console.error("[dispatches] push notify failed:", err.message);
+      }
+    }
 
     return json(res, 200, { dispatch });
   }
