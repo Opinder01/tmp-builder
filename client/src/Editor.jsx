@@ -5827,7 +5827,7 @@ if (measEdit) {
     e.domEvent.stopPropagation();
   }
 
-  // ✅ WORK AREA: right click cancels draft or deselects; turn off tool to match UI
+  // WORK AREA: right-click cancels draft (keeps tool active), or deselects
   if (activeTool === "work_area") {
     if (isDrawingWorkArea) {
       setIsDrawingWorkArea(false);
@@ -5838,7 +5838,6 @@ if (measEdit) {
       setSelectedInsertId(null);
       setSelectedWorkAreaId(null);
     }
-    setActiveTool(null);
     return;
   }
 
@@ -5862,17 +5861,8 @@ if (measEdit) {
   }
 
 
-  // stop signs tool
-  if (isSignsToolActive) {
-    setActiveTool(null);
-    setSignsPanelOpen(false);
-    return;
-  }
-
-  // stop arrows tool
-  if (isArrowToolActive) {
-    setActiveTool(null);
-    setArrowPanelOpen(false);
+  // Signs and Arrow are click-to-place — right-click is a no-op (keep tool active)
+  if (isSignsToolActive || isArrowToolActive) {
     return;
   }
 
@@ -5886,8 +5876,8 @@ if (measEdit) {
     return;
   }
 
-  // stop any insert tool
-  if (activeTool) {
+  // stop any other insert tool (but not cones/meas when not yet drawing — those keep tool active)
+  if (activeTool && activeTool !== "cones" && activeTool !== "measurements") {
     setPictureGhostPos(null);
     setLineDraft(null);
     setActiveTool(null);
@@ -6000,21 +5990,14 @@ useEffect(() => {
           setRoadHoverPoint(null);
           setSelectedRoadId(null);
         }
-        // Arrows: Esc turns off tool
-        if (isArrowToolActive) {
-          setActiveTool(null);
-          setArrowPanelOpen(false);
-        }
+        // Arrows and Signs: Esc is a no-op — click-to-place tools stay active
+        // (user uses the tool button toggle to deactivate them)
 
         if (uiDrag) setUiDrag(null);
         if (conesIsDrawing) cancelConesDrawing();
         if (measIsDrawing) cancelMeasDrawing();
         setSelectedMeasId(null);
         setSelectedConeId(null);
-        if (isSignsToolActive) {
-          setActiveTool(null);
-          setSignsPanelOpen(false);
-        }
       }
 
       if (e.key === "Enter") {
