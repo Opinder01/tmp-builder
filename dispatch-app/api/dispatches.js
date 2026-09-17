@@ -101,6 +101,117 @@ export default async function handler(req, res) {
     return json(res, 201, { dispatches, dispatch: dispatches[0] });
   }
 
+  if (action === "get" && req.method === "GET") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const id = req.query?.id;
+    if (!id) return json(res, 400, { error: "id is required" });
+
+    const supabase = getSupabaseAdmin();
+    const { data: dispatch, error } = await supabase
+      .from("dispatches")
+      .select("*, timesheets(id, status)")
+      .eq("id", id)
+      .single();
+    if (error) return json(res, 404, { error: "Dispatch not found" });
+    return json(res, 200, { dispatch });
+  }
+
+  if (action === "update" && req.method === "POST") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const {
+      id, job_number, location, start_time, notes, worker_id,
+      customer_qbo_id, qbo_customer_name, qbo_item_id, qbo_item_name, rate,
+      qbo_ot_item_id, qbo_ot_item_name, ot_rate,
+      qbo_dt_item_id, qbo_dt_item_name, dt_rate,
+      client_company_id, client_company_name,
+    } = req.body || {};
+    if (!id || !location || !start_time || !worker_id) {
+      return json(res, 400, { error: "id, location, start_time, and worker_id are required" });
+    }
+
+    const supabase = getSupabaseAdmin();
+
+    const { data: existing, error: fetchError } = await supabase
+      .from("dispatches")
+      .select("worker_id, timesheets(id)")
+      .eq("id", id)
+      .single();
+    if (fetchError) return json(res, 404, { error: "Dispatch not found" });
+
+    // Reassigning the worker after a timesheet already exists would leave
+    // that timesheet pointing at the old worker while the dispatch points
+    // at a new one -- an inconsistent, orphaned record. Everything else
+    // (time, location, contractor, billing) stays freely editable.
+    if (existing.timesheets && existing.worker_id !== worker_id) {
+      return json(res, 400, {
+        error: "Can't reassign the worker — a timesheet has already been submitted for this dispatch.",
+      });
+    }
+
+    const { data: dispatch, error } = await supabase
+      .from("dispatches")
+      .update({
+        job_number: job_number || null,
+        location,
+        start_time,
+        notes: notes || null,
+        worker_id,
+        customer_qbo_id: customer_qbo_id || null,
+        qbo_customer_name: qbo_customer_name || null,
+        qbo_item_id: qbo_item_id || null,
+        qbo_item_name: qbo_item_name || null,
+        rate: rate ?? null,
+        qbo_ot_item_id: qbo_ot_item_id || null,
+        qbo_ot_item_name: qbo_ot_item_name || null,
+        ot_rate: ot_rate ?? null,
+        qbo_dt_item_id: qbo_dt_item_id || null,
+        qbo_dt_item_name: qbo_dt_item_name || null,
+        dt_rate: dt_rate ?? null,
+        client_company_id: client_company_id || null,
+        client_company_name: client_company_name || null,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return json(res, 500, { error: error.message });
+
+    return json(res, 200, { dispatch });
+  }
+
+  if (action === "delete" && req.method === "POST") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const { id } = req.body || {};
+    if (!id) return json(res, 400, { error: "id is required" });
+
+    const supabase = getSupabaseAdmin();
+
+    const { data: timesheet } = await supabase
+      .from("timesheets")
+      .select("id")
+      .eq("dispatch_id", id)
+      .maybeSingle();
+
+    // Clean up rows that reference this dispatch but aren't covered by an
+    // on-delete-cascade FK, so the dispatch delete below doesn't get
+    // blocked by a foreign key violation.
+    if (timesheet) {
+      await supabase.from("qbo_sync_log").delete().eq("timesheet_id", timesheet.id);
+      await supabase.from("timesheets").delete().eq("id", timesheet.id);
+    }
+    await supabase.from("reminder_log").delete().eq("dispatch_id", id);
+
+    const { error } = await supabase.from("dispatches").delete().eq("id", id);
+    if (error) return json(res, 500, { error: error.message });
+
+    return json(res, 200, { deleted: true });
+  }
+
   if (action === "list" && req.method === "GET") {
     const profile = await getSessionProfile(req);
     if (!profile) return json(res, 401, { error: "Not authenticated" });

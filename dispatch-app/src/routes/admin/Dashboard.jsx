@@ -66,6 +66,7 @@ export default function Dashboard() {
               <th>Location</th>
               <th>Start</th>
               <th>Timesheet</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -79,6 +80,7 @@ export default function Dashboard() {
                   <td>{d.location}</td>
                   <td>{new Date(d.start_time).toLocaleString()}</td>
                   <td className={`status status-${status.tone}`}>{status.text}</td>
+                  <td><Link to={`/dispatch/${d.id}/edit`}>Edit</Link></td>
                 </tr>
               );
             })}
