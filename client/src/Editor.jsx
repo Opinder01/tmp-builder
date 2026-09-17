@@ -3444,14 +3444,14 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const w = cssToCanvas(cssSignPx(s?.wPx || 64, zRef));
     const h = cssToCanvas(cssSignPx(s?.hPx || 64, zRef));
     const rotDeg = s?.rotDeg ?? s?.rotationDeg ?? 0;
-    ctx.save();
-    ctx.translate(sc.x, sc.y);
-    ctx.rotate((rotDeg * Math.PI) / 180);
-    ctx.translate(-w / 2, -h / 2);
     const img = signImages[i];
-    if (img) {
-      ctx.drawImage(img, 0, 0, w, h);
-    } else {
+    // Actual sign images are added to PDF as separate high-res overlays below.
+    // Only draw a placeholder on canvas when image failed to load.
+    if (!img) {
+      ctx.save();
+      ctx.translate(sc.x, sc.y);
+      ctx.rotate((rotDeg * Math.PI) / 180);
+      ctx.translate(-w / 2, -h / 2);
       ctx.strokeStyle = "#111111";
       ctx.lineWidth = Math.max(1, 1.5 * exportCanvasScale);
       ctx.strokeRect(0, 0, w, h);
@@ -3460,8 +3460,8 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("SIGN", w / 2, h / 2 + 4);
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   // Arrow boards: tripod connectors first (same layering rule as signs), then arrow artwork.
@@ -3486,28 +3486,18 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
     const w = cssToCanvas(cssSignPx(a?.wPx || DEFAULT_ARROW_WIDTH_PX, zRef));
     const h = cssToCanvas(cssSignPx(a?.hPx || DEFAULT_ARROW_HEIGHT_PX, zRef));
     const rotDeg = a?.rotDeg ?? 0;
-    ctx.save();
-    ctx.translate(sc.x, sc.y);
-    ctx.rotate((rotDeg * Math.PI) / 180);
-    ctx.translate(-w / 2, -h / 2);
     const img = arrowImages[i];
-    if (img) {
-      const natW = img.naturalWidth || img.width || w;
-      const natH = img.naturalHeight || img.height || h;
-      if (natW > 0 && natH > 0) {
-        const fitScale = Math.min(w / natW, h / natH);
-        const dw = natW * fitScale;
-        const dh = natH * fitScale;
-        ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-      } else {
-        ctx.drawImage(img, 0, 0, w, h);
-      }
-    } else {
+    // Arrow board images are added as high-res PDF overlays below; only draw placeholder here.
+    if (!img) {
+      ctx.save();
+      ctx.translate(sc.x, sc.y);
+      ctx.rotate((rotDeg * Math.PI) / 180);
+      ctx.translate(-w / 2, -h / 2);
       ctx.strokeStyle = "#2563EB";
       ctx.lineWidth = Math.max(1, 1.5 * exportCanvasScale);
       ctx.strokeRect(0, 0, w, h);
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   // Insert objects (text, rect, table, picture) – skip line (drawn separately)
@@ -3897,6 +3887,51 @@ async function exportSelectionToPdf(boundsOverride = null, rectOverride = null) 
   // Map image (aerial + all overlays composited on canvas)
   const mapRect = { x: MARGIN, y: HDR_H, w: mapW_mm, h: mapH_mm };
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", mapRect.x, mapRect.y, mapRect.w, mapRect.h, undefined, "NONE");
+
+  // ── Signs + Arrow boards: high-res PDF image overlays (crisp at any zoom) ──
+  {
+    const SIGN_RES = 256;
+    const addHighResImage = (img, pos, wPx, hPx, zRef, rotDeg) => {
+      if (!img || !pos) return;
+      const resH = Math.max(1, Math.round(SIGN_RES * hPx / wPx));
+      const diag = Math.ceil(Math.sqrt(SIGN_RES * SIGN_RES + resH * resH));
+      const oc = document.createElement("canvas");
+      oc.width = diag; oc.height = diag;
+      const oc2 = oc.getContext("2d");
+      oc2.clearRect(0, 0, diag, diag);
+      oc2.save();
+      oc2.translate(diag / 2, diag / 2);
+      oc2.rotate((rotDeg * Math.PI) / 180);
+      oc2.drawImage(img, -SIGN_RES / 2, -resH / 2, SIGN_RES, resH);
+      oc2.restore();
+      const signW_mm = (cssSignPx(wPx, zRef) / imgW) * mapW_mm;
+      const signH_mm = (cssSignPx(hPx, zRef) / imgH) * mapH_mm;
+      const cx = mapRect.x + (pos.x / imgW) * mapRect.w;
+      const cy = mapRect.y + (pos.y / imgH) * mapRect.h;
+      const pdfBboxW = (diag / SIGN_RES) * signW_mm;
+      const pdfBboxH = (diag / resH) * signH_mm;
+      const pdfBbox = Math.max(pdfBboxW, pdfBboxH);
+      pdf.addImage(oc.toDataURL("image/png"), "PNG", cx - pdfBbox / 2, cy - pdfBbox / 2, pdfBbox, pdfBbox, undefined, "NONE");
+    };
+    for (let i = 0; i < (placedSigns || []).length; i++) {
+      const s = placedSigns[i];
+      addHighResImage(
+        signImages[i], project(s?.pos),
+        s?.wPx || 64, s?.hPx || 64,
+        s?.zRef ?? ELEMENT_BASE_ZOOM,
+        s?.rotDeg ?? s?.rotationDeg ?? 0
+      );
+    }
+    for (let i = 0; i < (placedArrows || []).length; i++) {
+      const a = placedArrows[i];
+      addHighResImage(
+        arrowImages[i], project(a?.pos),
+        a?.wPx || DEFAULT_ARROW_WIDTH_PX, a?.hPx || DEFAULT_ARROW_HEIGHT_PX,
+        a?.zRef ?? ELEMENT_BASE_ZOOM,
+        a?.rotDeg ?? 0
+      );
+    }
+  }
 
   // ── Work areas: PDF vector polygons ──
   {
