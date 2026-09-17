@@ -138,7 +138,7 @@ export default async function handler(req, res) {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
       .from("timesheets")
-      .select("*, dispatch:dispatches(id, job_number, location, start_time)")
+      .select("*, dispatch:dispatches(id, job_number, location, start_time, client_company_name)")
       .eq("worker_id", profile.id)
       .order("submitted_at", { ascending: false });
     if (error) return json(res, 500, { error: error.message });

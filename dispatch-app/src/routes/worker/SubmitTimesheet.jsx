@@ -74,10 +74,15 @@ export default function SubmitTimesheet() {
     <div>
       <h1>Submit Timesheet</h1>
       {dispatch && (
-        <p className="subtle">
-          {dispatch.job_number && `Job ${dispatch.job_number} — `}
-          {dispatch.location} — {new Date(dispatch.start_time).toLocaleDateString()}
-        </p>
+        <>
+          <p className="subtle">
+            {dispatch.job_number && `Job ${dispatch.job_number} — `}
+            {dispatch.location} — {new Date(dispatch.start_time).toLocaleDateString()}
+          </p>
+          {dispatch.client_company_name && (
+            <p className="subtle">Contractor: {dispatch.client_company_name}</p>
+          )}
+        </>
       )}
       <form onSubmit={handleSubmit} className="form">
         <label>

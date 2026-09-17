@@ -31,6 +31,7 @@ export default function TimesheetHistory() {
             <strong>{t.dispatch?.job_number ? `Job ${t.dispatch.job_number}` : t.dispatch?.location}</strong>
             {t.dispatch?.job_number && ` — ${t.dispatch.location}`}
           </p>
+          {t.dispatch?.client_company_name && <p className="subtle">Contractor: {t.dispatch.client_company_name}</p>}
           <p className="subtle">{t.dispatch?.start_time && new Date(t.dispatch.start_time).toLocaleDateString()}</p>
           <p>
             {new Date(t.typed_start_time).toLocaleTimeString()} – {new Date(t.typed_end_time).toLocaleTimeString()}
