@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { getSessionProfile, requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
 import { syncApprovedTimesheet } from "./_lib/qboSync.js";
+import { splitShiftHours } from "./_lib/overtime.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -143,6 +144,46 @@ export default async function handler(req, res) {
       .order("submitted_at", { ascending: false });
     if (error) return json(res, 500, { error: error.message });
     return json(res, 200, { timesheets: data });
+  }
+
+  if (action === "payroll-summary" && req.method === "GET") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const { from, to } = req.query || {};
+    if (!from || !to) return json(res, 400, { error: "from and to (dates) are required" });
+
+    const supabase = getSupabaseAdmin();
+    // Grouped by the shift's own typed start time (when the work actually
+    // happened), not when it was submitted or reviewed -- that's what
+    // determines which pay period a shift belongs to.
+    const { data, error } = await supabase
+      .from("timesheets")
+      .select("calculated_hours, typed_start_time, worker:profiles!timesheets_worker_id_fkey(id, full_name, worker_type)")
+      .eq("status", "approved")
+      .gte("typed_start_time", from)
+      .lt("typed_start_time", to);
+    if (error) return json(res, 500, { error: error.message });
+
+    const byWorker = new Map();
+    for (const t of data) {
+      if (!t.worker || t.worker.worker_type !== "employee") continue; // contractors are billed, not run through payroll
+      const key = t.worker.id;
+      if (!byWorker.has(key)) {
+        byWorker.set(key, { worker_id: key, full_name: t.worker.full_name, regular: 0, overtime: 0, doubletime: 0 });
+      }
+      const split = splitShiftHours(t.calculated_hours);
+      const entry = byWorker.get(key);
+      entry.regular += split.regular;
+      entry.overtime += split.overtime;
+      entry.doubletime += split.doubletime;
+    }
+
+    const summary = [...byWorker.values()]
+      .map((e) => ({ ...e, total: Math.round((e.regular + e.overtime + e.doubletime) * 100) / 100 }))
+      .sort((a, b) => a.full_name.localeCompare(b.full_name));
+
+    return json(res, 200, { summary });
   }
 
   return json(res, 404, { error: "Unknown action" });
