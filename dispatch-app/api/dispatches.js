@@ -239,10 +239,11 @@ export default async function handler(req, res) {
     let query = supabase
       .from("dispatches")
       .select(
-        "*, worker:profiles!dispatches_worker_id_fkey(id, full_name, worker_type), timesheets(id, status, calculated_hours)"
+        "*, worker:profiles!dispatches_worker_id_fkey(id, full_name, worker_type), timesheets(id, status, calculated_hours, slip_photo_path)"
       )
       .order("start_time", { ascending: false });
 
+    const isAdminViewingOneWorker = profile.role === "admin" && !!req.query?.worker_id;
     if (profile.role !== "admin") {
       query = query.eq("worker_id", profile.id);
     } else if (req.query?.worker_id) {
@@ -251,6 +252,21 @@ export default async function handler(req, res) {
 
     const { data, error } = await query;
     if (error) return json(res, 500, { error: error.message });
+
+    // Only sign photo URLs for the admin's single-worker schedule view (the
+    // Worker Schedule PDF/preview needs them) -- not the full dispatch list,
+    // to avoid an unnecessary batch of signed-URL calls on every load.
+    if (isAdminViewingOneWorker) {
+      await Promise.all(
+        data.map(async (d) => {
+          const path = d.timesheets?.slip_photo_path;
+          if (!path) return;
+          const { data: signed } = await supabase.storage.from("timesheet-photos").createSignedUrl(path, 60 * 15);
+          d.timesheets.slip_photo_url = signed?.signedUrl || null;
+        })
+      );
+    }
+
     return json(res, 200, { dispatches: data });
   }
 

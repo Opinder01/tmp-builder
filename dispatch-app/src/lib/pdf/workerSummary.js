@@ -1,10 +1,38 @@
 import { jsPDF } from "jspdf";
 
-// Simple tabular shift/hours summary for one worker, mirroring the jsPDF
-// usage already established in client/src/Editor.jsx (mm units, helvetica).
-export function generateWorkerSummaryPdf(worker, dispatches) {
+// Draws `img` onto an off-screen canvas rotated by `degrees` (0/90/180/270,
+// clockwise) and returns a flat JPEG data URL plus its resulting dimensions
+// -- simpler and more predictable than relying on jsPDF's own image-rotation
+// positioning, which rotates around a corner in a way that's easy to get wrong.
+function rotateImage(img, degrees) {
+  const swap = degrees === 90 || degrees === 270;
+  const canvas = document.createElement("canvas");
+  canvas.width = swap ? img.height : img.width;
+  canvas.height = swap ? img.width : img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((degrees * Math.PI) / 180);
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  return { dataUrl: canvas.toDataURL("image/jpeg", 0.85), width: canvas.width, height: canvas.height };
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load image"));
+    img.src = url;
+  });
+}
+
+// Summary table (Job #/Date/Location/Hours/Status) followed by one page per
+// shift's timesheet slip photo, each rotated per `rotations` (dispatch id ->
+// degrees clockwise) if provided.
+export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {}) {
   const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "letter" });
   const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
   const marginX = 15;
   let y = 20;
 
@@ -90,6 +118,46 @@ export function generateWorkerSummaryPdf(worker, dispatches) {
   pdf.setFontSize(11);
   pdf.setTextColor(15, 23, 42);
   pdf.text(`Total approved hours: ${totalHours}`, marginX, y);
+
+  // One page per timesheet slip photo, rotated as chosen in the preview step.
+  const withPhotos = dispatches.filter((d) => d.timesheets?.slip_photo_url);
+  for (const d of withPhotos) {
+    pdf.addPage();
+    let py = 18;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(11);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text(
+      `Job ${d.job_number || "-"} — ${d.location} — ${new Date(d.start_time).toLocaleDateString()}`,
+      marginX,
+      py
+    );
+    py += 8;
+
+    try {
+      const img = await loadImage(d.timesheets.slip_photo_url);
+      const degrees = rotations[d.id] || 0;
+      const rotated = rotateImage(img, degrees);
+
+      const maxW = pageW - marginX * 2;
+      const maxH = pageH - py - 15;
+      // jsPDF addImage expects width/height in the document's unit (mm);
+      // treat the source pixels as 96dpi and scale down further to fit.
+      const pxToMm = 25.4 / 96;
+      let drawW = rotated.width * pxToMm;
+      let drawH = rotated.height * pxToMm;
+      const fit = Math.min(maxW / drawW, maxH / drawH, 1);
+      drawW *= fit;
+      drawH *= fit;
+
+      pdf.addImage(rotated.dataUrl, "JPEG", marginX, py, drawW, drawH);
+    } catch (err) {
+      pdf.setFont("helvetica", "italic");
+      pdf.setFontSize(9);
+      pdf.setTextColor(148, 163, 184);
+      pdf.text("(Could not load timesheet photo)", marginX, py);
+    }
+  }
 
   const dateStamp = new Date().toISOString().slice(0, 10);
   const safeName = worker.full_name.replace(/[^a-zA-Z0-9]+/g, "-");
