@@ -3,6 +3,7 @@ import { getSessionProfile, requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
 import { syncApprovedTimesheet } from "./_lib/qboSync.js";
 import { splitShiftHours } from "./_lib/overtime.js";
+import { sendPushToWorker } from "./_lib/push.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -77,7 +78,10 @@ export default async function handler(req, res) {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
 
-    const { timesheet_id, decision, rejection_reason } = req.body || {};
+    const {
+      timesheet_id, decision, rejection_reason,
+      typed_start_time, typed_end_time, break_minutes, notify,
+    } = req.body || {};
     if (!timesheet_id || !["approved", "rejected"].includes(decision)) {
       return json(res, 400, { error: "timesheet_id and decision ('approved'|'rejected') are required" });
     }
@@ -86,9 +90,19 @@ export default async function handler(req, res) {
     }
 
     const supabase = getSupabaseAdmin();
+
+    // Admin can correct an obvious typo (wrong AM/PM, wrong end time, etc.)
+    // right from the approval screen before approving -- calculated_hours is
+    // a generated column, so it recomputes automatically from these.
+    const corrections = {};
+    if (typed_start_time) corrections.typed_start_time = typed_start_time;
+    if (typed_end_time) corrections.typed_end_time = typed_end_time;
+    if (break_minutes !== undefined && break_minutes !== null) corrections.break_minutes = break_minutes;
+
     const { data: timesheet, error } = await supabase
       .from("timesheets")
       .update({
+        ...corrections,
         status: decision,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
@@ -108,6 +122,20 @@ export default async function handler(req, res) {
       // Never blocks the approval itself — failures are logged to qbo_sync_log
       // and retryable from the QuickBooks settings screen.
       sync = await syncApprovedTimesheet(timesheet, dispatch, worker);
+
+      if (notify) {
+        try {
+          await sendPushToWorker(timesheet.worker_id, {
+            title: Object.keys(corrections).length > 0 ? "Timesheet approved (hours corrected)" : "Timesheet approved",
+            body: dispatch?.job_number
+              ? `Job ${dispatch.job_number} — ${timesheet.calculated_hours}h approved`
+              : `${timesheet.calculated_hours}h approved`,
+            url: "/history",
+          });
+        } catch (err) {
+          console.error("[timesheets] push notify failed:", err.message);
+        }
+      }
     }
 
     return json(res, 200, { timesheet, sync });
