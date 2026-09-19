@@ -162,6 +162,8 @@ input, select, textarea, button {
 
 .app-header nav {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
   gap: 1rem;
 }
 
