@@ -2,7 +2,7 @@ import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { getSessionProfile } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
 
-const ALLOWED_BUCKETS = new Set(["timesheet-photos", "dispatch-attachments"]);
+const ALLOWED_BUCKETS = new Set(["timesheet-photos", "dispatch-attachments", "paystubs"]);
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
     const { bucket, file_name } = req.body || {};
     if (!bucket || !ALLOWED_BUCKETS.has(bucket) || !file_name) {
-      return json(res, 400, { error: "bucket (timesheet-photos|dispatch-attachments) and file_name are required" });
+      return json(res, 400, { error: "bucket (timesheet-photos|dispatch-attachments|paystubs) and file_name are required" });
     }
 
     const safeName = file_name.replace(/[^a-zA-Z0-9._-]/g, "_");

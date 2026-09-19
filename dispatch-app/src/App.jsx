@@ -11,6 +11,7 @@ import Workers from "./routes/admin/Workers.jsx";
 import WorkerSchedule from "./routes/admin/WorkerSchedule.jsx";
 import QboSettings from "./routes/admin/QboSettings.jsx";
 import ClientCompanies from "./routes/admin/ClientCompanies.jsx";
+import AdminPaystubs from "./routes/admin/Paystubs.jsx";
 import ContractorBilling from "./routes/admin/ContractorBilling.jsx";
 import PayrollSummary from "./routes/admin/PayrollSummary.jsx";
 import CustomerInvoicing from "./routes/admin/CustomerInvoicing.jsx";
@@ -19,6 +20,7 @@ import MyDispatches from "./routes/worker/MyDispatches.jsx";
 import SubmitTimesheet from "./routes/worker/SubmitTimesheet.jsx";
 import TimesheetHistory from "./routes/worker/TimesheetHistory.jsx";
 import Profile from "./routes/worker/Profile.jsx";
+import WorkerPaystubs from "./routes/worker/Paystubs.jsx";
 
 function Gate() {
   const { session, profile, loading } = useAuth();
@@ -40,6 +42,7 @@ function Gate() {
           <Route path="/workers/:workerId" element={<WorkerSchedule />} />
           <Route path="/quickbooks" element={<QboSettings />} />
           <Route path="/contractors" element={<ClientCompanies />} />
+          <Route path="/paystubs" element={<AdminPaystubs />} />
           <Route path="/contractor-billing" element={<ContractorBilling />} />
           <Route path="/payroll-summary" element={<PayrollSummary />} />
           <Route path="/customer-invoicing" element={<CustomerInvoicing />} />
@@ -56,6 +59,7 @@ function Gate() {
         <Route path="/timesheet/:dispatchId" element={<SubmitTimesheet />} />
         <Route path="/history" element={<TimesheetHistory />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/paystubs" element={<WorkerPaystubs />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

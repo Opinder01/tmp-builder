@@ -22,11 +22,19 @@ const icons = {
       <path d="M4.5 19.5c1.5-3.5 4.5-5 7.5-5s6 1.5 7.5 5" />
     </svg>
   ),
+  paystub: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3h9l3 3v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+      <path d="M15 3v3h3" />
+      <path d="M8.5 12h7M8.5 15.5h7M8.5 9h4" />
+    </svg>
+  ),
 };
 
 const tabs = [
   { to: "/", end: true, icon: "dispatch", label: "Dispatch" },
   { to: "/history", icon: "timesheet", label: "Timesheet" },
+  { to: "/paystubs", icon: "paystub", label: "Paystub" },
   { to: "/profile", icon: "profile", label: "Profile" },
 ];
 

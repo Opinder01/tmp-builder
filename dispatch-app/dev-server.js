@@ -20,6 +20,7 @@ const routes = {
   "/api/timesheets": () => import("./api/timesheets.js"),
   "/api/uploads": () => import("./api/uploads.js"),
   "/api/push": () => import("./api/push.js"),
+  "/api/paystubs": () => import("./api/paystubs.js"),
   "/api/cron/reminders": () => import("./api/cron/reminders.js"),
   "/api/quickbooks/callback": () => import("./api/quickbooks/callback.js"),
   "/api/quickbooks/data": () => import("./api/quickbooks/data.js"),
