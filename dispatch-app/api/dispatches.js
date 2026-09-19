@@ -243,20 +243,22 @@ export default async function handler(req, res) {
       )
       .order("start_time", { ascending: false });
 
-    const isAdminViewingOneWorker = profile.role === "admin" && !!req.query?.worker_id;
+    const isAdminScopedView = profile.role === "admin" && !!(req.query?.worker_id || req.query?.client_company_id);
     if (profile.role !== "admin") {
       query = query.eq("worker_id", profile.id);
     } else if (req.query?.worker_id) {
       query = query.eq("worker_id", req.query.worker_id);
+    } else if (req.query?.client_company_id) {
+      query = query.eq("client_company_id", req.query.client_company_id);
     }
 
     const { data, error } = await query;
     if (error) return json(res, 500, { error: error.message });
 
-    // Only sign photo URLs for the admin's single-worker schedule view (the
-    // Worker Schedule PDF/preview needs them) -- not the full dispatch list,
-    // to avoid an unnecessary batch of signed-URL calls on every load.
-    if (isAdminViewingOneWorker) {
+    // Only sign photo URLs for the admin's single-worker or single-contractor
+    // schedule view (the PDF preview needs them) -- not the general dispatch
+    // list, to avoid an unnecessary batch of signed-URL calls on every load.
+    if (isAdminScopedView) {
       await Promise.all(
         data.map(async (d) => {
           const path = d.timesheets?.slip_photo_path;

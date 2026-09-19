@@ -11,6 +11,7 @@ import Workers from "./routes/admin/Workers.jsx";
 import WorkerSchedule from "./routes/admin/WorkerSchedule.jsx";
 import QboSettings from "./routes/admin/QboSettings.jsx";
 import ClientCompanies from "./routes/admin/ClientCompanies.jsx";
+import ContractorSchedule from "./routes/admin/ContractorSchedule.jsx";
 import AdminPaystubs from "./routes/admin/Paystubs.jsx";
 import ContractorBilling from "./routes/admin/ContractorBilling.jsx";
 import PayrollSummary from "./routes/admin/PayrollSummary.jsx";
@@ -42,6 +43,7 @@ function Gate() {
           <Route path="/workers/:workerId" element={<WorkerSchedule />} />
           <Route path="/quickbooks" element={<QboSettings />} />
           <Route path="/contractors" element={<ClientCompanies />} />
+          <Route path="/contractors/:companyId" element={<ContractorSchedule />} />
           <Route path="/paystubs" element={<AdminPaystubs />} />
           <Route path="/contractor-billing" element={<ContractorBilling />} />
           <Route path="/payroll-summary" element={<PayrollSummary />} />

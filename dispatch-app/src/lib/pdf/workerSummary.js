@@ -26,10 +26,12 @@ function loadImage(url) {
   });
 }
 
-// Summary table (Job #/Date/Location/Hours/Status) followed by one page per
-// shift's timesheet slip photo, each rotated per `rotations` (dispatch id ->
-// degrees clockwise) if provided.
-export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {}) {
+// Summary table followed by one page per shift's timesheet slip photo, each
+// rotated per `rotations` (dispatch id -> degrees clockwise) if provided.
+// `showWorkerColumn` adds a Worker column/label -- needed for a contractor's
+// schedule, which can span multiple different workers (a worker's own
+// schedule doesn't need it, since every row is already that one person).
+async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, showWorkerColumn = false }) {
   const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "letter" });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -43,22 +45,31 @@ export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {
   y += 8;
 
   pdf.setFontSize(12);
-  pdf.text(`${worker.full_name} (${worker.worker_type})`, marginX, y);
+  pdf.text(title, marginX, y);
   y += 6;
 
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);
   pdf.setTextColor(100, 116, 139);
-  pdf.text(`Generated ${new Date().toLocaleDateString()}`, marginX, y);
+  pdf.text(subtitle || `Generated ${new Date().toLocaleDateString()}`, marginX, y);
   y += 10;
 
-  const columns = [
-    { label: "Job #", width: 25 },
-    { label: "Date", width: 28 },
-    { label: "Location", width: 55 },
-    { label: "Hours", width: 20 },
-    { label: "Status", width: 30 },
-  ];
+  const columns = showWorkerColumn
+    ? [
+        { label: "Job #", width: 20 },
+        { label: "Worker", width: 32 },
+        { label: "Date", width: 24 },
+        { label: "Location", width: 44 },
+        { label: "Hours", width: 18 },
+        { label: "Status", width: 25 },
+      ]
+    : [
+        { label: "Job #", width: 25 },
+        { label: "Date", width: 28 },
+        { label: "Location", width: 55 },
+        { label: "Hours", width: 20 },
+        { label: "Status", width: 30 },
+      ];
 
   function drawHeaderRow() {
     pdf.setFont("helvetica", "bold");
@@ -92,13 +103,22 @@ export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {
     const hours = ts?.status === "approved" ? ts.calculated_hours : null;
     if (hours) totalHours += hours;
 
-    const row = [
-      d.job_number,
-      new Date(d.start_time).toLocaleDateString(),
-      d.location,
-      hours != null ? String(hours) : "-",
-      ts ? ts.status : "no timesheet",
-    ];
+    const row = showWorkerColumn
+      ? [
+          d.job_number,
+          d.worker?.full_name || "-",
+          new Date(d.start_time).toLocaleDateString(),
+          d.location,
+          hours != null ? String(hours) : "-",
+          ts ? ts.status : "no timesheet",
+        ]
+      : [
+          d.job_number,
+          new Date(d.start_time).toLocaleDateString(),
+          d.location,
+          hours != null ? String(hours) : "-",
+          ts ? ts.status : "no timesheet",
+        ];
 
     let x = marginX;
     pdf.setTextColor(30, 41, 59);
@@ -127,11 +147,10 @@ export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(11);
     pdf.setTextColor(15, 23, 42);
-    pdf.text(
-      `Job ${d.job_number || "-"} — ${d.location} — ${new Date(d.start_time).toLocaleDateString()}`,
-      marginX,
-      py
-    );
+    const label = showWorkerColumn
+      ? `Job ${d.job_number || "-"} — ${d.worker?.full_name || "-"} — ${d.location} — ${new Date(d.start_time).toLocaleDateString()}`
+      : `Job ${d.job_number || "-"} — ${d.location} — ${new Date(d.start_time).toLocaleDateString()}`;
+    pdf.text(label, marginX, py);
     py += 8;
 
     try {
@@ -159,7 +178,30 @@ export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {
     }
   }
 
+  return pdf;
+}
+
+export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {}) {
+  const pdf = await generateShiftsPdf({
+    title: `${worker.full_name} (${worker.worker_type})`,
+    dispatches,
+    rotations,
+    showWorkerColumn: false,
+  });
   const dateStamp = new Date().toISOString().slice(0, 10);
   const safeName = worker.full_name.replace(/[^a-zA-Z0-9]+/g, "-");
+  pdf.save(`${safeName}-${dateStamp}.pdf`);
+}
+
+export async function generateContractorSummaryPdf(company, dispatches, rotations = {}) {
+  const pdf = await generateShiftsPdf({
+    title: company.name,
+    subtitle: `Contractor — Generated ${new Date().toLocaleDateString()}`,
+    dispatches,
+    rotations,
+    showWorkerColumn: true,
+  });
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const safeName = company.name.replace(/[^a-zA-Z0-9]+/g, "-");
   pdf.save(`${safeName}-${dateStamp}.pdf`);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import CustomerSearch from "../../components/CustomerSearch.jsx";
 
@@ -123,6 +124,7 @@ export default function ClientCompanies() {
               <th>Phone</th>
               <th>Email</th>
               <th>QuickBooks customer</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -133,6 +135,9 @@ export default function ClientCompanies() {
                 <td>{c.email}</td>
                 <td>
                   <LinkQboCustomer company={c} onLinked={load} />
+                </td>
+                <td>
+                  <Link to={`/contractors/${c.id}`}>View schedule</Link>
                 </td>
               </tr>
             ))}
