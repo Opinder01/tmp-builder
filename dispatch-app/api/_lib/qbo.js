@@ -105,7 +105,10 @@ export async function qboFetch(path, { method = "GET", body } = {}) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message = data?.Fault?.Error?.[0]?.Message || JSON.stringify(data);
+    const fault = data?.Fault?.Error?.[0];
+    const message = fault
+      ? [fault.Message, fault.Detail].filter(Boolean).join(" — ")
+      : JSON.stringify(data);
     throw new Error(`QuickBooks API error (${res.status}): ${message}`);
   }
   return data;
