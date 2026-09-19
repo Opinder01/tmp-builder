@@ -21,7 +21,6 @@ export default function AdminLayout() {
           <NavLink to="/workers">Workers</NavLink>
           <NavLink to="/contractors">Contractors</NavLink>
           <NavLink to="/quickbooks">QuickBooks</NavLink>
-          <NavLink to="/contractor-billing">Contractor Billing</NavLink>
           <NavLink to="/customer-invoicing">Customer Invoicing</NavLink>
         </nav>
         <div>

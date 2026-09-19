@@ -13,7 +13,6 @@ import QboSettings from "./routes/admin/QboSettings.jsx";
 import ClientCompanies from "./routes/admin/ClientCompanies.jsx";
 import ContractorSchedule from "./routes/admin/ContractorSchedule.jsx";
 import AdminPaystubs from "./routes/admin/Paystubs.jsx";
-import ContractorBilling from "./routes/admin/ContractorBilling.jsx";
 import PayrollSummary from "./routes/admin/PayrollSummary.jsx";
 import CustomerInvoicing from "./routes/admin/CustomerInvoicing.jsx";
 import WorkerLayout from "./routes/worker/WorkerLayout.jsx";
@@ -45,7 +44,6 @@ function Gate() {
           <Route path="/contractors" element={<ClientCompanies />} />
           <Route path="/contractors/:companyId" element={<ContractorSchedule />} />
           <Route path="/paystubs" element={<AdminPaystubs />} />
-          <Route path="/contractor-billing" element={<ContractorBilling />} />
           <Route path="/payroll-summary" element={<PayrollSummary />} />
           <Route path="/customer-invoicing" element={<CustomerInvoicing />} />
           <Route path="*" element={<Navigate to="/" replace />} />
