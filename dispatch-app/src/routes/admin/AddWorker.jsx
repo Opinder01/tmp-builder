@@ -7,7 +7,6 @@ export default function AddWorker() {
   const [form, setForm] = useState({
     full_name: "",
     email: "",
-    password: "",
     worker_type: "employee",
     phone: "",
     contracted_hours_per_period: "",
@@ -17,6 +16,7 @@ export default function AddWorker() {
   });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [created, setCreated] = useState(null);
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -27,7 +27,7 @@ export default function AddWorker() {
     setError("");
     setSubmitting(true);
     try {
-      await api.post("/api/workers?action=create", {
+      const data = await api.post("/api/workers?action=create", {
         ...form,
         contracted_hours_per_period: form.contracted_hours_per_period
           ? Number(form.contracted_hours_per_period)
@@ -36,12 +36,32 @@ export default function AddWorker() {
         job_title: form.job_title || null,
         wage: form.wage ? Number(form.wage) : null,
       });
-      navigate("/dispatch/new");
+      setCreated({ name: form.full_name, password: data.temporary_password });
     } catch (err) {
       setError(err.message);
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (created) {
+    return (
+      <div>
+        <h1>Add Flagger</h1>
+        <p className="status status-ok">{created.name}'s account was created.</p>
+        <div className="form" style={{ maxWidth: 420 }}>
+          <label>
+            Temporary password — share this with {created.name} now, it won't be shown again
+            <input readOnly value={created.password} onClick={(e) => e.target.select()} />
+          </label>
+          <p className="subtle">
+            They'll be asked to set their own password the first time they log in — after that,
+            this temporary one no longer works.
+          </p>
+          <button type="button" onClick={() => navigate("/workers")}>Done</button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -60,16 +80,6 @@ export default function AddWorker() {
             type="email"
             value={form.email}
             onChange={(e) => update("email", e.target.value)}
-          />
-        </label>
-
-        <label>
-          Temporary password
-          <input
-            required
-            type="text"
-            value={form.password}
-            onChange={(e) => update("password", e.target.value)}
           />
         </label>
 

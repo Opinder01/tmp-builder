@@ -1,6 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
+
+// Readable-but-random one-time password (no ambiguous 0/O/1/l) — the admin
+// shares this with the flagger once; they're forced to set their own on
+// first login, so no one but them knows their real password after that.
+const PASSWORD_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+function generatePassword(length = 10) {
+  const bytes = randomBytes(length);
+  return Array.from(bytes, (b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length]).join("");
+}
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -53,14 +63,15 @@ export default async function handler(req, res) {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
 
-    const { email, password, full_name, worker_type, phone, contracted_hours_per_period, contractor_bill_rate, job_title, wage } = req.body || {};
-    if (!email || !password || !full_name || !worker_type) {
-      return json(res, 400, { error: "email, password, full_name, and worker_type are required" });
+    const { email, full_name, worker_type, phone, contracted_hours_per_period, contractor_bill_rate, job_title, wage } = req.body || {};
+    if (!email || !full_name || !worker_type) {
+      return json(res, 400, { error: "email, full_name, and worker_type are required" });
     }
     if (!["employee", "contractor"].includes(worker_type)) {
       return json(res, 400, { error: "worker_type must be 'employee' or 'contractor'" });
     }
 
+    const password = generatePassword();
     const supabase = getSupabaseAdmin();
     const { data: created, error: createError } = await supabase.auth.admin.createUser({
       email,
@@ -82,12 +93,35 @@ export default async function handler(req, res) {
         contractor_bill_rate: contractor_bill_rate || null,
         job_title: job_title || null,
         wage: wage || null,
+        must_change_password: true,
       })
       .select()
       .single();
     if (profileError) return json(res, 500, { error: profileError.message });
 
-    return json(res, 201, { worker: profile });
+    return json(res, 201, { worker: profile, temporary_password: password });
+  }
+
+  if (action === "reset-password" && req.method === "POST") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const { worker_id } = req.body || {};
+    if (!worker_id) return json(res, 400, { error: "worker_id is required" });
+
+    const password = generatePassword();
+    const supabase = getSupabaseAdmin();
+    const { error: updateError } = await supabase.auth.admin.updateUserById(worker_id, { password });
+    if (updateError) return json(res, 500, { error: updateError.message });
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ must_change_password: true })
+      .eq("id", worker_id)
+      .eq("role", "worker");
+    if (profileError) return json(res, 500, { error: profileError.message });
+
+    return json(res, 200, { temporary_password: password });
   }
 
   return json(res, 404, { error: "Unknown action" });

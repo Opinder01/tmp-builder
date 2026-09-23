@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import Login from "./routes/Login.jsx";
+import SetNewPassword from "./routes/SetNewPassword.jsx";
 import AdminLayout from "./routes/admin/AdminLayout.jsx";
 import Dashboard from "./routes/admin/Dashboard.jsx";
 import DispatchForm from "./routes/admin/DispatchForm.jsx";
@@ -28,6 +29,7 @@ function Gate() {
   if (loading) return <p>Loading...</p>;
   if (!session) return <Login />;
   if (!profile) return <p>Loading profile...</p>;
+  if (profile.must_change_password) return <SetNewPassword />;
 
   if (profile.role === "admin") {
     return (
