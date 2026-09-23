@@ -25,6 +25,7 @@ export default function DispatchForm() {
     client_company_id: "",
   });
   const [titles, setTitles] = useState({});
+  const [workerListOpen, setWorkerListOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -125,31 +126,41 @@ export default function DispatchForm() {
         <label>
           Workers
           <span className="subtle">Select one or more — everyone gets their own dispatch and timesheet for this job.</span>
-          <div className="worker-checklist">
-            {workers.map((w) => {
-              const checked = form.worker_ids.includes(w.id);
-              return (
-                <div key={w.id} className="worker-checklist-item">
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleWorker(w.id)} />
-                    {w.full_name} ({w.worker_type})
-                  </label>
-                  <select
-                    value={titles[w.id] || ""}
-                    onChange={(e) => setTitle(w.id, e.target.value)}
-                    style={{ marginLeft: "1.5rem", width: "auto" }}
-                  >
-                    <option value="">Title (optional)</option>
-                    {TITLE_OPTIONS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })}
-          </div>
+          <button type="button" onClick={() => setWorkerListOpen((o) => !o)}>
+            {form.worker_ids.length === 0
+              ? "Select workers..."
+              : `${form.worker_ids.length} worker(s) selected — ${workers
+                  .filter((w) => form.worker_ids.includes(w.id))
+                  .map((w) => w.full_name)
+                  .join(", ")}`}
+          </button>
+          {workerListOpen && (
+            <div className="worker-checklist">
+              {workers.map((w) => {
+                const checked = form.worker_ids.includes(w.id);
+                return (
+                  <div key={w.id} className="worker-checklist-item">
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleWorker(w.id)} />
+                      {w.full_name} ({w.worker_type})
+                    </label>
+                    <select
+                      value={titles[w.id] || ""}
+                      onChange={(e) => setTitle(w.id, e.target.value)}
+                      style={{ marginLeft: "1.5rem", width: "auto" }}
+                    >
+                      <option value="">Title (optional)</option>
+                      {TITLE_OPTIONS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </label>
 
         <label>
