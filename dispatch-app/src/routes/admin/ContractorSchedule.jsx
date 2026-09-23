@@ -143,6 +143,7 @@ export default function ContractorSchedule() {
             <tr>
               <th>Job #</th>
               <th>Worker</th>
+              <th>Title</th>
               <th>Date</th>
               <th>Location</th>
               <th>Hours</th>
@@ -157,6 +158,7 @@ export default function ContractorSchedule() {
                 <tr key={d.id}>
                   <td>{d.job_number}</td>
                   <td>{d.worker?.full_name}</td>
+                  <td>{d.title || "-"}</td>
                   <td>{new Date(d.start_time).toLocaleDateString()}</td>
                   <td>{d.location}</td>
                   <td>{ts?.status === "approved" ? ts.calculated_hours : "-"}</td>

@@ -62,6 +62,7 @@ export default function Dashboard() {
             <tr>
               <th>Job #</th>
               <th>Worker</th>
+              <th>Title</th>
               <th>Contractor</th>
               <th>Location</th>
               <th>Start</th>
@@ -76,6 +77,7 @@ export default function Dashboard() {
                 <tr key={d.id}>
                   <td>{d.job_number}</td>
                   <td>{d.worker?.full_name}</td>
+                  <td>{d.title || "-"}</td>
                   <td>{d.client_company_name || "-"}</td>
                   <td>{d.location}</td>
                   <td>{new Date(d.start_time).toLocaleString()}</td>

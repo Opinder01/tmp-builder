@@ -20,6 +20,7 @@ function DispatchCard({ d, status }) {
         <strong>{d.job_number ? `Job ${d.job_number}` : d.location}</strong>
         {d.job_number && ` — ${d.location}`}
       </p>
+      {d.title && <p className="subtle">Title: {d.title}</p>}
       {d.client_company_name && <p className="subtle">Contractor: {d.client_company_name}</p>}
       {d.colleagues?.length > 0 && (
         <p className="subtle">With: {d.colleagues.map((c) => c.full_name).join(", ")}</p>

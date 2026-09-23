@@ -79,6 +79,7 @@ export default function SubmitTimesheet() {
             {dispatch.job_number && `Job ${dispatch.job_number} — `}
             {dispatch.location} — {new Date(dispatch.start_time).toLocaleDateString()}
           </p>
+          {dispatch.title && <p className="subtle">Title: {dispatch.title}</p>}
           {dispatch.client_company_name && (
             <p className="subtle">Contractor: {dispatch.client_company_name}</p>
           )}

@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     if (!admin) return;
 
     const {
-      job_number, location, start_time, notes, worker_id, worker_ids, attachments,
+      job_number, location, start_time, notes, worker_id, worker_ids, titles, attachments,
       customer_qbo_id, qbo_customer_name, qbo_item_id, qbo_item_name, rate,
       qbo_ot_item_id, qbo_ot_item_name, ot_rate,
       qbo_dt_item_id, qbo_dt_item_name, dt_rate,
@@ -60,9 +60,11 @@ export default async function handler(req, res) {
       client_company_name: client_company_name || null,
     };
 
+    // Each worker on a shared job can have a different role (e.g. one is
+    // TCP, another LCT), so title is per-worker, not shared in baseRow.
     const { data: dispatches, error } = await supabase
       .from("dispatches")
-      .insert(ids.map((id) => ({ ...baseRow, worker_id: id })))
+      .insert(ids.map((id) => ({ ...baseRow, worker_id: id, title: titles?.[id] || null })))
       .select();
     if (error) return json(res, 500, { error: error.message });
 
@@ -128,7 +130,7 @@ export default async function handler(req, res) {
     if (!admin) return;
 
     const {
-      id, job_number, location, start_time, notes, worker_id, notify,
+      id, job_number, location, start_time, notes, worker_id, title, notify,
       customer_qbo_id, qbo_customer_name, qbo_item_id, qbo_item_name, rate,
       qbo_ot_item_id, qbo_ot_item_name, ot_rate,
       qbo_dt_item_id, qbo_dt_item_name, dt_rate,
@@ -165,6 +167,7 @@ export default async function handler(req, res) {
         start_time,
         notes: notes || null,
         worker_id,
+        title: title || null,
         customer_qbo_id: customer_qbo_id || null,
         qbo_customer_name: qbo_customer_name || null,
         qbo_item_id: qbo_item_id || null,

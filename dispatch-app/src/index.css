@@ -271,12 +271,18 @@ th, td {
 }
 
 .worker-checklist-item {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center;
-  gap: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   font-weight: 400;
   font-size: 1rem;
+}
+
+.worker-checklist-item > label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .worker-checklist-item input {

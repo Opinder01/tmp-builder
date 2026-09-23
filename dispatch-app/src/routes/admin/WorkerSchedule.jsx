@@ -243,6 +243,7 @@ export default function WorkerSchedule() {
           <thead>
             <tr>
               <th>Job #</th>
+              <th>Title</th>
               <th>Date</th>
               <th>Location</th>
               <th>Hours</th>
@@ -256,6 +257,7 @@ export default function WorkerSchedule() {
               return (
                 <tr key={d.id}>
                   <td>{d.job_number}</td>
+                  <td>{d.title || "-"}</td>
                   <td>{new Date(d.start_time).toLocaleDateString()}</td>
                   <td>{d.location}</td>
                   <td>{ts?.status === "approved" ? ts.calculated_hours : "-"}</td>

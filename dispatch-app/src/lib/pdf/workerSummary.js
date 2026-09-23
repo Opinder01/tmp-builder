@@ -56,19 +56,21 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
 
   const columns = showWorkerColumn
     ? [
-        { label: "Job #", width: 20 },
-        { label: "Worker", width: 32 },
-        { label: "Date", width: 24 },
-        { label: "Location", width: 44 },
-        { label: "Hours", width: 18 },
-        { label: "Status", width: 25 },
+        { label: "Job #", width: 18 },
+        { label: "Worker", width: 28 },
+        { label: "Title", width: 16 },
+        { label: "Date", width: 22 },
+        { label: "Location", width: 38 },
+        { label: "Hours", width: 16 },
+        { label: "Status", width: 22 },
       ]
     : [
-        { label: "Job #", width: 25 },
-        { label: "Date", width: 28 },
-        { label: "Location", width: 55 },
-        { label: "Hours", width: 20 },
-        { label: "Status", width: 30 },
+        { label: "Job #", width: 22 },
+        { label: "Title", width: 16 },
+        { label: "Date", width: 26 },
+        { label: "Location", width: 46 },
+        { label: "Hours", width: 18 },
+        { label: "Status", width: 26 },
       ];
 
   function drawHeaderRow() {
@@ -107,6 +109,7 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
       ? [
           d.job_number,
           d.worker?.full_name || "-",
+          d.title || "-",
           new Date(d.start_time).toLocaleDateString(),
           d.location,
           hours != null ? String(hours) : "-",
@@ -114,6 +117,7 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
         ]
       : [
           d.job_number,
+          d.title || "-",
           new Date(d.start_time).toLocaleDateString(),
           d.location,
           hours != null ? String(hours) : "-",

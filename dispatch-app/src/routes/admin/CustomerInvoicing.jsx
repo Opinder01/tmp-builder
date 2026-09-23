@@ -149,6 +149,7 @@ export default function CustomerInvoicing() {
                 <th></th>
                 <th>Job #</th>
                 <th>Worker</th>
+                <th>Title</th>
                 <th>Date</th>
                 <th>Location</th>
                 <th>Hours (reg / OT / DT)</th>
@@ -165,6 +166,7 @@ export default function CustomerInvoicing() {
                     </td>
                     <td>{t.dispatch.job_number}</td>
                     <td>{t.worker?.full_name}</td>
+                    <td>{t.dispatch.title || "-"}</td>
                     <td>{new Date(t.dispatch.start_time).toLocaleDateString()}</td>
                     <td>{t.dispatch.location}</td>
                     <td>

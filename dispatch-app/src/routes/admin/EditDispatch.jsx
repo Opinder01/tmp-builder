@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 
+const TITLE_OPTIONS = ["TCP", "LCT", "TCS"];
+
 function toDateTimeLocal(isoString) {
   if (!isoString) return "";
   const d = new Date(isoString);
@@ -33,6 +35,7 @@ export default function EditDispatch() {
         setForm({
           job_number: d.job_number || "",
           worker_id: d.worker_id,
+          title: d.title || "",
           location: d.location,
           start_time: toDateTimeLocal(d.start_time),
           notes: d.notes || "",
@@ -139,6 +142,18 @@ export default function EditDispatch() {
               changed — delete and recreate it instead if it was assigned to the wrong person.
             </span>
           )}
+        </label>
+
+        <label>
+          Title (optional) — role this worker is on for this shift
+          <select value={form.title} onChange={(e) => update("title", e.target.value)}>
+            <option value="">None</option>
+            {TITLE_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label>

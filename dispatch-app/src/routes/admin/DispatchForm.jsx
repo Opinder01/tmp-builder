@@ -3,6 +3,8 @@ import { useNavigate, Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { uploadFile } from "../../lib/upload.js";
 
+const TITLE_OPTIONS = ["TCP", "LCT", "TCS"];
+
 export default function DispatchForm() {
   const navigate = useNavigate();
   const [workers, setWorkers] = useState([]);
@@ -22,6 +24,7 @@ export default function DispatchForm() {
     dt_rate: "",
     client_company_id: "",
   });
+  const [titles, setTitles] = useState({});
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -53,6 +56,10 @@ export default function DispatchForm() {
         ? f.worker_ids.filter((id) => id !== workerId)
         : [...f.worker_ids, workerId],
     }));
+  }
+
+  function setTitle(workerId, title) {
+    setTitles((t) => ({ ...t, [workerId]: title }));
   }
 
   async function handleSubmit(e) {
@@ -92,6 +99,7 @@ export default function DispatchForm() {
         qbo_dt_item_name: selectedDtItem?.name || null,
         client_company_id: form.client_company_id || null,
         client_company_name: selectedContractor?.name || null,
+        titles,
         attachments,
       });
       navigate("/");
@@ -118,16 +126,31 @@ export default function DispatchForm() {
           Workers
           <span className="subtle">Select one or more — everyone gets their own dispatch and timesheet for this job.</span>
           <div className="worker-checklist">
-            {workers.map((w) => (
-              <label key={w.id} className="worker-checklist-item">
-                <input
-                  type="checkbox"
-                  checked={form.worker_ids.includes(w.id)}
-                  onChange={() => toggleWorker(w.id)}
-                />
-                {w.full_name} ({w.worker_type})
-              </label>
-            ))}
+            {workers.map((w) => {
+              const checked = form.worker_ids.includes(w.id);
+              return (
+                <div key={w.id} className="worker-checklist-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleWorker(w.id)} />
+                    {w.full_name} ({w.worker_type})
+                  </label>
+                  {checked && (
+                    <select
+                      value={titles[w.id] || ""}
+                      onChange={(e) => setTitle(w.id, e.target.value)}
+                      style={{ marginLeft: "1.5rem", width: "auto" }}
+                    >
+                      <option value="">Title (optional)</option>
+                      {TITLE_OPTIONS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </label>
 

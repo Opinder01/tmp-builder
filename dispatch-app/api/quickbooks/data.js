@@ -196,7 +196,7 @@ export default async function handler(req, res) {
     let query = supabase
       .from("timesheets")
       .select(
-        "*, dispatch:dispatches(job_number, location, start_time, qbo_item_id, rate, qbo_ot_item_id, ot_rate, qbo_dt_item_id, dt_rate), worker:profiles!timesheets_worker_id_fkey(full_name)"
+        "*, dispatch:dispatches(job_number, title, location, start_time, qbo_item_id, rate, qbo_ot_item_id, ot_rate, qbo_dt_item_id, dt_rate), worker:profiles!timesheets_worker_id_fkey(full_name)"
       )
       .eq("status", "approved")
       .in("dispatch_id", dispatchIds)
@@ -233,7 +233,7 @@ export default async function handler(req, res) {
     const { data: timesheets, error: tsError } = await supabase
       .from("timesheets")
       .select(
-        "*, dispatch:dispatches(job_number, location, start_time, qbo_item_id, rate, qbo_ot_item_id, ot_rate, qbo_dt_item_id, dt_rate), worker:profiles!timesheets_worker_id_fkey(full_name)"
+        "*, dispatch:dispatches(job_number, title, location, start_time, qbo_item_id, rate, qbo_ot_item_id, ot_rate, qbo_dt_item_id, dt_rate), worker:profiles!timesheets_worker_id_fkey(full_name)"
       )
       .in("id", timesheet_ids)
       .eq("status", "approved");
