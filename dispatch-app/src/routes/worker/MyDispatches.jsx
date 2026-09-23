@@ -21,6 +21,9 @@ function DispatchCard({ d, status }) {
         {d.job_number && ` — ${d.location}`}
       </p>
       {d.client_company_name && <p className="subtle">Contractor: {d.client_company_name}</p>}
+      {d.colleagues?.length > 0 && (
+        <p className="subtle">With: {d.colleagues.map((c) => c.full_name).join(", ")}</p>
+      )}
       <p className="subtle">{new Date(d.start_time).toLocaleString()}</p>
       {d.notes && <p>{d.notes}</p>}
       <p className={`status status-${status.tone}`}>{status.text}</p>

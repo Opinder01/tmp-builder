@@ -82,6 +82,9 @@ export default function SubmitTimesheet() {
           {dispatch.client_company_name && (
             <p className="subtle">Contractor: {dispatch.client_company_name}</p>
           )}
+          {dispatch.colleagues?.length > 0 && (
+            <p className="subtle">With: {dispatch.colleagues.map((c) => c.full_name).join(", ")}</p>
+          )}
         </>
       )}
       <form onSubmit={handleSubmit} className="form">

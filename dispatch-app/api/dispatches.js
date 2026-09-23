@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { getSessionProfile, requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
@@ -34,12 +35,16 @@ export default async function handler(req, res) {
     }
 
     const supabase = getSupabaseAdmin();
+    // Shared across every row in this submission, so workers dispatched
+    // together to the same job can see who their colleagues are on it.
+    const groupId = randomUUID();
     const baseRow = {
       job_number: job_number || null,
       location,
       start_time,
       notes: notes || null,
       created_by: admin.id,
+      group_id: groupId,
       customer_qbo_id: customer_qbo_id || null,
       qbo_customer_name: qbo_customer_name || null,
       qbo_item_id: qbo_item_id || null,
@@ -267,6 +272,27 @@ export default async function handler(req, res) {
           d.timesheets.slip_photo_url = signed?.signedUrl || null;
         })
       );
+    }
+
+    // A worker viewing their own dispatches can't see other workers' rows,
+    // so a shift dispatched to a crew looks like it's theirs alone. Look up
+    // who else shares each dispatch's group_id (same "New Dispatch"
+    // submission) and attach their names.
+    if (profile.role !== "admin" && data.length > 0) {
+      const groupIds = [...new Set(data.map((d) => d.group_id))];
+      const { data: crewRows } = await supabase
+        .from("dispatches")
+        .select("group_id, worker:profiles!dispatches_worker_id_fkey(id, full_name)")
+        .in("group_id", groupIds)
+        .neq("worker_id", profile.id);
+      const byGroup = new Map();
+      for (const row of crewRows || []) {
+        if (!byGroup.has(row.group_id)) byGroup.set(row.group_id, []);
+        byGroup.get(row.group_id).push(row.worker);
+      }
+      for (const d of data) {
+        d.colleagues = byGroup.get(d.group_id) || [];
+      }
     }
 
     return json(res, 200, { dispatches: data });
