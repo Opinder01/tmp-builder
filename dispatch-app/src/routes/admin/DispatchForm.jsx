@@ -134,20 +134,18 @@ export default function DispatchForm() {
                     <input type="checkbox" checked={checked} onChange={() => toggleWorker(w.id)} />
                     {w.full_name} ({w.worker_type})
                   </label>
-                  {checked && (
-                    <select
-                      value={titles[w.id] || ""}
-                      onChange={(e) => setTitle(w.id, e.target.value)}
-                      style={{ marginLeft: "1.5rem", width: "auto" }}
-                    >
-                      <option value="">Title (optional)</option>
-                      {TITLE_OPTIONS.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    value={titles[w.id] || ""}
+                    onChange={(e) => setTitle(w.id, e.target.value)}
+                    style={{ marginLeft: "1.5rem", width: "auto" }}
+                  >
+                    <option value="">Title (optional)</option>
+                    {TITLE_OPTIONS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               );
             })}
