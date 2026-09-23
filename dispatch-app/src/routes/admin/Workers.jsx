@@ -16,13 +16,13 @@ export default function Workers() {
   return (
     <div>
       <div className="page-header">
-        <h1>Workers</h1>
-        <Link to="/workers/new" className="button">Add Worker</Link>
+        <h1>Flaggers</h1>
+        <Link to="/workers/new" className="button">Add Flagger</Link>
       </div>
 
       {error && <p className="error">{error}</p>}
       {!workers && !error && <p>Loading...</p>}
-      {workers && workers.length === 0 && <p>No workers yet.</p>}
+      {workers && workers.length === 0 && <p>No flaggers yet.</p>}
 
       {workers && workers.length > 0 && (
         <table>

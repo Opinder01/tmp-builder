@@ -124,12 +124,12 @@ export default function DispatchForm() {
         </label>
 
         <label>
-          Workers
+          Flaggers
           <span className="subtle">Select one or more — everyone gets their own dispatch and timesheet for this job.</span>
           <button type="button" onClick={() => setWorkerListOpen((o) => !o)}>
             {form.worker_ids.length === 0
-              ? "Select workers..."
-              : `${form.worker_ids.length} worker(s) selected — ${workers
+              ? "Select flaggers..."
+              : `${form.worker_ids.length} flagger(s) selected — ${workers
                   .filter((w) => form.worker_ids.includes(w.id))
                   .map((w) => w.full_name)
                   .join(", ")}`}

@@ -108,7 +108,7 @@ function ReviewCard({ t, busy, onReview }) {
 
         <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontWeight: 400, margin: "0.5rem 0" }}>
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} style={{ width: "auto" }} />
-          Notify worker when approved
+          Notify flagger when approved
         </label>
 
         <div className="review-card-actions">

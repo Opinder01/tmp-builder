@@ -96,7 +96,7 @@ export default function ContractorSchedule() {
           <h2 style={{ marginTop: 0 }}>PDF Preview</h2>
           <p className="subtle">
             {filteredDispatches.length} shift(s) in range, {withPhotos.length} with a timesheet
-            photo, across {new Set(filteredDispatches.map((d) => d.worker_id)).size} worker(s).
+            photo, across {new Set(filteredDispatches.map((d) => d.worker_id)).size} flagger(s).
             Rotate any photo that's sideways before downloading.
           </p>
 
@@ -142,7 +142,7 @@ export default function ContractorSchedule() {
           <thead>
             <tr>
               <th>Job #</th>
-              <th>Worker</th>
+              <th>Flagger</th>
               <th>Title</th>
               <th>Date</th>
               <th>Location</th>

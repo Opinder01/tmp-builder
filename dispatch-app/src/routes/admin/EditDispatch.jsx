@@ -123,7 +123,7 @@ export default function EditDispatch() {
         </label>
 
         <label>
-          Worker
+          Flagger
           <select
             required
             disabled={hasTimesheet}
@@ -138,7 +138,7 @@ export default function EditDispatch() {
           </select>
           {hasTimesheet && (
             <span className="subtle">
-              A timesheet has already been submitted for this dispatch, so the worker can't be
+              A timesheet has already been submitted for this dispatch, so the flagger can't be
               changed — delete and recreate it instead if it was assigned to the wrong person.
             </span>
           )}
@@ -258,7 +258,7 @@ export default function EditDispatch() {
             {submitting ? "Saving..." : "Save Changes"}
           </button>
           <button type="button" disabled={submitting || deleting} onClick={() => save(true)}>
-            {submitting ? "Saving..." : "Save & Notify Worker"}
+            {submitting ? "Saving..." : "Save & Notify Flagger"}
           </button>
           <button type="button" className="button-danger" disabled={submitting || deleting} onClick={handleDelete}>
             {deleting ? "Deleting..." : "Delete Dispatch"}

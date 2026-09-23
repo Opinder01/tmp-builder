@@ -46,7 +46,7 @@ export default function AddWorker() {
 
   return (
     <div>
-      <h1>Add Worker</h1>
+      <h1>Add Flagger</h1>
       <form onSubmit={handleSubmit} className="form">
         <label>
           Full name
@@ -74,7 +74,7 @@ export default function AddWorker() {
         </label>
 
         <label>
-          Worker type
+          Flagger type
           <select value={form.worker_type} onChange={(e) => update("worker_type", e.target.value)}>
             <option value="employee">Employee</option>
             <option value="contractor">Contractor</option>
@@ -130,7 +130,7 @@ export default function AddWorker() {
         {error && <p className="error">{error}</p>}
 
         <button type="submit" disabled={submitting}>
-          {submitting ? "Creating..." : "Create Worker"}
+          {submitting ? "Creating..." : "Create Flagger"}
         </button>
       </form>
     </div>

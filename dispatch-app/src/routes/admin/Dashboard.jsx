@@ -30,7 +30,7 @@ export default function Dashboard() {
       const result = await api.post("/api/cron/reminders?force=true");
       setReminderStatus(
         result.workersNotified > 0
-          ? `Notified ${result.workersNotified} worker(s) about ${result.dispatchesFlagged} missing timesheet(s).`
+          ? `Notified ${result.workersNotified} flagger(s) about ${result.dispatchesFlagged} missing timesheet(s).`
           : "No workers currently missing a timesheet."
       );
     } catch (err) {
@@ -61,7 +61,7 @@ export default function Dashboard() {
           <thead>
             <tr>
               <th>Job #</th>
-              <th>Worker</th>
+              <th>Flagger</th>
               <th>Title</th>
               <th>Contractor</th>
               <th>Location</th>

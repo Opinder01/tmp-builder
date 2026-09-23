@@ -57,7 +57,7 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
   const columns = showWorkerColumn
     ? [
         { label: "Job #", width: 18 },
-        { label: "Worker", width: 28 },
+        { label: "Flagger", width: 28 },
         { label: "Title", width: 16 },
         { label: "Date", width: 22 },
         { label: "Location", width: 38 },

@@ -148,7 +148,7 @@ export default function CustomerInvoicing() {
               <tr>
                 <th></th>
                 <th>Job #</th>
-                <th>Worker</th>
+                <th>Flagger</th>
                 <th>Title</th>
                 <th>Date</th>
                 <th>Location</th>
