@@ -8003,6 +8003,26 @@ const handleContextCut = () => {
   closeContextMenu();
 };
 
+const handleContextDelete = () => {
+  if (!contextMenu) return;
+  const { entityType, entityId } = contextMenu;
+  pushHistory();
+  switch (entityType) {
+    case "sign":        setPlacedSigns(prev => prev.filter(x => x.id !== entityId)); break;
+    case "arrow":       setPlacedArrows(prev => prev.filter(x => x.id !== entityId)); break;
+    case "cones":       setConesFeatures(prev => prev.filter(x => x.id !== entityId)); break;
+    case "workArea":    setWorkAreas(prev => prev.filter(x => x.id !== entityId)); break;
+    case "measurement": setMeasurements(prev => prev.filter(x => x.id !== entityId)); setSelectedMeasId(null); break;
+    case "insert":      setInsertObjects(prev => prev.filter(x => x.id !== entityId)); break;
+    case "northArrow":  setNorthArrows(prev => prev.filter(x => x.id !== entityId)); break;
+    case "scale":       setScales(prev => prev.filter(x => x.id !== entityId)); break;
+    case "legend":      setLegendBoxes(prev => prev.filter(x => x.id !== entityId)); break;
+    case "manifest":    setManifestBoxes(prev => prev.filter(x => x.id !== entityId)); break;
+    default: break;
+  }
+  closeContextMenu();
+};
+
 const handleContextPaste = (cb) => {
   const { kind, data } = cb || {};
   if (!kind || !data) return;
@@ -10735,6 +10755,38 @@ onUnmount={(polygon) => {
                     ))
                   : null;
 
+                // Floating delete button shown above first vertex when measurement is selected
+                const measDeleteBtn = (isSelected && path.length > 0 && (!activeTool || activeTool === "measurements")) ? (
+                  <OverlayViewF key={`${m.id}_del`} position={path[0]} mapPaneName="overlayMouseTarget">
+                    <div
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        pushHistory();
+                        setMeasurements(prev => prev.filter(x => x.id !== m.id));
+                        setSelectedMeasId(null);
+                      }}
+                      style={{
+                        transform: "translate(-50%, calc(-100% - 14px))",
+                        background: "#dc2626",
+                        color: "#fff",
+                        borderRadius: 5,
+                        padding: "3px 9px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                        userSelect: "none",
+                        whiteSpace: "nowrap",
+                        zIndex: 99999,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Delete
+                    </div>
+                  </OverlayViewF>
+                ) : null;
+
                 if (m.mode === "distance" && path.length >= 2) {
                   const a = path[0];
                   const b = path[path.length - 1];
@@ -10772,6 +10824,7 @@ onUnmount={(polygon) => {
                         onDblClick={() => startEditMeasureLabel(m.id, null, displayText)}
                       />
                       {vertexHandles}
+                      {measDeleteBtn}
                     </React.Fragment>
                   );
                 }
@@ -10824,6 +10877,7 @@ onUnmount={(polygon) => {
                       {segs}
                       {/* Draggable vertex handles — one per path node */}
                       {vertexHandles}
+                      {measDeleteBtn}
                     </React.Fragment>
                   );
                 }
@@ -13114,6 +13168,7 @@ height: pendingPictureTool.hPx * elementScale,
           menu={contextMenu}
           onCut={handleContextCut}
           onCopy={handleContextCopy}
+          onDelete={handleContextDelete}
           onToggleLegend={handleLegendToggle}
           legendExclusions={legendExclusions}
         />
@@ -13574,7 +13629,7 @@ function Divider() {
 }
 
 // =================== CONTEXT MENU COMPONENT ===================
-function ContextMenu({ menu, onCut, onCopy, onToggleLegend, legendExclusions }) {
+function ContextMenu({ menu, onCut, onCopy, onDelete, onToggleLegend, legendExclusions }) {
   const isIncluded = menu.typeId ? !legendExclusions.has(menu.typeId) : true;
   const font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
   const base = {
@@ -13586,6 +13641,7 @@ function ContextMenu({ menu, onCut, onCopy, onToggleLegend, legendExclusions }) 
   };
   const hl = (e) => (e.currentTarget.style.background = "#e8eaed");
   const ul = (e) => (e.currentTarget.style.background = "transparent");
+  const hlRed = (e) => (e.currentTarget.style.background = "#fee2e2");
   return (
     <div
       style={{
@@ -13616,6 +13672,14 @@ function ContextMenu({ menu, onCut, onCopy, onToggleLegend, legendExclusions }) 
           </button>
         </>
       )}
+      <div style={{ height: 1, background: "#e0e0e0", margin: "3px 0" }} />
+      <button
+        style={{ ...base, color: "#dc2626" }}
+        onClick={onDelete}
+        onMouseEnter={hlRed} onMouseLeave={ul}
+      >
+        Delete
+      </button>
     </div>
   );
 }
