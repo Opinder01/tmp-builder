@@ -128,7 +128,7 @@ async function sendOtpEmail(email, otp) {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const MAX_DEVICES  = 2;
+
 const OTP_TTL_MS   = 10 * 60 * 1000;
 
 // ── Input validation ─────────────────────────────────────────────────────────
@@ -237,27 +237,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Clean up sessions inactive for more than 30 days before checking device limit
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from("user_sessions")
-      .delete().eq("email", norm).lt("last_active", thirtyDaysAgo);
-
-    const { data: sessions } = await supabase
-      .from("user_sessions").select("id, last_active").eq("email", norm)
-      .order("last_active", { ascending: true });
-
-    if ((sessions || []).length >= MAX_DEVICES) {
-      // Auto-evict the oldest session so the same user logging in again is never blocked
-      const oldest = sessions[0];
-      if (oldest) {
-        await supabase.from("user_sessions").delete().eq("id", oldest.id);
-      } else {
-        return json(res, 403, {
-          error: `This account is already signed in on ${MAX_DEVICES} devices. Please sign out from another device first.`,
-          code: "MAX_DEVICES_REACHED",
-        });
-      }
-    }
+    // no device limit, no automatic cleanup
+    
 
     const sessionToken = crypto.randomBytes(32).toString("hex");
     const { error: sessErr } = await supabase.from("user_sessions")
