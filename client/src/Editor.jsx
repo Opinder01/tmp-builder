@@ -1931,6 +1931,18 @@ async function refreshProjectsList() {
     const localById = new Map(local.map(p => [p.id, p]));
     const cloudIds = new Set(plans.map(p => p.id));
     const localOnly = local.filter(p => !cloudIds.has(p.id));
+
+    // Auto-migrate any local plans that haven't been synced to cloud yet
+    for (const p of localOnly) {
+      if (p.snapshot) {
+        fetch("/api/plans", {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ id: p.id, name: p.name, data: p.snapshot }),
+        }).catch(() => {});
+      }
+    }
+
     const merged = [
       ...plans.map(p => ({
         id: p.id,
