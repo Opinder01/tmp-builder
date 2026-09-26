@@ -1890,7 +1890,15 @@ const [saveAsName, setSaveAsName] = useState("");
 
 const [openDialog, setOpenDialog] = useState(false);
 const importFileInputRef = useRef(null);
-const [savedProjects, setSavedProjects] = useState([]); // list from localStorage
+const [savedProjects, setSavedProjects] = useState([]); // list from localStorage / cloud
+const [plansLoading, setPlansLoading] = useState(false);
+
+function getAuthHeaders() {
+  try {
+    const token = localStorage.getItem("sessionToken") || "";
+    return { "Content-Type": "application/json", "Authorization": `Bearer ${token}` };
+  } catch { return { "Content-Type": "application/json" }; }
+}
 
 function loadProjectsList() {
   try {
@@ -1911,8 +1919,32 @@ function writeProjectsList(arr) {
   }
 }
 
-function refreshProjectsList() {
-  setSavedProjects(loadProjectsList());
+async function refreshProjectsList() {
+  const local = loadProjectsList();
+  setSavedProjects(local); // show immediately from localStorage
+  try {
+    setPlansLoading(true);
+    const r = await fetch("/api/plans", { headers: getAuthHeaders() });
+    if (!r.ok) return;
+    const { plans } = await r.json();
+    if (!Array.isArray(plans)) return;
+    const localById = new Map(local.map(p => [p.id, p]));
+    const cloudIds = new Set(plans.map(p => p.id));
+    const localOnly = local.filter(p => !cloudIds.has(p.id));
+    const merged = [
+      ...plans.map(p => ({
+        id: p.id,
+        name: p.name,
+        updatedAt: new Date(p.updated_at).getTime(),
+        isCloud: true,
+        snapshot: localById.get(p.id)?.snapshot, // attach local copy if available
+      })),
+      ...localOnly,
+    ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    setSavedProjects(merged);
+  } catch { /* silent fail — localStorage plans are already shown */ } finally {
+    setPlansLoading(false);
+  }
 }
 
 useEffect(() => {
@@ -8539,16 +8571,18 @@ const tileIconStyle = {
             const id = crypto.randomUUID();
 
             const list = loadProjectsList();
-            list.unshift({
-              id,
-              name,
-              updatedAt: Date.now(),
-              snapshot: snap,
-            });
+            list.unshift({ id, name, updatedAt: Date.now(), snapshot: snap });
             writeProjectsList(list);
 
             setSaveAsOpen(false);
             refreshProjectsList();
+
+            // Sync to cloud (async, silent fail — localStorage copy is the fallback)
+            fetch("/api/plans", {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ id, name, data: snap }),
+            }).catch(() => {});
           }
         }}
       />
@@ -8565,16 +8599,18 @@ const tileIconStyle = {
             const id = crypto.randomUUID();
 
             const list = loadProjectsList();
-            list.unshift({
-              id,
-              name,
-              updatedAt: Date.now(),
-              snapshot: snap,
-            });
+            list.unshift({ id, name, updatedAt: Date.now(), snapshot: snap });
             writeProjectsList(list);
 
             setSaveAsOpen(false);
             refreshProjectsList();
+
+            // Sync to cloud (async, silent fail — localStorage copy is the fallback)
+            fetch("/api/plans", {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ id, name, data: snap }),
+            }).catch(() => {});
           }}
         >
           Save
@@ -8644,6 +8680,11 @@ const tileIconStyle = {
       </div>
 
       <div style={{ marginTop: 10, maxHeight: 320, overflow: "auto", border: "1px solid #eee", borderRadius: 12 }}>
+        {plansLoading && savedProjects.length === 0 && (
+          <div style={{ padding: 14, color: "#888", fontSize: 13, textAlign: "center" }}>
+            Loading plans…
+          </div>
+        )}
         {(savedProjects.length ? savedProjects : loadProjectsList()).map((p) => (
           <div
             key={p.id}
@@ -8652,22 +8693,62 @@ const tileIconStyle = {
               borderBottom: "1px solid #f0f0f0",
               display: "flex",
               alignItems: "center",
-              gap: 10,
+              gap: 8,
               cursor: "pointer",
             }}
-            onClick={() => {
-              applyProjectSnapshot(p.snapshot ?? p);
+            onClick={async () => {
+              if (p.isCloud && !p.snapshot) {
+                // Plan is only in cloud — fetch full snapshot
+                try {
+                  setPlansLoading(true);
+                  const r = await fetch(`/api/plans?id=${p.id}`, { headers: getAuthHeaders() });
+                  if (!r.ok) throw new Error("not found");
+                  const { plan } = await r.json();
+                  applyProjectSnapshot(plan.data);
+                } catch {
+                  alert("Failed to load plan from cloud. Please try again.");
+                  setPlansLoading(false);
+                  return;
+                }
+                setPlansLoading(false);
+              } else {
+                applyProjectSnapshot(p.snapshot ?? p);
+              }
               setOpenDialog(false);
             }}
           >
             <div style={{ fontWeight: 900 }}>{p.name}</div>
-            <div style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>
-              {new Date(p.updatedAt).toLocaleString()}
+            {p.isCloud && (
+              <span style={{ fontSize: 10, color: "#2AA6B8", background: "#e8f6f9", borderRadius: 4, padding: "1px 5px", fontWeight: 700, flexShrink: 0 }}>
+                cloud
+              </span>
+            )}
+            <div style={{ marginLeft: "auto", fontSize: 12, color: "#888", flexShrink: 0 }}>
+              {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ""}
             </div>
+            <button
+              title="Delete plan"
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "#dc2626", fontSize: 16, padding: "1px 6px",
+                borderRadius: 4, fontWeight: 700, lineHeight: 1, flexShrink: 0,
+              }}
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (!window.confirm(`Delete "${p.name}"?`)) return;
+                writeProjectsList(loadProjectsList().filter(x => x.id !== p.id));
+                if (p.isCloud) {
+                  fetch(`/api/plans?id=${p.id}`, { method: "DELETE", headers: getAuthHeaders() }).catch(() => {});
+                }
+                refreshProjectsList();
+              }}
+            >
+              ×
+            </button>
           </div>
         ))}
 
-        {!loadProjectsList().length && (
+        {!plansLoading && savedProjects.length === 0 && !loadProjectsList().length && (
           <div style={{ padding: 14, color: "#666", fontSize: 13 }}>
             No saved TMP files yet.
           </div>
