@@ -205,7 +205,7 @@ export default async function handler(req, res) {
     const norm = email.toLowerCase().trim();
 
     const { data: user, error } = await supabase
-      .from("app_users").select("email, password, full_name, company_name, phone")
+      .from("app_users").select("id, email, password, full_name, company_name, phone")
       .eq("email", norm).maybeSingle();
 
     if (error) return json(res, 500, { error: "Database error. Please try again." });
@@ -217,17 +217,18 @@ export default async function handler(req, res) {
       await supabase.from("app_users").update({ password: hashPassword(password) }).eq("email", norm);
     }
 
-    // Create session — enforce device limit
-
     // If the browser already has a valid session for this account, reuse it (same device re-login)
     const { existingToken } = req.body || {};
     if (existingToken) {
       const { data: existing } = await supabase
         .from("user_sessions").select("id").eq("email", norm).eq("session_token", existingToken).maybeSingle();
       if (existing) {
-        await supabase.from("user_sessions").update({ last_active: new Date().toISOString() })
+        // Backfill user_id on the reused session if missing
+        await supabase.from("user_sessions")
+          .update({ last_active: new Date().toISOString(), user_id: user.id })
           .eq("session_token", existingToken);
         return json(res, 200, {
+          userId:      user.id,
           email:       user.email,
           fullName:    user.full_name,
           companyName: user.company_name,
@@ -238,14 +239,14 @@ export default async function handler(req, res) {
     }
 
     // no device limit, no automatic cleanup
-    
 
     const sessionToken = crypto.randomBytes(32).toString("hex");
     const { error: sessErr } = await supabase.from("user_sessions")
-      .insert({ email: norm, session_token: sessionToken });
+      .insert({ email: norm, user_id: user.id, session_token: sessionToken });
     if (sessErr) return json(res, 500, { error: "Failed to create session." });
 
     return json(res, 200, {
+      userId:      user.id,
       email:       user.email,
       fullName:    user.full_name,
       companyName: user.company_name,

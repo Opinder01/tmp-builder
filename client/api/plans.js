@@ -35,16 +35,16 @@ function getSupabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
-async function getEmailFromToken(req, supabase) {
+async function getUserFromToken(req, supabase) {
   const auth = req.headers?.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return null;
   const { data } = await supabase
     .from("user_sessions")
-    .select("email")
+    .select("email, user_id")
     .eq("session_token", token)
     .maybeSingle();
-  return data?.email || null;
+  return data || null;
 }
 
 export default async function handler(req, res) {
@@ -52,31 +52,26 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return json(res, 204, {});
 
   const supabase = getSupabase();
-  const email = await getEmailFromToken(req, supabase);
-  if (!email) return json(res, 401, { error: "Not authenticated." });
+  const sessionUser = await getUserFromToken(req, supabase);
+  if (!sessionUser) return json(res, 401, { error: "Not authenticated." });
+
+  const { email, user_id } = sessionUser;
 
   // ── GET: list plans or fetch one by id ────────────────────────────────────
   if (req.method === "GET") {
     const id = req.query?.id;
 
     if (id) {
-      // Return single plan with full data
-      const { data, error } = await supabase
-        .from("plans")
-        .select("id, name, data, updated_at")
-        .eq("id", id)
-        .eq("email", email)
-        .maybeSingle();
+      // Return single plan with full data — ownership checked by user_id
+      const q = supabase.from("plans").select("id, name, data, updated_at").eq("id", id);
+      const { data, error } = await (user_id ? q.eq("user_id", user_id) : q.eq("email", email)).maybeSingle();
       if (error || !data) return json(res, 404, { error: "Plan not found." });
       return json(res, 200, { plan: data });
     }
 
     // Return list without heavy data field
-    const { data, error } = await supabase
-      .from("plans")
-      .select("id, name, updated_at")
-      .eq("email", email)
-      .order("updated_at", { ascending: false });
+    const q = supabase.from("plans").select("id, name, updated_at").order("updated_at", { ascending: false });
+    const { data, error } = await (user_id ? q.eq("user_id", user_id) : q.eq("email", email));
     if (error) return json(res, 500, { error: "Failed to load plans." });
     return json(res, 200, { plans: data || [] });
   }
@@ -87,12 +82,11 @@ export default async function handler(req, res) {
     if (!name || !planData) return json(res, 400, { error: "name and data are required." });
 
     if (id) {
-      // Update existing plan
-      const { error } = await supabase
-        .from("plans")
+      // Update existing plan — ownership checked by user_id
+      const q = supabase.from("plans")
         .update({ name, data: planData, updated_at: new Date().toISOString() })
-        .eq("id", id)
-        .eq("email", email);
+        .eq("id", id);
+      const { error } = await (user_id ? q.eq("user_id", user_id) : q.eq("email", email));
       if (error) return json(res, 500, { error: "Failed to update plan." });
       return json(res, 200, { id });
     }
@@ -100,7 +94,7 @@ export default async function handler(req, res) {
     // Create new plan
     const { data: row, error } = await supabase
       .from("plans")
-      .insert({ email, name, data: planData })
+      .insert({ email, user_id: user_id || null, name, data: planData })
       .select("id")
       .single();
     if (error) return json(res, 500, { error: "Failed to save plan." });
@@ -111,11 +105,8 @@ export default async function handler(req, res) {
   if (req.method === "DELETE") {
     const id = req.query?.id;
     if (!id) return json(res, 400, { error: "id is required." });
-    const { error } = await supabase
-      .from("plans")
-      .delete()
-      .eq("id", id)
-      .eq("email", email);
+    const q = supabase.from("plans").delete().eq("id", id);
+    const { error } = await (user_id ? q.eq("user_id", user_id) : q.eq("email", email));
     if (error) return json(res, 500, { error: "Failed to delete plan." });
     return json(res, 200, { ok: true });
   }

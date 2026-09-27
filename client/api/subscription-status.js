@@ -47,17 +47,18 @@ export default async function handler(req, res) {
   if (!sessionToken) return json(res, 401, { error: "Authentication required." });
 
   const { data: session } = await supabase
-    .from("user_sessions").select("email")
+    .from("user_sessions").select("email, user_id")
     .eq("session_token", sessionToken).maybeSingle();
 
   if (!session || session.email !== email)
     return json(res, 401, { error: "Invalid or expired session." });
 
   // ── Step 1: check Supabase ────────────────────────────────────────────────
-  const { data, error } = await supabase
-    .from("subscriptions")
-    .select("email, stripe_customer_id, stripe_subscription_id, plan")
-    .eq("email", email).maybeSingle();
+  // Prefer user_id ownership check; fall back to email for older records
+  const subQuery = session.user_id
+    ? supabase.from("subscriptions").select("email, stripe_customer_id, stripe_subscription_id, plan").eq("user_id", session.user_id)
+    : supabase.from("subscriptions").select("email, stripe_customer_id, stripe_subscription_id, plan").eq("email", email);
+  const { data, error } = await subQuery.maybeSingle();
 
   if (error) return json(res, 500, { error: "Database error." });
 

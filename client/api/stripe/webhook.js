@@ -26,8 +26,14 @@ async function saveSubscription(email, record) {
     return;
   }
 
+  // Look up permanent user_id so subscription ownership is by user_id, not just email
+  const normEmail = email.toLowerCase().trim();
+  const { data: userRow } = await supabase
+    .from("app_users").select("id").eq("email", normEmail).maybeSingle();
+
   const row = {
-    email:                  email.toLowerCase(),
+    email:                  normEmail,
+    user_id:                userRow?.id ?? undefined,
     stripe_customer_id:     record.customerId     ?? undefined,
     stripe_subscription_id: record.subscriptionId ?? undefined,
     plan:                   record.plan            ?? undefined,

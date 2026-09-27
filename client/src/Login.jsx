@@ -35,7 +35,8 @@ export default function Login() {
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data?.email) {
-        userData     = { email: data.email, fullName: data.fullName || "",
+        userData     = { email: data.email, userId: data.userId || null,
+                         fullName: data.fullName || "",
                          companyName: data.companyName || "", phone: data.phone || "" };
         sessionToken = data.sessionToken || null;
       } else if (res.status === 401) {
