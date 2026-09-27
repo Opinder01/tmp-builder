@@ -44,7 +44,21 @@ async function getUserFromToken(req, supabase) {
     .select("email, user_id")
     .eq("session_token", token)
     .maybeSingle();
-  return data || null;
+  if (!data) return null;
+
+  // Session predates migration — look up user_id and backfill it
+  if (!data.user_id) {
+    const { data: userRow } = await supabase
+      .from("app_users").select("id").eq("email", data.email).maybeSingle();
+    if (userRow?.id) {
+      await supabase.from("user_sessions")
+        .update({ user_id: userRow.id })
+        .eq("session_token", token);
+      return { email: data.email, user_id: userRow.id };
+    }
+  }
+
+  return data;
 }
 
 export default async function handler(req, res) {

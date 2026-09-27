@@ -46,15 +46,24 @@ export default async function handler(req, res) {
   // Validate session token — reject if missing or doesn't match the requested email
   if (!sessionToken) return json(res, 401, { error: "Authentication required." });
 
-  const { data: session } = await supabase
+  let { data: session } = await supabase
     .from("user_sessions").select("email, user_id")
     .eq("session_token", sessionToken).maybeSingle();
 
   if (!session || session.email !== email)
     return json(res, 401, { error: "Invalid or expired session." });
 
+  // Session predates migration — resolve user_id and backfill
+  if (!session.user_id) {
+    const { data: userRow } = await supabase
+      .from("app_users").select("id").eq("email", session.email).maybeSingle();
+    if (userRow?.id) {
+      await supabase.from("user_sessions").update({ user_id: userRow.id }).eq("session_token", sessionToken);
+      session = { ...session, user_id: userRow.id };
+    }
+  }
+
   // ── Step 1: check Supabase ────────────────────────────────────────────────
-  // Prefer user_id ownership check; fall back to email for older records
   const subQuery = session.user_id
     ? supabase.from("subscriptions").select("email, stripe_customer_id, stripe_subscription_id, plan").eq("user_id", session.user_id)
     : supabase.from("subscriptions").select("email, stripe_customer_id, stripe_subscription_id, plan").eq("email", email);
