@@ -60,21 +60,50 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [settingsTab, setSettingsTab] = useState("company"); // company | account
   const [projects, setProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalError,   setPortalError]   = useState("");
+
 useEffect(() => {
   const sp = new URLSearchParams(loc.search);
   const tab = (sp.get("tab") || "").toLowerCase();
-
   if (tab === "home" || tab === "new" || tab === "open" || tab === "settings") {
     setActive(tab);
   }
 }, [loc.search]);
 
-
   useEffect(() => {
-  setProjects(getProjects());
-}, [active, loc.search]);
+    const local = getProjects();
+    setProjects(local);
+
+    // Fetch cloud plans and merge
+    const token = localStorage.getItem("sessionToken") || "";
+    if (!token) return;
+    setProjectsLoading(true);
+    fetch("/api/plans", {
+      headers: { "Authorization": `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(body => {
+        if (!body || !Array.isArray(body.plans)) return;
+        const localById = new Map(local.map(p => [p.id, p]));
+        const cloudIds = new Set(body.plans.map(p => p.id));
+        const localOnly = local.filter(p => !cloudIds.has(p.id));
+        const merged = [
+          ...body.plans.map(p => ({
+            id: p.id,
+            name: p.name,
+            updatedAt: new Date(p.updated_at).getTime(),
+            isCloud: true,
+            snapshot: localById.get(p.id)?.snapshot,
+          })),
+          ...localOnly,
+        ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        setProjects(merged);
+      })
+      .catch(() => {})
+      .finally(() => setProjectsLoading(false));
+  }, [active, loc.search]);
 
 
   const companyName = user?.companyName || "Your Company";
@@ -99,11 +128,30 @@ useEffect(() => {
 
   const recentProjects = useMemo(() => filteredProjects.slice(0, 5), [filteredProjects]);
 
-  const openProject = (project) => {
+  const openProject = async (project) => {
     const id = getProjectId(project);
     if (!id) return;
+
+    let snapshot = project.snapshot ?? (project.isCloud ? null : project);
+
+    // Cloud-only plan — fetch full snapshot before opening
+    if (project.isCloud && !snapshot) {
+      try {
+        const token = localStorage.getItem("sessionToken") || "";
+        const r = await fetch(`/api/plans?id=${project.id}`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!r.ok) throw new Error("not found");
+        const { plan } = await r.json();
+        snapshot = plan.data;
+      } catch {
+        alert("Failed to load plan from cloud. Please try again.");
+        return;
+      }
+    }
+
     localStorage.setItem("currentProjectId", String(id));
-    localStorage.setItem("currentProjectSnapshot", JSON.stringify(project.snapshot ?? project));
+    localStorage.setItem("currentProjectSnapshot", JSON.stringify(snapshot));
     nav("/editor");
   };
 
