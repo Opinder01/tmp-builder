@@ -95,24 +95,24 @@ export default async function handler(req, res) {
     const { id, name, data: planData } = req.body || {};
     if (!name || !planData) return json(res, 400, { error: "name and data are required." });
 
-    if (id) {
-      // Update existing plan — ownership checked by user_id
-      const q = supabase.from("plans")
-        .update({ name, data: planData, updated_at: new Date().toISOString() })
-        .eq("id", id);
-      const { error } = await (user_id ? q.eq("user_id", user_id) : q.eq("email", email));
-      if (error) return json(res, 500, { error: "Failed to update plan." });
-      return json(res, 200, { id });
-    }
+    // Use upsert so a client-generated id works for both first save and updates
+    const row = {
+      ...(id ? { id } : {}),
+      email,
+      user_id: user_id || null,
+      name,
+      data: planData,
+      updated_at: new Date().toISOString(),
+    };
 
-    // Create new plan
-    const { data: row, error } = await supabase
+    const { data: saved, error } = await supabase
       .from("plans")
-      .insert({ email, user_id: user_id || null, name, data: planData })
+      .upsert(row, { onConflict: "id" })
       .select("id")
       .single();
+
     if (error) return json(res, 500, { error: "Failed to save plan." });
-    return json(res, 200, { id: row.id });
+    return json(res, 200, { id: saved.id });
   }
 
   // ── DELETE: remove a plan ─────────────────────────────────────────────────
