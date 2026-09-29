@@ -9485,20 +9485,6 @@ const tileIconStyle = {
                 })}
               </div>
 
-              {/* Delete */}
-              <button
-                type="button"
-                onClick={() => {
-                  setConesFeatures((prev) => prev.filter((f) => f.id !== selectedConeId));
-                  setSelectedConeId(null);
-                  pushHistory();
-                }}
-                style={{
-                  width: "100%", padding: "7px 0", border: "1.5px solid #fca5a5",
-                  borderRadius: 8, background: "#fff5f5", color: "#dc2626",
-                  cursor: "pointer", fontSize: 12, fontWeight: 700,
-                }}
-              >🗑 Delete {currentLabel}</button>
             </div>
           );
         })()}
