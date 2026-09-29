@@ -5657,15 +5657,12 @@ return;
 }
 
 
-      // SIGNS: deselect first if a sign is selected, otherwise place
+      // SIGNS: place immediately on single click
       if (isSignsToolActive) {
-        if (selectedEntity?.kind === "sign") {
-          setSelectedEntity(null);
-        } else {
-          placeSignAt(p);
-        }
-        return;
-      }
+  clearSelectionEverywhere();
+  placeSignAt(p);
+  return;
+}
 
       // ARROWS place repeatedly
       if (isArrowToolActive) {
@@ -5693,12 +5690,8 @@ return;
           else addMeasVertex(p);
         }
       } else {
-        // Any other tool: also clear measurement + cone + work area selection
-        setSelectedMeasId(null);
-        setSelectedConeId(null);
-        setSelectedWorkAreaId(null);
-      }
-      // setSelectedEntity(null);  // <-- disable: keep selection until dbl/right click
+  clearSelectionEverywhere();
+}
 
     }, CLICK_DELAY_MS);
   }
@@ -5768,9 +5761,6 @@ function onMapDblClick(e) {
   return;
 }
 
-  // If editing a measurement label, don't let map dblclick zoom/finish actions
-if (measEdit) return;
-
   // stop Google Maps zoom + stop event bubbling
   if (e?.domEvent) {
     e.domEvent.preventDefault();
@@ -5784,10 +5774,11 @@ if (measEdit) return;
   }
 
   // block the synthetic click that follows dblclick
-  if (dblClickGuardRef) dblClickGuardRef.current = true;
-  setTimeout(() => {
-    if (dblClickGuardRef) dblClickGuardRef.current = false;
-  }, 0);
+  dblClickGuardRef.current = true;
+
+setTimeout(() => {
+  dblClickGuardRef.current = false;
+}, 250);
 
   const ll = e?.latLng;
   const p = ll ? { lat: ll.lat(), lng: ll.lng() } : null;
@@ -5873,21 +5864,41 @@ if (activeTool === "work_area" && isDrawingWorkArea) {
   }
 
   // ✅ LINE: dblclick = finalize polyline
-  if (activeTool === "insert:line" && lineDraft?.points?.length) {
-    const last = lineDraft.points[lineDraft.points.length - 1];
-    const same = last && Math.abs(last.lat - p.lat) < 1e-10 && Math.abs(last.lng - p.lng) < 1e-10;
-    const finalPath = same ? lineDraft.points : [...lineDraft.points, p];
-    if (finalPath.length >= 2) {
-      const id = crypto.randomUUID();
-      setInsertObjects((prev) => [
-        ...prev,
-        { id, kind: "line", path: finalPath, stroke: "#111111", strokeWidth: 3 },
-      ]);
-      setSelectedInsertId(id);
-    }
-    setLineDraft(null);
-    return;
+  // ✅ LINE: dblclick = finalize polyline
+if (activeTool === "insert:line" && lineDraft?.points?.length) {
+  const last = lineDraft.points[lineDraft.points.length - 1];
+
+  const same =
+    p &&
+    last &&
+    Math.abs(last.lat - p.lat) < 1e-10 &&
+    Math.abs(last.lng - p.lng) < 1e-10;
+
+  const finalPath =
+    !p || same
+      ? lineDraft.points
+      : [...lineDraft.points, p];
+
+  if (finalPath.length >= 2) {
+    const id = crypto.randomUUID();
+
+    setInsertObjects((prev) => [
+      ...prev,
+      {
+        id,
+        kind: "line",
+        path: finalPath,
+        stroke: "#111111",
+        strokeWidth: 3,
+      },
+    ]);
+
+    setSelectedInsertId(id);
   }
+
+  setLineDraft(null);
+  return;
+}
 
   // otherwise just deselect/end editing
   if (activeTool === "work_area") setActiveTool(null);
@@ -5914,9 +5925,7 @@ if (measEdit) {
       setWorkDraft([]);
       setWorkHover(null);
     } else {
-      setSelectedEntity(null);
-      setSelectedInsertId(null);
-      setSelectedWorkAreaId(null);
+      clearSelectionEverywhere();
     }
     return;
   }
@@ -5969,9 +5978,7 @@ if (measEdit) {
   }
 
   // deselect anything
-  setSelectedEntity(null);
-  setSelectedInsertId(null);
-  setSelectedWorkAreaId(null);
+  clearSelectionEverywhere();
 }
 // ── Right-click anywhere always deselects work area ─────────────────────────
 // Use BOTH contextmenu (fires for two-finger tap, right mouse button, etc.)
