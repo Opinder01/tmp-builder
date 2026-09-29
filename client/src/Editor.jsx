@@ -2710,7 +2710,8 @@ async function importAerialPhotoForFrame() {
   /* ================= Selection / Drag ================= */
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [uiDrag, setUiDrag] = useState(null);
-  const [contextMenu, setContextMenu] = useState(null); // { x, y, entityType, entityId, typeId }
+  const [selectionMenu, setSelectionMenu] = useState(null); // { x, y, entityType, entityId, typeId }
+  const selMenuPointerRef = useRef(null); // pending menu open — resolved on pointerup if no drag
   // legendExclusions declared earlier (before exportPlanDataRef useEffect) to avoid TDZ
   const [clipboard, setClipboard] = useState(null); // { kind, data }
   // Live rotation accumulator for signs (avoids stale closures + reattaching listeners)
@@ -6202,22 +6203,41 @@ useEffect(() => {
 // Track cursor position globally so paste lands at cursor
 useEffect(() => {
   const onMove = (e) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
-  window.addEventListener("mousemove", onMove, { passive: true });
-  return () => window.removeEventListener("mousemove", onMove);
+  window.addEventListener("pointermove", onMove, { passive: true });
+  return () => window.removeEventListener("pointermove", onMove);
 }, []);
 
-// Context menu: dismiss on outside click or Escape
+// Selection menu: dismiss on outside click or Escape
 useEffect(() => {
-  if (!contextMenu) return;
-  const onDown = () => closeContextMenu();
-  const onKey = (e) => { if (e.key === "Escape") closeContextMenu(); };
+  if (!selectionMenu) return;
+  const onDown = (e) => {
+    const menuEl = document.getElementById("sel-menu-popup");
+    if (menuEl && menuEl.contains(e.target)) return;
+    setSelectionMenu(null);
+  };
+  const onKey = (e) => { if (e.key === "Escape") setSelectionMenu(null); };
   window.addEventListener("pointerdown", onDown);
   window.addEventListener("keydown", onKey);
   return () => {
     window.removeEventListener("pointerdown", onDown);
     window.removeEventListener("keydown", onKey);
   };
-}, [contextMenu]);
+}, [selectionMenu]);
+
+// Selection menu: open on pointerup only if pointer didn't travel (click, not drag)
+useEffect(() => {
+  const onUp = (e) => {
+    const pending = selMenuPointerRef.current;
+    if (!pending) return;
+    selMenuPointerRef.current = null;
+    const dist = Math.hypot(e.clientX - pending.clientX, e.clientY - pending.clientY);
+    if (dist < 8) {
+      setSelectionMenu({ x: e.clientX, y: e.clientY, entityType: pending.entityType, entityId: pending.entityId, typeId: pending.typeId });
+    }
+  };
+  window.addEventListener("pointerup", onUp);
+  return () => window.removeEventListener("pointerup", onUp);
+}, []);
 
 
   useEffect(() => {
@@ -7997,12 +8017,10 @@ const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
 };
 
 // =================== CONTEXT MENU HELPERS ===================
-const openContextMenu = (e, entityType, entityId, typeId = null) => {
-  e.preventDefault();
-  e.stopPropagation();
-  setContextMenu({ x: e.clientX, y: e.clientY, entityType, entityId, typeId });
+// Schedule a selection menu to open on pointerup (if no drag occurred)
+const scheduleSelectionMenu = (clientX, clientY, entityType, entityId, typeId = null) => {
+  selMenuPointerRef.current = { clientX, clientY, entityType, entityId, typeId };
 };
-const closeContextMenu = () => setContextMenu(null);
 
 const _getEntityData = (entityType, entityId) => {
   switch (entityType) {
@@ -8019,41 +8037,21 @@ const _getEntityData = (entityType, entityId) => {
   }
 };
 
-const handleContextCopy = () => {
-  if (!contextMenu) return;
-  const data = _getEntityData(contextMenu.entityType, contextMenu.entityId);
-  if (data) setClipboard({ kind: contextMenu.entityType, data: { ...data } });
-  closeContextMenu();
+const handleCopy = () => {
+  if (!selectionMenu) return;
+  const data = _getEntityData(selectionMenu.entityType, selectionMenu.entityId);
+  if (data) setClipboard({ kind: selectionMenu.entityType, data: structuredClone(data) });
+  setSelectionMenu(null);
 };
 
-const handleContextCut = () => {
-  if (!contextMenu) return;
-  const { entityType, entityId } = contextMenu;
+const handleCut = () => {
+  if (!selectionMenu) return;
+  const { entityType, entityId } = selectionMenu;
   const data = _getEntityData(entityType, entityId);
-  if (data) setClipboard({ kind: entityType, data: { ...data } });
-  switch (entityType) {
-    case "sign":        setPlacedSigns(prev => prev.filter(x => x.id !== entityId)); break;
-    case "arrow":       setPlacedArrows(prev => prev.filter(x => x.id !== entityId)); break;
-    case "cones":       setConesFeatures(prev => prev.filter(x => x.id !== entityId)); break;
-    case "workArea":    setWorkAreas(prev => prev.filter(x => x.id !== entityId)); break;
-    case "measurement": setMeasurements(prev => prev.filter(x => x.id !== entityId)); break;
-    case "insert":      setInsertObjects(prev => prev.filter(x => x.id !== entityId)); break;
-    case "northArrow":  setNorthArrows(prev => prev.filter(x => x.id !== entityId)); break;
-    case "scale":       setScales(prev => prev.filter(x => x.id !== entityId)); break;
-    case "legend":      setLegendBoxes(prev => prev.filter(x => x.id !== entityId)); break;
-    case "manifest":    setManifestBoxes(prev => prev.filter(x => x.id !== entityId)); break;
-    default: break;
-  }
-  closeContextMenu();
-};
-
-const handleContextDelete = () => {
-  if (!contextMenu) return;
-  const { entityType, entityId } = contextMenu;
+  if (data) setClipboard({ kind: entityType, data: structuredClone(data) });
   pushHistory();
   switch (entityType) {
     case "sign":        setPlacedSigns(prev => prev.filter(x => x.id !== entityId)); break;
-    case "arrow":       setPlacedArrows(prev => prev.filter(x => x.id !== entityId)); break;
     case "cones":       setConesFeatures(prev => prev.filter(x => x.id !== entityId)); break;
     case "workArea":    setWorkAreas(prev => prev.filter(x => x.id !== entityId)); break;
     case "measurement": setMeasurements(prev => prev.filter(x => x.id !== entityId)); setSelectedMeasId(null); break;
@@ -8064,7 +8062,7 @@ const handleContextDelete = () => {
     case "manifest":    setManifestBoxes(prev => prev.filter(x => x.id !== entityId)); break;
     default: break;
   }
-  closeContextMenu();
+  setSelectionMenu(null);
 };
 
 const handleContextPaste = (cb) => {
@@ -8107,13 +8105,13 @@ const handleContextPaste = (cb) => {
 };
 
 const handleLegendToggle = (typeId) => {
-  if (!typeId) { closeContextMenu(); return; }
+  if (!typeId) { setSelectionMenu(null); return; }
   setLegendExclusions(prev => {
     const next = new Set(prev);
     if (next.has(typeId)) next.delete(typeId); else next.add(typeId);
     return next;
   });
-  closeContextMenu();
+  setSelectionMenu(null);
 };
 // ============================================================
 
@@ -8523,11 +8521,7 @@ const tileIconStyle = {
 
     <div
       style={{ height: "100vh", display: "flex", flexDirection: "column" }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        // Right-click anywhere always clears work area selection
-        setSelectedWorkAreaId(null);
-      }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* ================= SAVE AS MODAL ================= */}
 {saveAsOpen && (
@@ -9003,7 +8997,6 @@ const tileIconStyle = {
               <RibbonGroup>
                 <RibbonTextButton label="Undo" onClick={doUndo} />
                 <RibbonTextButton label="Redo" onClick={doRedo} />
-                <RibbonTextButton label="Delete" onClick={doDelete} />
 
               </RibbonGroup>
             )}
@@ -10127,10 +10120,7 @@ draggingCursor:
                       e.domEvent?.preventDefault?.();
                       e.domEvent?.stopPropagation?.();
                       selectConeForEdit(f.id);
-                    }}
-                    onRightClick={(e) => {
-                      if (!coneClickOk) return;
-                      if (e.domEvent) openContextMenu(e.domEvent, "cones", f.id, f.typeId);
+                      scheduleSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "cones", f.id, f.typeId);
                     }}
                   />
                 );
@@ -10569,19 +10559,13 @@ onUnmount={(polygon) => {
   if (e.domEvent?.button === 2) return; // ignore right-click firing as click (touchpad)
   e?.stop?.(); // prevent map onClick from also firing and clearing the selection
   setSelectedWorkAreaId(wa.id);
+  setSelectionMenu({ x: e.domEvent?.clientX ?? 0, y: e.domEvent?.clientY ?? 0, entityType: "workArea", entityId: wa.id, typeId: "workArea" });
 
   // ✅ clear any leftover draft preview so you don’t see the inner polygon
   setIsDrawingWorkArea(false);
   setWorkDraft([]);
   setWorkHover(null);
 }}
-
-    onRightClick={(e) => {
-      setSelectedWorkAreaId(null);
-      if (e.domEvent) {
-        openContextMenu(e.domEvent, "workArea", wa.id, "workArea");
-      }
-    }}
     onDragEnd={(e) => {
       // after dragging whole polygon, update state
       // polygon path is already updated internally, so we trigger a refresh:
@@ -10810,10 +10794,7 @@ onUnmount={(polygon) => {
                   e.domEvent?.preventDefault?.();
                   e.domEvent?.stopPropagation?.();
                   setSelectedMeasId(m.id);
-                };
-                const onHitRightClick = (e) => {
-                  if (activeTool && activeTool !== "measurements") return;
-                  if (e.domEvent) openContextMenu(e.domEvent, "measurement", m.id);
+                  scheduleSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "measurement", m.id, "measurement");
                 };
 
                 // Vertex handle style — small white circle with purple border (same purple as BoxSelectionOverlay)
@@ -10848,37 +10829,6 @@ onUnmount={(polygon) => {
                     ))
                   : null;
 
-                // Floating delete button shown above first vertex when measurement is selected
-                const measDeleteBtn = (isSelected && path.length > 0 && (!activeTool || activeTool === "measurements")) ? (
-                  <OverlayViewF key={`${m.id}_del`} position={path[0]} mapPaneName="overlayMouseTarget">
-                    <div
-                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        pushHistory();
-                        setMeasurements(prev => prev.filter(x => x.id !== m.id));
-                        setSelectedMeasId(null);
-                      }}
-                      style={{
-                        transform: "translate(-50%, calc(-100% - 14px))",
-                        background: "#dc2626",
-                        color: "#fff",
-                        borderRadius: 5,
-                        padding: "3px 9px",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-                        userSelect: "none",
-                        whiteSpace: "nowrap",
-                        zIndex: 99999,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      Delete
-                    </div>
-                  </OverlayViewF>
-                ) : null;
 
                 if (m.mode === "distance" && path.length >= 2) {
                   const a = path[0];
@@ -10899,7 +10849,7 @@ onUnmount={(polygon) => {
                   };
                   return (
                     <React.Fragment key={m.id}>
-                      <PolylineF path={[a, b]} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
+                      <PolylineF path={[a, b]} options={hitLineOptions} onMouseDown={onHitMouseDown} />
                       {isSelected && <PolylineF path={[a, b]} options={selLineOptions} />}
                       <DimensionSegment a={a} b={b} opacity={1} zIndex={30} scale={measureScale} pixelLen={pxLen} />
                       {/* Leader line from midpoint to label when span is short */}
@@ -10917,7 +10867,6 @@ onUnmount={(polygon) => {
                         onDblClick={() => startEditMeasureLabel(m.id, null, displayText)}
                       />
                       {vertexHandles}
-                      {measDeleteBtn}
                     </React.Fragment>
                   );
                 }
@@ -10962,15 +10911,14 @@ onUnmount={(polygon) => {
                   }
                   return (
                     <React.Fragment key={m.id}>
-                      {/* Invisible hit area — click selects, right-click opens menu */}
-                      <PolylineF path={path} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
+                      {/* Invisible hit area — click selects */}
+                      <PolylineF path={path} options={hitLineOptions} onMouseDown={onHitMouseDown} />
                       {/* Selection glow */}
                       {isSelected && <PolylineF path={path} options={selLineOptions} />}
                       {/* Segment visuals */}
                       {segs}
                       {/* Draggable vertex handles — one per path node */}
                       {vertexHandles}
-                      {measDeleteBtn}
                     </React.Fragment>
                   );
                 }
@@ -11054,12 +11002,12 @@ onUnmount={(polygon) => {
                         cursor: uiDrag?.type === "moveLegend" && uiDrag?.legendId === lb.id ? "grabbing" : "grab",
                         userSelect: "none",
                       }}
-                      onContextMenu={(e) => openContextMenu(e, "legend", lb.id, "legend")}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         onSelectLegend(lb.id);
                         beginMoveLegend(lb.id, lb.pos, { x: e.clientX, y: e.clientY });
+                        scheduleSelectionMenu(e.clientX, e.clientY, "legend", lb.id, "legend");
                       }}
                     >
                       {_dataUrl
@@ -11107,12 +11055,12 @@ onUnmount={(polygon) => {
                         cursor: uiDrag?.type === "moveManifest" && uiDrag?.manifestId === mb.id ? "grabbing" : "grab",
                         userSelect: "none",
                       }}
-                      onContextMenu={(e) => openContextMenu(e, "manifest", mb.id, "manifest")}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         onSelectManifest(mb.id);
                         beginMoveManifest(mb.id, mb.pos, { x: e.clientX, y: e.clientY });
+                        scheduleSelectionMenu(e.clientX, e.clientY, "manifest", mb.id, "manifest");
                       }}
                     >
                       {/* Canvas-rendered manifest image — height auto-fits content like legend */}
@@ -11171,11 +11119,13 @@ onUnmount={(polygon) => {
           strokeWeight: obj.strokeWidth || 3,
           clickable: true,
         }}
-        onRightClick={(e) => { if (e.domEvent) openContextMenu(e.domEvent, "insert", obj.id, "line"); }}
         onMouseDown={(e) => {
           e.domEvent?.preventDefault?.();
           e.domEvent?.stopPropagation?.();
-          if (!exportMode) setSelectedInsertId(obj.id);
+          if (!exportMode) {
+            setSelectedInsertId(obj.id);
+            scheduleSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "insert", obj.id, "line");
+          }
         }}
       />
     );
@@ -11203,11 +11153,13 @@ onUnmount={(polygon) => {
           overflow: "visible",
         }}
         
-        onContextMenu={(e) => openContextMenu(e, "insert", obj.id, obj.kind ?? "insert")}
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (!exportMode) setSelectedInsertId(obj.id);
+          if (!exportMode) {
+            setSelectedInsertId(obj.id);
+            scheduleSelectionMenu(e.clientX, e.clientY, "insert", obj.id, obj.kind ?? "insert");
+          }
           beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
         }}
       >
@@ -11700,12 +11652,12 @@ height: pendingPictureTool.hPx * elementScale,
           position: "relative",
           overflow: "visible", // IMPORTANT: allow rotate handle
         }}
-        onContextMenu={(e) => openContextMenu(e, "northArrow", na.id, "northArrow")}
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setSelectedEntity({ kind: "northArrow", id: na.id });
           beginMoveNorthArrow(na.id, na.pos, { x: e.clientX, y: e.clientY });
+          scheduleSelectionMenu(e.clientX, e.clientY, "northArrow", na.id, "northArrow");
         }}
       >
         {/* ROTATED ARROW */}
@@ -11810,13 +11762,13 @@ height: pendingPictureTool.hPx * elementScale,
     mapPaneName="overlayMouseTarget"
   >
   <div
-  onContextMenu={(e) => openContextMenu(e, "scale", scale.id, "scale")}
   onMouseDown={(e) => {
     e.preventDefault();
     e.stopPropagation();
 
     // select
     setSelectedEntity({ kind: "scale", id: scale.id });
+    scheduleSelectionMenu(e.clientX, e.clientY, "scale", scale.id, "scale");
 
     // ✅ only start move if NOT clicking a handle
     if (e.target?.dataset?.handle === "1") return;
@@ -12119,7 +12071,6 @@ height: pendingPictureTool.hPx * elementScale,
                           }}
                           onMouseEnter={() => setSignHoveredId(s.id)}
                           onMouseLeave={() => setSignHoveredId(null)}
-                          onContextMenu={(ev) => openContextMenu(ev, "sign", s.id, s.typeId ?? s.code ?? s.id)}
                           onClick={(ev) => {
                             ev.preventDefault();
                             ev.stopPropagation();
@@ -12131,6 +12082,7 @@ height: pendingPictureTool.hPx * elementScale,
                             ev.currentTarget.setPointerCapture?.(ev.pointerId);
                             onSelectSign(s.id);
                             beginMoveSign(s.id, s.pos, { x: ev.clientX, y: ev.clientY });
+                            scheduleSelectionMenu(ev.clientX, ev.clientY, "sign", s.id, s.typeId ?? s.code ?? s.id);
                           }}
                         >
                           <img
@@ -13256,12 +13208,11 @@ height: pendingPictureTool.hPx * elementScale,
             </div>
           )}
         </div>
-      {contextMenu && (
-        <ContextMenu
-          menu={contextMenu}
-          onCut={handleContextCut}
-          onCopy={handleContextCopy}
-          onDelete={handleContextDelete}
+      {selectionMenu && (
+        <FloatingSelectionMenu
+          menu={selectionMenu}
+          onCut={handleCut}
+          onCopy={handleCopy}
           onToggleLegend={handleLegendToggle}
           legendExclusions={legendExclusions}
         />
@@ -13722,7 +13673,8 @@ function Divider() {
 }
 
 // =================== CONTEXT MENU COMPONENT ===================
-function ContextMenu({ menu, onCut, onCopy, onDelete, onToggleLegend, legendExclusions }) {
+function FloatingSelectionMenu({ menu, onCut, onCopy, onToggleLegend, legendExclusions }) {
+  const supportsLegend = menu.entityType !== "insert";
   const isIncluded = menu.typeId ? !legendExclusions.has(menu.typeId) : true;
   const font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
   const base = {
@@ -13734,23 +13686,22 @@ function ContextMenu({ menu, onCut, onCopy, onDelete, onToggleLegend, legendExcl
   };
   const hl = (e) => (e.currentTarget.style.background = "#e8eaed");
   const ul = (e) => (e.currentTarget.style.background = "transparent");
-  const hlRed = (e) => (e.currentTarget.style.background = "#fee2e2");
   return (
     <div
+      id="sel-menu-popup"
       style={{
         position: "fixed", left: menu.x, top: menu.y, zIndex: 999999,
         background: "#fff", borderRadius: 6,
         boxShadow: "0 1px 4px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)",
         border: "1px solid rgba(0,0,0,0.08)",
-        padding: "4px", minWidth: 172,
+        padding: "4px", minWidth: 160,
         fontFamily: font,
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <button style={base} onClick={onCut} onMouseEnter={hl} onMouseLeave={ul}>Cut</button>
       <button style={base} onClick={onCopy} onMouseEnter={hl} onMouseLeave={ul}>Copy</button>
-      {/* "Include in Legend" is only relevant for sign-type objects, not measurements */}
-      {menu.entityType !== "measurement" && (
+      {supportsLegend && (
         <>
           <div style={{ height: 1, background: "#e0e0e0", margin: "3px 0" }} />
           <button
@@ -13765,14 +13716,6 @@ function ContextMenu({ menu, onCut, onCopy, onDelete, onToggleLegend, legendExcl
           </button>
         </>
       )}
-      <div style={{ height: 1, background: "#e0e0e0", margin: "3px 0" }} />
-      <button
-        style={{ ...base, color: "#dc2626" }}
-        onClick={onDelete}
-        onMouseEnter={hlRed} onMouseLeave={ul}
-      >
-        Delete
-      </button>
     </div>
   );
 }
