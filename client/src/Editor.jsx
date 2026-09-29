@@ -8030,6 +8030,7 @@ const _getEntityData = (entityType, entityId) => {
     case "measurement": return measurements.find(m => m.id === entityId);
     case "insert":      return insertObjects.find(o => o.id === entityId);
     case "northArrow":  return northArrows.find(n => n.id === entityId);
+    case "arrow":       return placedArrows.find(a => a.id === entityId);
     case "scale":       return scales.find(s => s.id === entityId);
     case "legend":      return legendBoxes.find(l => l.id === entityId);
     case "manifest":    return manifestBoxes.find(m => m.id === entityId);
@@ -8057,6 +8058,7 @@ const handleCut = () => {
     case "measurement": setMeasurements(prev => prev.filter(x => x.id !== entityId)); setSelectedMeasId(null); break;
     case "insert":      setInsertObjects(prev => prev.filter(x => x.id !== entityId)); break;
     case "northArrow":  setNorthArrows(prev => prev.filter(x => x.id !== entityId)); break;
+    case "arrow":       setPlacedArrows(prev => prev.filter(x => x.id !== entityId)); break;
     case "scale":       setScales(prev => prev.filter(x => x.id !== entityId)); break;
     case "legend":      setLegendBoxes(prev => prev.filter(x => x.id !== entityId)); break;
     case "manifest":    setManifestBoxes(prev => prev.filter(x => x.id !== entityId)); break;
@@ -12406,6 +12408,7 @@ height: pendingPictureTool.hPx * elementScale,
                             ev.preventDefault(); ev.stopPropagation();
                             ev.currentTarget.setPointerCapture?.(ev.pointerId);
                             setSelectedEntity({ kind: "arrow", id: arrow.id });
+                            scheduleSelectionMenu(ev.clientX, ev.clientY, "arrow", arrow.id, arrow.arrowId ?? "arrow");
                             if (!projectionReady) return;
                             const centerPx = latLngToPx(arrow.pos);
                             if (!centerPx) return;
