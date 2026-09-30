@@ -5712,6 +5712,7 @@ function clearSelectionEverywhere() {
   // if you have selectedWorkAreaId, table selection, etc:
   setSelectedWorkAreaId?.(null);
   setSelectedMeasId?.(null);
+  setSelectedConeId?.(null);
 }
 
 function cancelActiveDrafts() {
