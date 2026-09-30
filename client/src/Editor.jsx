@@ -3071,6 +3071,7 @@ const doDelete = React.useCallback(() => {
   const lastDblClickTsRef = useRef(0);
   const rotateStandGuardRef = useRef(false);
   const addArrowPointGuardRef = useRef(false); // true = next map click is from the add-point button, ignore it
+  const toolElementSelectionGuardRef = useRef(false); // true = next map click came from a placed tool element (legend/manifest/title/northArrow/scale)
 
 
 const lastTapRef = useRef({ id: null, t: 0 });
@@ -5330,6 +5331,12 @@ const dedupeLastIfSame = (arr, p) => {
     // ignore it so the mode stays active for the NEXT map click (the real placement).
     if (addArrowPointGuardRef.current) {
       addArrowPointGuardRef.current = false;
+      return;
+    }
+
+    // Ignore map click that fires after clicking a placed tool element (legend/manifest/title/northArrow/scale)
+    if (toolElementSelectionGuardRef.current) {
+      toolElementSelectionGuardRef.current = false;
       return;
     }
 
@@ -11001,6 +11008,7 @@ onUnmount={(polygon) => {
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        toolElementSelectionGuardRef.current = true;
                         onSelectLegend(lb.id);
                         beginMoveLegend(lb.id, lb.pos, { x: e.clientX, y: e.clientY });
                         scheduleSelectionMenu(e.clientX, e.clientY, "legend", lb.id, "legend");
@@ -11054,6 +11062,7 @@ onUnmount={(polygon) => {
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        toolElementSelectionGuardRef.current = true;
                         onSelectManifest(mb.id);
                         beginMoveManifest(mb.id, mb.pos, { x: e.clientX, y: e.clientY });
                         scheduleSelectionMenu(e.clientX, e.clientY, "manifest", mb.id, "manifest");
@@ -11152,6 +11161,7 @@ onUnmount={(polygon) => {
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          toolElementSelectionGuardRef.current = true;
           if (!exportMode) {
             setSelectedInsertId(obj.id);
             scheduleSelectionMenu(e.clientX, e.clientY, "insert", obj.id, obj.kind ?? "insert");
@@ -11651,6 +11661,7 @@ height: pendingPictureTool.hPx * elementScale,
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          toolElementSelectionGuardRef.current = true;
           setSelectedEntity({ kind: "northArrow", id: na.id });
           beginMoveNorthArrow(na.id, na.pos, { x: e.clientX, y: e.clientY });
           scheduleSelectionMenu(e.clientX, e.clientY, "northArrow", na.id, "northArrow");
@@ -11761,6 +11772,7 @@ height: pendingPictureTool.hPx * elementScale,
   onMouseDown={(e) => {
     e.preventDefault();
     e.stopPropagation();
+    toolElementSelectionGuardRef.current = true;
 
     // select
     setSelectedEntity({ kind: "scale", id: scale.id });
