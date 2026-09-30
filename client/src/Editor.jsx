@@ -5917,6 +5917,7 @@ if (measEdit) {
     e.domEvent.preventDefault();
     e.domEvent.stopPropagation();
   }
+  clearSelectionEverywhere();
 
   // WORK AREA: right-click cancels draft (keeps tool active), or deselects
   if (activeTool === "work_area") {
@@ -5977,8 +5978,7 @@ if (measEdit) {
     return;
   }
 
-  // deselect anything
-  clearSelectionEverywhere();
+  
 }
 // ── Right-click anywhere always deselects work area ─────────────────────────
 // Use BOTH contextmenu (fires for two-finger tap, right mouse button, etc.)
