@@ -5704,6 +5704,7 @@ function clearSelectionEverywhere() {
   setUiDrag?.(null);
   // if you have selectedWorkAreaId, table selection, etc:
   setSelectedWorkAreaId?.(null);
+  setSelectedMeasId?.(null);
 }
 
 function cancelActiveDrafts() {
