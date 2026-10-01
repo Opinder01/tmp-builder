@@ -8,6 +8,17 @@ export default async function handler(req, res) {
 
   const action = req.query?.action;
 
+  // Public, read-only diagnostic -- VAPID_PUBLIC_KEY is not a secret (the
+  // whole point of it is to be handed to every subscribing browser), so this
+  // just reports whether push is configured at all, to debug "notifications
+  // don't arrive" without digging through Vercel's env var dashboard.
+  if (action === "status" && req.method === "GET") {
+    return json(res, 200, {
+      serverConfigured: !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
+      serverPublicKey: process.env.VAPID_PUBLIC_KEY || null,
+    });
+  }
+
   if (action === "subscribe" && req.method === "POST") {
     const profile = await getSessionProfile(req);
     if (!profile) return json(res, 401, { error: "Not authenticated" });
