@@ -5531,7 +5531,7 @@ if (activeTool === "insert:table") {
         const id = String(Date.now() + Math.random());
         setManifestBoxes((prev) => [
           ...prev,
-          { id, pos: p, wPx: 240, hPx: 220, zRef: ELEMENT_BASE_ZOOM },
+          { id, pos: p, wPx: manifestNaturalW0, zRef: ELEMENT_BASE_ZOOM },
         ]);
         setSelectedEntity({ kind: "manifest", id });
         setActiveTool(null);
@@ -7261,7 +7261,7 @@ useEffect(() => {
   };
 }, [uiDrag, setInsertObjects, zoomNow]);
 
-  /* ================= Manifest resize: identical math to resizeInsert ================= */
+  /* ================= Manifest resize: proportional like Legend ================= */
   useEffect(() => {
     if (!uiDrag || uiDrag.type !== "resizeManifest") return;
 
@@ -7269,38 +7269,38 @@ useEffect(() => {
       const curPointerPx = clientToDivPx(ev.clientX, ev.clientY);
       if (!curPointerPx) return;
 
-      const { manifestId, corner, startSize, startPointerPx, centerPx } = uiDrag;
+      const { manifestId, corner, startSize, startPointerPx, centerPx, manifestNaturalW0: natW, manifestNaturalH0: natH } = uiDrag;
       const zRef = startSize?.zRef ?? ELEMENT_BASE_ZOOM;
       const kPlan = planElementZoomScale(zRef);
 
-      // Same rotation-aware local-space delta as resizeInsert (manifest never rotates so deg=0)
       const p0 = rotatePt(startPointerPx, centerPx, 0);
       const p1 = rotatePt(curPointerPx,   centerPx, 0);
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
 
       const startVisualW = scalePxPlan(startSize.wPx, zRef);
-      const startVisualH = scalePxPlan(startSize.hPx, zRef);
-      let visualW = startVisualW;
-      let visualH = startVisualH;
+      const startVisualH = scalePxPlan(startSize.hPx ?? natH, zRef);
+      const aspect = natW > 0 && natH > 0 ? natH / natW : startVisualH / Math.max(startVisualW, 1e-6);
 
-      if      (corner === "se") { visualW += dx; visualH += dy; }
-      else if (corner === "sw") { visualW -= dx; visualH += dy; }
-      else if (corner === "ne") { visualW += dx; visualH -= dy; }
-      else if (corner === "nw") { visualW -= dx; visualH -= dy; }
-      else if (corner === "e")  { visualW += dx; }
-      else if (corner === "w")  { visualW -= dx; }
-      else if (corner === "s")  { visualH += dy; }
-      else if (corner === "n")  { visualH -= dy; }
+      let vw = startVisualW;
+      let vh = startVisualH;
+      if      (corner === "se") { vw += dx; vh += dy; }
+      else if (corner === "sw") { vw -= dx; vh += dy; }
+      else if (corner === "ne") { vw += dx; vh -= dy; }
+      else if (corner === "nw") { vw -= dx; vh -= dy; }
+      else if (corner === "e")  { vw += dx; }
+      else if (corner === "w")  { vw -= dx; }
+      else if (corner === "s")  { vh += dy; }
+      else if (corner === "n")  { vh -= dy; }
 
-      // Minimum size only — no maximum cap
-      visualW = Math.max(scalePxPlan(60, zRef), visualW);
-      visualH = Math.max(scalePxPlan(40, zRef), visualH);
+      const scaleRaw = Math.max(vw / startVisualW, vh / startVisualH, 1e-6);
+      const minVisualW = scalePxPlan(60, zRef);
+      let visualW = Math.max(minVisualW, startVisualW * scaleRaw);
+      let visualH = visualW * aspect;
 
       const w = visualW / kPlan;
-      const h = visualH / kPlan;
 
-      // Edge-anchored centre shift — same formula as resizeInsert
+      // Edge-anchored centre shift
       const shiftDx = (visualW - startVisualW) / 2;
       const shiftDy = (visualH - startVisualH) / 2;
       let shiftLocal = { x: 0, y: 0 };
@@ -7320,7 +7320,7 @@ useEffect(() => {
       setManifestBoxes((prev) =>
         prev.map((mb) => {
           if (mb.id !== manifestId) return mb;
-          return { ...mb, wPx: w, hPx: h, ...(nextPos ? { pos: nextPos } : {}) };
+          return { ...mb, wPx: w, ...(nextPos ? { pos: nextPos } : {}) };
         })
       );
     }
@@ -8212,6 +8212,7 @@ const handleLegendToggle = (typeId) => {
     // Store centerPx once at drag-start — matches beginResizeInsert pattern exactly
     const centerPx = latLngToPx(manifest.pos);
     if (!centerPx) return;
+    const manifestNaturalH0 = manifestCanvasPixelHeight(manifestRows, manifestNaturalW0, manifestNaturalW0);
     setUiDrag({
       type: "resizeManifest",
       manifestId,
@@ -8219,6 +8220,8 @@ const handleLegendToggle = (typeId) => {
       startSize: { ...startSize, zRef: manifest.zRef ?? ELEMENT_BASE_ZOOM },
       startPointerPx,
       centerPx,
+      manifestNaturalW0,
+      manifestNaturalH0,
     });
   };
 
@@ -11086,6 +11089,7 @@ onUnmount={(polygon) => {
                               zRef: zRef,
                             })
                           }
+                          // hPx passed only as startSize reference; resize saves only wPx
                         />
                       )}
                     </div>
