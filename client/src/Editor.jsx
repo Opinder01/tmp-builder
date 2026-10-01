@@ -9243,7 +9243,9 @@ const tileIconStyle = {
 })()}
 
 
-       {/* ===== Title Box properties UI when selected (INSERT title_box) ===== */}
+      </header>
+
+      {/* ===== Title Box properties panel — fixed right side ===== */}
 {(() => {
   const sel = insertObjects.find((o) => o.id === selectedInsertId);
   if (!sel || sel.kind !== "title_box") return null;
@@ -9254,121 +9256,113 @@ const tileIconStyle = {
     setInsertObjects((prev) =>
       prev.map((o) => {
         if (o.id !== sel.id) return o;
-        return {
-          ...o,
-          data: { ...(o.data || {}), ...patch },
-        };
+        return { ...o, data: { ...(o.data || {}), ...patch } };
       })
     );
   };
 
+  const font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  const labelStyle = { fontSize: 12, fontFamily: font, color: "#111", display: "flex", flexDirection: "column", gap: 3 };
+  const inputStyle = { fontSize: 12, fontFamily: font, padding: "4px 7px", border: "1px solid #d1d5db", borderRadius: 5, outline: "none", width: "100%", boxSizing: "border-box" };
+
   return (
     <div
+      className="no-print"
+      onMouseDown={(e) => e.stopPropagation()}
       style={{
-        padding: "10px 12px",
+        position: "fixed",
+        top: 90,
+        right: 12,
+        zIndex: 99999,
+        width: 240,
+        background: "#fff",
+        border: "1px solid rgba(0,0,0,0.1)",
+        borderRadius: 10,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.14), 0 8px 24px rgba(0,0,0,0.08)",
+        padding: "12px 14px 14px",
         display: "flex",
+        flexDirection: "column",
         gap: 10,
-        alignItems: "center",
-        flexWrap: "wrap",
+        fontFamily: font,
       }}
     >
-      <label style={{ fontSize: 12 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>Title Box</span>
+        <button
+          type="button"
+          onClick={() => setSelectedInsertId(null)}
+          style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: "#666", lineHeight: 1, padding: 2 }}
+        >✕</button>
+      </div>
+
+      <label style={labelStyle}>
         Project
-        <input
-          value={d.project || ""}
-          onChange={(e) => patchTitle({ project: e.target.value })}
-          style={{ marginLeft: 6, width: 180 }}
-        />
+        <input value={d.project || ""} onChange={(e) => patchTitle({ project: e.target.value })} style={inputStyle} />
       </label>
 
-      <label style={{ fontSize: 12 }}>
+      <label style={labelStyle}>
         Job Location
-        <input
-          value={d.jobLocation || ""}
-          onChange={(e) => patchTitle({ jobLocation: e.target.value })}
-          style={{ marginLeft: 6, width: 180 }}
-        />
+        <input value={d.jobLocation || ""} onChange={(e) => patchTitle({ jobLocation: e.target.value })} style={inputStyle} />
       </label>
 
-      <label style={{ fontSize: 12 }}>
+      <label style={labelStyle}>
         Date
-        <input
-          type="date"
-          value={d.date || ""}
-          onChange={(e) => patchTitle({ date: e.target.value })}
-          style={{ marginLeft: 6 }}
-        />
+        <input type="date" value={d.date || ""} onChange={(e) => patchTitle({ date: e.target.value })} style={inputStyle} />
       </label>
 
-      <label style={{ fontSize: 12 }}>
+      <label style={labelStyle}>
         Author
-        <input
-          value={d.author || ""}
-          onChange={(e) => patchTitle({ author: e.target.value })}
-          style={{ marginLeft: 6, width: 160 }}
+        <input value={d.author || ""} onChange={(e) => patchTitle({ author: e.target.value })} style={inputStyle} />
+      </label>
+
+      <label style={labelStyle}>
+        Comments
+        <textarea
+          value={d.comments || ""}
+          onChange={(e) => patchTitle({ comments: normalizeCommentLineBreaks(e.target.value) })}
+          rows={3}
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.4 }}
         />
       </label>
 
-      {/* Logo picker */}
-<input
-  key={sel.id}
-  ref={titleLogoInputRef}
-  type="file"
-  accept="image/*"
-  style={{ display: "none" }}
-  onChange={(e) =>
-    uploadInsertTitleLogo(sel.id, e.target.files?.[0])
-  }
-/>
+      {/* Logo */}
+      <input
+        key={sel.id}
+        ref={titleLogoInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => uploadInsertTitleLogo(sel.id, e.target.files?.[0])}
+      />
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="button"
+          onClick={() => titleLogoInputRef.current?.click()}
+          style={{ flex: 1, fontSize: 12, padding: "5px 0", border: "1px solid #d1d5db", borderRadius: 5, background: "#f9fafb", cursor: "pointer", fontFamily: font }}
+        >Choose Logo</button>
+        <button
+          type="button"
+          onClick={() => patchTitle({ logoDataUrl: null })}
+          style={{ flex: 1, fontSize: 12, padding: "5px 0", border: "1px solid #d1d5db", borderRadius: 5, background: "#f9fafb", cursor: "pointer", fontFamily: font }}
+        >Clear Logo</button>
+      </div>
 
-<RibbonTextButton
-  label="Choose Logo"
-  onClick={() => titleLogoInputRef.current?.click()}
-/>
-
-<RibbonTextButton
-  label="Clear Logo"
-  onClick={() => patchTitle({ logoDataUrl: null })}
-/>
-
-<label style={{ fontSize: 12 }}>
-  Logo Size
-  <input
-    type="range"
-    min="0.4"
-    max="2.5"
-    step="0.05"
-    value={d.logoScale ?? 1}
-    onChange={(e) =>
-      patchTitle({ logoScale: Number(e.target.value) })
-    }
-    style={{ marginLeft: 6, width: 140 }}
-  />
-  <span style={{ marginLeft: 6 }}>
-    {Math.round((d.logoScale ?? 1) * 100)}%
-  </span>
-</label>
-<label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-  Comments
-  <textarea
-    value={d.comments || ""}
-    onChange={(e) => patchTitle({ comments: normalizeCommentLineBreaks(e.target.value) })}
-    rows={2}
-    style={{
-      width: 320,
-      resize: "vertical",
-      padding: "6px 8px",
-      fontFamily: "inherit",
-      fontSize: 12,
-    }}
-  />
-</label>
-
+      <label style={labelStyle}>
+        Logo Size — {Math.round((d.logoScale ?? 1) * 100)}%
+        <input
+          type="range"
+          min="0.4"
+          max="2.5"
+          step="0.05"
+          value={d.logoScale ?? 1}
+          onChange={(e) => patchTitle({ logoScale: Number(e.target.value) })}
+          style={{ width: "100%" }}
+        />
+      </label>
     </div>
   );
 })()}
-
-      </header>
 
       {/* ================= MAP ================= */}
       <main style={{ flex: 1, position: "relative" }}>
