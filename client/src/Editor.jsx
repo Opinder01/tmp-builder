@@ -2711,7 +2711,6 @@ async function importAerialPhotoForFrame() {
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [uiDrag, setUiDrag] = useState(null);
   const [selectionMenu, setSelectionMenu] = useState(null); // { x, y, entityType, entityId, typeId }
-  const selMenuPointerRef = useRef(null); // pending menu open — resolved on pointerup if no drag
   // legendExclusions declared earlier (before exportPlanDataRef useEffect) to avoid TDZ
   const [clipboard, setClipboard] = useState(null); // { kind, data }
   // Live rotation accumulator for signs (avoids stale closures + reattaching listeners)
@@ -6240,20 +6239,6 @@ useEffect(() => {
   };
 }, [selectionMenu]);
 
-// Selection menu: open on pointerup only if pointer didn't travel (click, not drag)
-useEffect(() => {
-  const onUp = (e) => {
-    const pending = selMenuPointerRef.current;
-    if (!pending) return;
-    selMenuPointerRef.current = null;
-    const dist = Math.hypot(e.clientX - pending.clientX, e.clientY - pending.clientY);
-    if (dist < 8) {
-      setSelectionMenu({ x: e.clientX, y: e.clientY, entityType: pending.entityType, entityId: pending.entityId, typeId: pending.typeId });
-    }
-  };
-  window.addEventListener("pointerup", onUp);
-  return () => window.removeEventListener("pointerup", onUp);
-}, []);
 
 
   useEffect(() => {
@@ -8033,9 +8018,8 @@ const beginMoveScale = (scaleId, startLatLng, grabClientPt) => {
 };
 
 // =================== CONTEXT MENU HELPERS ===================
-// Schedule a selection menu to open on pointerup (if no drag occurred)
-const scheduleSelectionMenu = (clientX, clientY, entityType, entityId, typeId = null) => {
-  selMenuPointerRef.current = { clientX, clientY, entityType, entityId, typeId };
+const openSelectionMenu = (clientX, clientY, entityType, entityId, typeId = null) => {
+  setSelectionMenu({ x: clientX, y: clientY, entityType, entityId, typeId });
 };
 
 const _getEntityData = (entityType, entityId) => {
@@ -10067,7 +10051,12 @@ draggingCursor:
                       e.domEvent?.preventDefault?.();
                       e.domEvent?.stopPropagation?.();
                       selectConeForEdit(f.id);
-                      scheduleSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "cones", f.id, f.typeId);
+                    }}
+                    onRightClick={(e) => {
+                      e.domEvent?.preventDefault?.();
+                      e.domEvent?.stopPropagation?.();
+                      selectConeForEdit(f.id);
+                      openSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "cones", f.id, f.typeId);
                     }}
                   />
                 );
@@ -10503,15 +10492,18 @@ onUnmount={(polygon) => {
     
     
     onClick={(e) => {
-  if (e.domEvent?.button === 2) return; // ignore right-click firing as click (touchpad)
-  e?.stop?.(); // prevent map onClick from also firing and clearing the selection
+  if (e.domEvent?.button === 2) return;
+  e?.stop?.();
   setSelectedWorkAreaId(wa.id);
-  setSelectionMenu({ x: e.domEvent?.clientX ?? 0, y: e.domEvent?.clientY ?? 0, entityType: "workArea", entityId: wa.id, typeId: "workArea" });
-
-  // ✅ clear any leftover draft preview so you don’t see the inner polygon
   setIsDrawingWorkArea(false);
   setWorkDraft([]);
   setWorkHover(null);
+}}
+    onRightClick={(e) => {
+  e.domEvent?.preventDefault?.();
+  e.domEvent?.stopPropagation?.();
+  setSelectedWorkAreaId(wa.id);
+  openSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "workArea", wa.id, "workArea");
 }}
     onDragEnd={(e) => {
       // after dragging whole polygon, update state
@@ -10736,12 +10728,18 @@ onUnmount={(polygon) => {
                 // Clicking the line only selects — individual vertex handles do the dragging
                 const onHitMouseDown = (e) => {
                   if (measIsDrawing) return;
-                  // While any drawing tool is active, clicks belong to that tool — never select measurements
                   if (activeTool && activeTool !== "measurements") return;
                   e.domEvent?.preventDefault?.();
                   e.domEvent?.stopPropagation?.();
                   setSelectedMeasId(m.id);
-                  scheduleSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "measurement", m.id, "measurement");
+                };
+                const onHitRightClick = (e) => {
+                  if (measIsDrawing) return;
+                  if (activeTool && activeTool !== "measurements") return;
+                  e.domEvent?.preventDefault?.();
+                  e.domEvent?.stopPropagation?.();
+                  setSelectedMeasId(m.id);
+                  openSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "measurement", m.id, "measurement");
                 };
 
                 // Vertex handle style — small white circle with purple border (same purple as BoxSelectionOverlay)
@@ -10796,7 +10794,7 @@ onUnmount={(polygon) => {
                   };
                   return (
                     <React.Fragment key={m.id}>
-                      <PolylineF path={[a, b]} options={hitLineOptions} onMouseDown={onHitMouseDown} />
+                      <PolylineF path={[a, b]} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
                       {isSelected && <PolylineF path={[a, b]} options={selLineOptions} />}
                       <DimensionSegment a={a} b={b} opacity={1} zIndex={30} scale={measureScale} pixelLen={pxLen} />
                       {/* Leader line from midpoint to label when span is short */}
@@ -10859,7 +10857,7 @@ onUnmount={(polygon) => {
                   return (
                     <React.Fragment key={m.id}>
                       {/* Invisible hit area — click selects */}
-                      <PolylineF path={path} options={hitLineOptions} onMouseDown={onHitMouseDown} />
+                      <PolylineF path={path} options={hitLineOptions} onMouseDown={onHitMouseDown} onRightClick={onHitRightClick} />
                       {/* Selection glow */}
                       {isSelected && <PolylineF path={path} options={selLineOptions} />}
                       {/* Segment visuals */}
@@ -10955,7 +10953,12 @@ onUnmount={(polygon) => {
                         toolElementSelectionGuardRef.current = true;
                         onSelectLegend(lb.id);
                         beginMoveLegend(lb.id, lb.pos, { x: e.clientX, y: e.clientY });
-                        scheduleSelectionMenu(e.clientX, e.clientY, "legend", lb.id, "legend");
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onSelectLegend(lb.id);
+                        openSelectionMenu(e.clientX, e.clientY, "legend", lb.id, "legend");
                       }}
                     >
                       {_dataUrl
@@ -11009,7 +11012,12 @@ onUnmount={(polygon) => {
                         toolElementSelectionGuardRef.current = true;
                         onSelectManifest(mb.id);
                         beginMoveManifest(mb.id, mb.pos, { x: e.clientX, y: e.clientY });
-                        scheduleSelectionMenu(e.clientX, e.clientY, "manifest", mb.id, "manifest");
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onSelectManifest(mb.id);
+                        openSelectionMenu(e.clientX, e.clientY, "manifest", mb.id, "manifest");
                       }}
                     >
                       {/* Canvas-rendered manifest image — height auto-fits content like legend */}
@@ -11072,9 +11080,14 @@ onUnmount={(polygon) => {
         onMouseDown={(e) => {
           e.domEvent?.preventDefault?.();
           e.domEvent?.stopPropagation?.();
+          if (!exportMode) setSelectedInsertId(obj.id);
+        }}
+        onRightClick={(e) => {
+          e.domEvent?.preventDefault?.();
+          e.domEvent?.stopPropagation?.();
           if (!exportMode) {
             setSelectedInsertId(obj.id);
-            scheduleSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "insert", obj.id, "line");
+            openSelectionMenu(e.domEvent?.clientX ?? 0, e.domEvent?.clientY ?? 0, "insert", obj.id, "line");
           }
         }}
       />
@@ -11107,11 +11120,17 @@ onUnmount={(polygon) => {
           e.preventDefault();
           e.stopPropagation();
           toolElementSelectionGuardRef.current = true;
+          if (!exportMode) setSelectedInsertId(obj.id);
+          beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toolElementSelectionGuardRef.current = true;
           if (!exportMode) {
             setSelectedInsertId(obj.id);
-            scheduleSelectionMenu(e.clientX, e.clientY, "insert", obj.id, obj.kind ?? "insert");
+            openSelectionMenu(e.clientX, e.clientY, "insert", obj.id, obj.kind ?? "insert");
           }
-          beginMoveInsert(obj.id, obj.pos || obj.position, { x: e.clientX, y: e.clientY });
         }}
       >
         <div
@@ -11609,7 +11628,13 @@ height: pendingPictureTool.hPx * elementScale,
           toolElementSelectionGuardRef.current = true;
           setSelectedEntity({ kind: "northArrow", id: na.id });
           beginMoveNorthArrow(na.id, na.pos, { x: e.clientX, y: e.clientY });
-          scheduleSelectionMenu(e.clientX, e.clientY, "northArrow", na.id, "northArrow");
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toolElementSelectionGuardRef.current = true;
+          setSelectedEntity({ kind: "northArrow", id: na.id });
+          openSelectionMenu(e.clientX, e.clientY, "northArrow", na.id, "northArrow");
         }}
       >
         {/* ROTATED ARROW */}
@@ -11719,14 +11744,19 @@ height: pendingPictureTool.hPx * elementScale,
     e.stopPropagation();
     toolElementSelectionGuardRef.current = true;
 
-    // select
     setSelectedEntity({ kind: "scale", id: scale.id });
-    scheduleSelectionMenu(e.clientX, e.clientY, "scale", scale.id, "scale");
 
-    // ✅ only start move if NOT clicking a handle
+    // only start move if NOT clicking a handle
     if (e.target?.dataset?.handle === "1") return;
 
     beginMoveScale(scale.id, scale.pos, { x: e.clientX, y: e.clientY });
+  }}
+  onContextMenu={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toolElementSelectionGuardRef.current = true;
+    setSelectedEntity({ kind: "scale", id: scale.id });
+    openSelectionMenu(e.clientX, e.clientY, "scale", scale.id, "scale");
   }}
   style={{
     transform: "translate(-50%, -50%)",
@@ -12035,7 +12065,12 @@ height: pendingPictureTool.hPx * elementScale,
                             ev.currentTarget.setPointerCapture?.(ev.pointerId);
                             onSelectSign(s.id);
                             beginMoveSign(s.id, s.pos, { x: ev.clientX, y: ev.clientY });
-                            scheduleSelectionMenu(ev.clientX, ev.clientY, "sign", s.id, s.typeId ?? s.code ?? s.id);
+                          }}
+                          onContextMenu={(ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            onSelectSign(s.id);
+                            openSelectionMenu(ev.clientX, ev.clientY, "sign", s.id, s.typeId ?? s.code ?? s.id);
                           }}
                         >
                           <img
@@ -12355,11 +12390,15 @@ height: pendingPictureTool.hPx * elementScale,
                           onMouseEnter={() => setArrowHoveredId(arrow.id)}
                           onMouseLeave={() => setArrowHoveredId(null)}
                           onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setSelectedEntity({ kind: "arrow", id: arrow.id }); }}
+                          onContextMenu={(ev) => {
+                            ev.preventDefault(); ev.stopPropagation();
+                            setSelectedEntity({ kind: "arrow", id: arrow.id });
+                            openSelectionMenu(ev.clientX, ev.clientY, "arrow", arrow.id, arrow.arrowId ?? "arrow");
+                          }}
                           onPointerDown={(ev) => {
                             ev.preventDefault(); ev.stopPropagation();
                             ev.currentTarget.setPointerCapture?.(ev.pointerId);
                             setSelectedEntity({ kind: "arrow", id: arrow.id });
-                            scheduleSelectionMenu(ev.clientX, ev.clientY, "arrow", arrow.id, arrow.arrowId ?? "arrow");
                             if (!projectionReady) return;
                             const centerPx = latLngToPx(arrow.pos);
                             if (!centerPx) return;
