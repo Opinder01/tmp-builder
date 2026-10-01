@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "../_lib/supabase.js";
 import { getSessionProfile } from "../_lib/auth.js";
 import { setCors, json } from "../_lib/cors.js";
 import { sendPushToWorker } from "../_lib/push.js";
+import { shiftSummary } from "../_lib/shiftSummary.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REMINDER_INTERVAL_DAYS = 14;
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
 
   const { data: dispatches, error } = await supabase
     .from("dispatches")
-    .select("id, job_number, worker_id, start_time, timesheets(id)")
+    .select("id, job_number, location, worker_id, start_time, timesheets(id)")
     .lt("start_time", new Date().toISOString());
   if (error) return json(res, 500, { error: error.message });
 
@@ -73,7 +74,7 @@ export default async function handler(req, res) {
       title: "Timesheet reminder",
       body:
         count === 1
-          ? `You have 1 shift (Job ${workerDispatches[0].job_number}) missing a timesheet.`
+          ? `Missing timesheet — ${shiftSummary(workerDispatches[0])}`
           : `You have ${count} shifts missing timesheets.`,
       url: "/",
       badgeCount: count,

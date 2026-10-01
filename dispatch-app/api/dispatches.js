@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "./_lib/supabase.js";
 import { getSessionProfile, requireRole } from "./_lib/auth.js";
 import { setCors, json } from "./_lib/cors.js";
 import { sendPushToWorker } from "./_lib/push.js";
+import { shiftSummary } from "./_lib/shiftSummary.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -95,7 +96,7 @@ export default async function handler(req, res) {
 
           await sendPushToWorker(d.worker_id, {
             title: "New dispatch",
-            body: job_number ? `Job ${job_number} — ${location}` : location,
+            body: shiftSummary({ job_number, location, start_time }),
             url: "/",
             badgeCount,
           });
@@ -197,7 +198,7 @@ export default async function handler(req, res) {
 
         await sendPushToWorker(worker_id, {
           title: "Dispatch updated",
-          body: job_number ? `Job ${job_number} — ${location}` : location,
+          body: shiftSummary({ job_number, location, start_time }),
           url: "/",
           badgeCount,
         });
@@ -249,7 +250,7 @@ export default async function handler(req, res) {
     const supabase = getSupabaseAdmin();
     const { data: dispatch, error } = await supabase
       .from("dispatches")
-      .select("id, job_number, location, worker_id, timesheets(status)")
+      .select("id, job_number, location, start_time, worker_id, timesheets(status)")
       .eq("id", id)
       .single();
     if (error || !dispatch) return json(res, 404, { error: "Dispatch not found" });
@@ -259,12 +260,12 @@ export default async function handler(req, res) {
       return json(res, 400, { error: "This dispatch already has a submitted timesheet." });
     }
 
-    const jobLabel = dispatch.job_number ? `Job ${dispatch.job_number}` : dispatch.location;
+    const summary = shiftSummary(dispatch);
     const result = await sendPushToWorker(dispatch.worker_id, {
       title: isRejected ? "Timesheet needs resubmission" : "Timesheet reminder",
       body: isRejected
-        ? `Your timesheet for ${jobLabel} was rejected — please resubmit.`
-        : `Don't forget to submit your timesheet for ${jobLabel}.`,
+        ? `Rejected, please resubmit — ${summary}`
+        : `Missing timesheet — ${summary}`,
       url: "/",
     });
 
