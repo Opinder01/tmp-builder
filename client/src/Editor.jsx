@@ -9102,148 +9102,94 @@ const tileIconStyle = {
 
           </div>
         )}
-                {/* ===== TABLE controls when selected ===== */}
-        {(() => {
-          const sel = insertObjects.find((o) => o.id === selectedInsertId);
-          if (!sel || sel.kind !== "table") return null;
-
-          return (
-            <div style={{ padding: "10px 12px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900, fontSize: 13 }}>Table</div>
-
-              <RibbonTextButton
-                label="Add Row"
-                onClick={() => {
-                  setInsertObjects((prev) =>
-                    prev.map((o) => {
-                      if (o.id !== sel.id || o.kind !== "table") return o;
-                      const next = structuredClone(o);
-                      const cols = next.cols;
-                      next.rows += 1;
-                      next.rowHeights.push(48);
-                      next.cells.push(Array.from({ length: cols }, () => ""));
-                      next.hPx += 48;
-                      return next;
-                    })
-                  );
-                }}
-              />
-
-              <RibbonTextButton
-                label="Add Column"
-                onClick={() => {
-                  setInsertObjects((prev) =>
-                    prev.map((o) => {
-                      if (o.id !== sel.id || o.kind !== "table") return o;
-                      const next = structuredClone(o);
-                      next.cols += 1;
-                      next.colWidths.push(120);
-                      next.cells = next.cells.map((row) => [...row, ""]);
-                      next.wPx += 120;
-                      return next;
-                    })
-                  );
-                }}
-              />
-
-              <RibbonTextButton
-                label="Remove Row"
-                onClick={() => {
-                  setInsertObjects((prev) =>
-                    prev.map((o) => {
-                      if (o.id !== sel.id || o.kind !== "table") return o;
-                      if (o.rows <= 1) return o;
-                      const next = structuredClone(o);
-                      next.rows -= 1;
-                      next.rowHeights.pop();
-                      next.cells.pop();
-                      next.hPx = Math.max(140, next.hPx - 48);
-                      return next;
-                    })
-                  );
-                }}
-              />
-
-              <RibbonTextButton
-                label="Remove Column"
-                onClick={() => {
-                  setInsertObjects((prev) =>
-                    prev.map((o) => {
-                      if (o.id !== sel.id || o.kind !== "table") return o;
-                      if (o.cols <= 1) return o;
-                      const next = structuredClone(o);
-                      next.cols -= 1;
-                      next.colWidths.pop();
-                      next.cells = next.cells.map((row) => row.slice(0, -1));
-                      next.wPx = Math.max(220, next.wPx - 120);
-                      return next;
-                    })
-                  );
-                }}
-              />
-            </div>
-          );
-        })()}
-        {/* ===== FONT controls when selected (Text / TextBox / Rect / Table) ===== */}
-{(() => {
-  const sel = insertObjects.find((o) => o.id === selectedInsertId);
-  if (!sel) return null;
-
-  const supportsFont =
-    sel.kind === "text" ||
-    sel.kind === "textbox" ||
-    sel.kind === "rect" ||
-    sel.kind === "table";
-
-  if (!supportsFont) return null;
-
-  const fontSize = sel.fontSize ?? (sel.kind === "table" ? 14 : 18);
-  const fontFamily = sel.fontFamily ?? "Arial";
-
-  return (
-    <div style={{ padding: "10px 12px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-      <div style={{ fontWeight: 900, fontSize: 13 }}>Text Style</div>
-
-      <label style={{ fontSize: 12, fontWeight: 800 }}>
-        Font
-        <select
-          value={fontFamily}
-          onChange={(e) => {
-            const val = e.target.value;
-            setInsertObjects((prev) =>
-              prev.map((o) => (o.id === sel.id ? { ...o, fontFamily: val } : o))
-            );
-          }}
-          style={{ marginLeft: 8, padding: "6px 8px" }}
-        >
-          {FONT_FAMILIES.map((f) => (
-            <option key={f} value={f}>{f}</option>
-          ))}
-        </select>
-      </label>
-
-      <label style={{ fontSize: 12, fontWeight: 800 }}>
-        Size
-        <input
-          type="number"
-          min="8"
-          max="120"
-          value={fontSize}
-          onChange={(e) => {
-            const val = Number(e.target.value || 0);
-            setInsertObjects((prev) =>
-              prev.map((o) => (o.id === sel.id ? { ...o, fontSize: val } : o))
-            );
-          }}
-          style={{ marginLeft: 8, width: 90, padding: "6px 8px" }}
-        />
-      </label>
-    </div>
-  );
-})()}
-
-
       </header>
+
+      {/* ===== TABLE controls — fixed right side ===== */}
+      {(() => {
+        const sel = insertObjects.find((o) => o.id === selectedInsertId);
+        if (!sel || sel.kind !== "table") return null;
+        const font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        const btnStyle = {
+          fontSize: 12, fontFamily: font, padding: "6px 0",
+          border: "1px solid #d1d5db", borderRadius: 5,
+          background: "#f9fafb", cursor: "pointer", width: "100%",
+        };
+        const patchTable = (fn) => setInsertObjects((prev) => prev.map((o) => {
+          if (o.id !== sel.id || o.kind !== "table") return o;
+          return fn(structuredClone(o));
+        }));
+        return (
+          <div
+            className="no-print"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed", top: 90, right: 12, zIndex: 99999,
+              width: 240, background: "#fff",
+              border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.14), 0 8px 24px rgba(0,0,0,0.08)",
+              padding: "12px 14px 14px", display: "flex", flexDirection: "column",
+              gap: 8, fontFamily: font,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>Table</span>
+              <button type="button" onClick={() => setSelectedInsertId(null)}
+                style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: "#666", lineHeight: 1, padding: 2 }}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <button type="button" style={btnStyle} onClick={() => patchTable((o) => { o.rows += 1; o.rowHeights.push(48); o.cells.push(Array.from({ length: o.cols }, () => "")); o.hPx += 48; return o; })}>+ Row</button>
+              <button type="button" style={btnStyle} onClick={() => patchTable((o) => { o.cols += 1; o.colWidths.push(120); o.cells = o.cells.map((r) => [...r, ""]); o.wPx += 120; return o; })}>+ Column</button>
+              <button type="button" style={btnStyle} onClick={() => patchTable((o) => { if (o.rows <= 1) return o; o.rows -= 1; o.rowHeights.pop(); o.cells.pop(); o.hPx = Math.max(140, o.hPx - 48); return o; })}>− Row</button>
+              <button type="button" style={btnStyle} onClick={() => patchTable((o) => { if (o.cols <= 1) return o; o.cols -= 1; o.colWidths.pop(); o.cells = o.cells.map((r) => r.slice(0, -1)); o.wPx = Math.max(220, o.wPx - 120); return o; })}>− Column</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ===== FONT controls — fixed right side (stacks below table panel if both open) ===== */}
+      {(() => {
+        const sel = insertObjects.find((o) => o.id === selectedInsertId);
+        if (!sel) return null;
+        const supportsFont = sel.kind === "text" || sel.kind === "textbox" || sel.kind === "rect" || sel.kind === "table";
+        if (!supportsFont) return null;
+        const font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        const fontSize = sel.fontSize ?? (sel.kind === "table" ? 14 : 18);
+        const fontFamily = sel.fontFamily ?? "Arial";
+        const topOffset = sel.kind === "table" ? 270 : 90;
+        const inputStyle = { fontSize: 12, fontFamily: font, padding: "4px 7px", border: "1px solid #d1d5db", borderRadius: 5, width: "100%", boxSizing: "border-box" };
+        return (
+          <div
+            className="no-print"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed", top: topOffset, right: 12, zIndex: 99999,
+              width: 240, background: "#fff",
+              border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.14), 0 8px 24px rgba(0,0,0,0.08)",
+              padding: "12px 14px 14px", display: "flex", flexDirection: "column",
+              gap: 10, fontFamily: font,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>Text Style</span>
+              <button type="button" onClick={() => setSelectedInsertId(null)}
+                style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: "#666", lineHeight: 1, padding: 2 }}>✕</button>
+            </div>
+            <label style={{ fontSize: 12, fontFamily: font, display: "flex", flexDirection: "column", gap: 3 }}>
+              Font
+              <select value={fontFamily} onChange={(e) => setInsertObjects((prev) => prev.map((o) => o.id === sel.id ? { ...o, fontFamily: e.target.value } : o))} style={inputStyle}>
+                {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </label>
+            <label style={{ fontSize: 12, fontFamily: font, display: "flex", flexDirection: "column", gap: 3 }}>
+              Size
+              <input type="number" min="8" max="120" value={fontSize}
+                onChange={(e) => setInsertObjects((prev) => prev.map((o) => o.id === sel.id ? { ...o, fontSize: Number(e.target.value || 0) } : o))}
+                style={inputStyle} />
+            </label>
+          </div>
+        );
+      })()}
 
       {/* ===== Title Box properties panel — fixed right side ===== */}
 {(() => {
