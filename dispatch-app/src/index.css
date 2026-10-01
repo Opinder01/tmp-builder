@@ -217,6 +217,24 @@ button {
   border-color: #dc2626;
 }
 
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2563eb;
+  text-decoration: underline;
+  font-size: inherit;
+}
+
+.review-panel-row td {
+  padding: 0;
+  background: #f8fafc;
+}
+
+.review-panel-row .review-card {
+  padding: 1rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

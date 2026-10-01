@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 
@@ -12,17 +12,69 @@ function statusLabel(dispatch) {
   return { text: "Rejected", tone: "bad" };
 }
 
+function ReviewPanel({ dispatch, busy, onReview }) {
+  const ts = dispatch.timesheets;
+  const [notify, setNotify] = useState(true);
+
+  return (
+    <tr className="review-panel-row">
+      <td colSpan={8}>
+        <div className="review-card">
+          <div className="review-card-photo">
+            {ts.slip_photo_url ? (
+              <a href={ts.slip_photo_url} target="_blank" rel="noreferrer">
+                <img src={ts.slip_photo_url} alt="Timesheet slip" />
+              </a>
+            ) : (
+              <p className="subtle">Photo unavailable</p>
+            )}
+          </div>
+          <div className="review-card-details">
+            <p>
+              Typed: {new Date(ts.typed_start_time).toLocaleTimeString()} –{" "}
+              {new Date(ts.typed_end_time).toLocaleTimeString()}
+              {ts.break_minutes > 0 && ` (${ts.break_minutes} min break)`}
+            </p>
+            <p>
+              <strong>{ts.calculated_hours} hours</strong>
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontWeight: 400, margin: "0.5rem 0" }}>
+              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} style={{ width: "auto" }} />
+              Notify flagger when approved
+            </label>
+            <div className="review-card-actions">
+              <button disabled={busy} onClick={() => onReview(ts.id, "approved", { notify })}>
+                Approve
+              </button>
+              <button disabled={busy} className="button-danger" onClick={() => onReview(ts.id, "rejected")}>
+                Reject
+              </button>
+            </div>
+            <p className="subtle">
+              Need to correct the typed hours first? Use the <Link to="/approvals">Approval Queue</Link> page.
+            </p>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export default function Dashboard() {
   const [dispatches, setDispatches] = useState(null);
   const [error, setError] = useState("");
   const [reminderStatus, setReminderStatus] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
 
-  useEffect(() => {
+  function load() {
     api
       .get("/api/dispatches?action=list")
       .then((data) => setDispatches(data.dispatches))
       .catch((err) => setError(err.message));
-  }, []);
+  }
+
+  useEffect(load, []);
 
   async function sendRemindersNow() {
     setReminderStatus("Sending...");
@@ -35,6 +87,25 @@ export default function Dashboard() {
       );
     } catch (err) {
       setReminderStatus(`Failed: ${err.message}`);
+    }
+  }
+
+  async function review(timesheet_id, decision, extra = {}) {
+    let rejection_reason;
+    if (decision === "rejected") {
+      rejection_reason = window.prompt("Reason for rejecting this timesheet:");
+      if (!rejection_reason) return;
+    }
+    setBusyId(timesheet_id);
+    setError("");
+    try {
+      await api.post("/api/timesheets?action=review", { timesheet_id, decision, rejection_reason, ...extra });
+      setExpandedId(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -73,17 +144,38 @@ export default function Dashboard() {
           <tbody>
             {dispatches.map((d) => {
               const status = statusLabel(d);
+              const isPending = d.timesheets?.status === "pending";
+              const isExpanded = expandedId === d.id;
               return (
-                <tr key={d.id}>
-                  <td>{d.job_number}</td>
-                  <td>{d.worker?.full_name}</td>
-                  <td>{d.title || "-"}</td>
-                  <td>{d.client_company_name || "-"}</td>
-                  <td>{d.location}</td>
-                  <td>{new Date(d.start_time).toLocaleString()}</td>
-                  <td className={`status status-${status.tone}`}>{status.text}</td>
-                  <td><Link to={`/dispatch/${d.id}/edit`}>Edit</Link></td>
-                </tr>
+                <Fragment key={d.id}>
+                  <tr>
+                    <td>{d.job_number}</td>
+                    <td>{d.worker?.full_name}</td>
+                    <td>{d.title || "-"}</td>
+                    <td>{d.client_company_name || "-"}</td>
+                    <td>{d.location}</td>
+                    <td>{new Date(d.start_time).toLocaleString()}</td>
+                    <td className={`status status-${status.tone}`}>{status.text}</td>
+                    <td>
+                      <Link to={`/dispatch/${d.id}/edit`}>Edit</Link>
+                      {isPending && (
+                        <>
+                          {" | "}
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setExpandedId(isExpanded ? null : d.id)}
+                          >
+                            {isExpanded ? "Hide" : "Approve"}
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                  {isPending && isExpanded && (
+                    <ReviewPanel dispatch={d} busy={busyId === d.timesheets.id} onReview={review} />
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
