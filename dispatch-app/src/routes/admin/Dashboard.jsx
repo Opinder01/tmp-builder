@@ -66,6 +66,8 @@ export default function Dashboard() {
   const [reminderStatus, setReminderStatus] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [reminderBusyId, setReminderBusyId] = useState(null);
+  const [reminderSentId, setReminderSentId] = useState(null);
 
   function load() {
     api
@@ -87,6 +89,21 @@ export default function Dashboard() {
       );
     } catch (err) {
       setReminderStatus(`Failed: ${err.message}`);
+    }
+  }
+
+  async function sendReminder(d) {
+    setReminderBusyId(d.id);
+    setReminderSentId(null);
+    setError("");
+    try {
+      const result = await api.post("/api/dispatches?action=remind", { id: d.id });
+      setReminderSentId(d.id);
+      if (!result.sent) setError(`${d.worker?.full_name} doesn't have notifications enabled yet — they won't see this until they open the app.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReminderBusyId(null);
     }
   }
 
@@ -145,6 +162,8 @@ export default function Dashboard() {
             {dispatches.map((d) => {
               const status = statusLabel(d);
               const isPending = d.timesheets?.status === "pending";
+              const isMissing = !d.timesheets;
+              const isRejected = d.timesheets?.status === "rejected";
               const isExpanded = expandedId === d.id;
               return (
                 <Fragment key={d.id}>
@@ -167,6 +186,23 @@ export default function Dashboard() {
                             onClick={() => setExpandedId(isExpanded ? null : d.id)}
                           >
                             {isExpanded ? "Hide" : "Approve"}
+                          </button>
+                        </>
+                      )}
+                      {(isMissing || isRejected) && (
+                        <>
+                          {" | "}
+                          <button
+                            type="button"
+                            className="link-button"
+                            disabled={reminderBusyId === d.id}
+                            onClick={() => sendReminder(d)}
+                          >
+                            {reminderBusyId === d.id
+                              ? "Sending..."
+                              : reminderSentId === d.id
+                              ? "Sent"
+                              : "Send Reminder"}
                           </button>
                         </>
                       )}

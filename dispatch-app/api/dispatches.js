@@ -239,6 +239,38 @@ export default async function handler(req, res) {
     return json(res, 200, { deleted: true });
   }
 
+  if (action === "remind" && req.method === "POST") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const { id } = req.body || {};
+    if (!id) return json(res, 400, { error: "id is required" });
+
+    const supabase = getSupabaseAdmin();
+    const { data: dispatch, error } = await supabase
+      .from("dispatches")
+      .select("id, job_number, location, worker_id, timesheets(status)")
+      .eq("id", id)
+      .single();
+    if (error || !dispatch) return json(res, 404, { error: "Dispatch not found" });
+
+    const isRejected = dispatch.timesheets?.status === "rejected";
+    if (dispatch.timesheets && !isRejected) {
+      return json(res, 400, { error: "This dispatch already has a submitted timesheet." });
+    }
+
+    const jobLabel = dispatch.job_number ? `Job ${dispatch.job_number}` : dispatch.location;
+    const result = await sendPushToWorker(dispatch.worker_id, {
+      title: isRejected ? "Timesheet needs resubmission" : "Timesheet reminder",
+      body: isRejected
+        ? `Your timesheet for ${jobLabel} was rejected — please resubmit.`
+        : `Don't forget to submit your timesheet for ${jobLabel}.`,
+      url: "/",
+    });
+
+    return json(res, 200, { sent: result.sent > 0 });
+  }
+
   if (action === "list" && req.method === "GET") {
     const profile = await getSessionProfile(req);
     if (!profile) return json(res, 401, { error: "Not authenticated" });

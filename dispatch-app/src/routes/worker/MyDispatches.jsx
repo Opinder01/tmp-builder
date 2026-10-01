@@ -10,7 +10,7 @@ function statusFor(dispatch) {
   if (!ts) return { text: "Timesheet needed", tone: "warn", actionable: true };
   if (ts.status === "pending") return { text: "Submitted — pending review", tone: "info" };
   if (ts.status === "approved") return { text: `Approved — ${ts.calculated_hours}h`, tone: "ok" };
-  return { text: `Rejected: ${ts.rejection_reason || ""}`, tone: "bad" };
+  return { text: `Rejected: ${ts.rejection_reason || ""} — please resubmit`, tone: "bad", actionable: true };
 }
 
 function DispatchCard({ d, status }) {
@@ -30,7 +30,7 @@ function DispatchCard({ d, status }) {
       <p className={`status status-${status.tone}`}>{status.text}</p>
       {status.actionable && (
         <Link to={`/timesheet/${d.id}`} className="button">
-          Submit Timesheet
+          {d.timesheets ? "Resubmit Timesheet" : "Submit Timesheet"}
         </Link>
       )}
     </div>

@@ -33,18 +33,44 @@ export default async function handler(req, res) {
     if (dispatchError || !dispatch) return json(res, 404, { error: "Dispatch not found" });
     if (dispatch.worker_id !== profile.id) return json(res, 403, { error: "Forbidden" });
 
-    const { data: timesheet, error } = await supabase
+    // A dispatch can only ever have one timesheet row (unique dispatch_id).
+    // If the previous submission was rejected, this is a resubmission --
+    // update that same row (clearing the rejection and putting it back to
+    // pending) instead of inserting a second row, which would violate the
+    // unique constraint.
+    const { data: existing } = await supabase
       .from("timesheets")
-      .insert({
-        dispatch_id,
-        worker_id: profile.id,
-        slip_photo_path,
-        typed_start_time,
-        typed_end_time,
-        break_minutes: break_minutes || 0,
-      })
-      .select()
-      .single();
+      .select("id, status")
+      .eq("dispatch_id", dispatch_id)
+      .maybeSingle();
+    if (existing && existing.status !== "rejected") {
+      return json(res, 409, { error: "A timesheet has already been submitted for this dispatch." });
+    }
+
+    const row = {
+      dispatch_id,
+      worker_id: profile.id,
+      slip_photo_path,
+      typed_start_time,
+      typed_end_time,
+      break_minutes: break_minutes || 0,
+    };
+
+    const { data: timesheet, error } = existing
+      ? await supabase
+          .from("timesheets")
+          .update({
+            ...row,
+            status: "pending",
+            submitted_at: new Date().toISOString(),
+            reviewed_by: null,
+            reviewed_at: null,
+            rejection_reason: null,
+          })
+          .eq("id", existing.id)
+          .select()
+          .single()
+      : await supabase.from("timesheets").insert(row).select().single();
     if (error) return json(res, 500, { error: error.message });
 
     return json(res, 201, { timesheet });
