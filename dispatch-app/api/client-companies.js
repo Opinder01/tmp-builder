@@ -59,5 +59,28 @@ export default async function handler(req, res) {
     return json(res, 200, { company: data });
   }
 
+  if (action === "delete" && req.method === "POST") {
+    const { id } = req.body || {};
+    if (!id) return json(res, 400, { error: "id is required" });
+
+    // Dispatches keep a foreign key to their contractor (and invoicing groups
+    // by it), so deleting one that's in use would either fail or orphan
+    // billing history -- refuse and say how many dispatches use it.
+    const { count, error: countError } = await supabase
+      .from("dispatches")
+      .select("id", { count: "exact", head: true })
+      .eq("client_company_id", id);
+    if (countError) return json(res, 500, { error: countError.message });
+    if (count > 0) {
+      return json(res, 409, {
+        error: `Can't delete — ${count} dispatch(es) are assigned to this contractor. Reassign or delete those first.`,
+      });
+    }
+
+    const { error } = await supabase.from("client_companies").delete().eq("id", id);
+    if (error) return json(res, 500, { error: error.message });
+    return json(res, 200, { deleted: true });
+  }
+
   return json(res, 404, { error: "Unknown action" });
 }

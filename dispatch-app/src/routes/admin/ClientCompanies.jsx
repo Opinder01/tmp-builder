@@ -50,6 +50,7 @@ export default function ClientCompanies() {
   const [companies, setCompanies] = useState(null);
   const [form, setForm] = useState({ name: "", phone: "", email: "", notes: "" });
   const [error, setError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   function load() {
@@ -63,6 +64,17 @@ export default function ClientCompanies() {
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  async function handleDelete(c) {
+    if (!confirm(`Delete contractor "${c.name}"? This can't be undone.`)) return;
+    setDeleteError("");
+    try {
+      await api.post("/api/client-companies?action=delete", { id: c.id });
+      load();
+    } catch (err) {
+      setDeleteError(err.message);
+    }
   }
 
   async function handleSubmit(e) {
@@ -115,6 +127,7 @@ export default function ClientCompanies() {
         </form>
       </fieldset>
 
+      {deleteError && <p className="error">{deleteError}</p>}
       {companies && companies.length === 0 && <p>No contractors added yet.</p>}
       {companies && companies.length > 0 && (
         <table>
@@ -138,6 +151,10 @@ export default function ClientCompanies() {
                 </td>
                 <td>
                   <Link to={`/contractors/${c.id}`}>View schedule</Link>
+                  {" | "}
+                  <button type="button" className="link-button" onClick={() => handleDelete(c)}>
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}
