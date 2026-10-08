@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { syncPushSubscription } from "./lib/push.js";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import Login from "./routes/Login.jsx";
 import SetNewPassword from "./routes/SetNewPassword.jsx";
@@ -26,6 +28,10 @@ import WorkerPaystubs from "./routes/worker/Paystubs.jsx";
 
 function Gate() {
   const { session, profile, loading } = useAuth();
+
+  useEffect(() => {
+    if (profile && !profile.must_change_password) syncPushSubscription();
+  }, [profile?.id, profile?.must_change_password]);
 
   if (loading) return <p>Loading...</p>;
   if (!session) return <Login />;
