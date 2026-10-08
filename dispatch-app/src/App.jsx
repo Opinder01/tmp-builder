@@ -9,6 +9,7 @@ import Dashboard from "./routes/admin/Dashboard.jsx";
 import DispatchForm from "./routes/admin/DispatchForm.jsx";
 import EditDispatch from "./routes/admin/EditDispatch.jsx";
 import Bookings from "./routes/admin/Bookings.jsx";
+import Calendar from "./routes/admin/Calendar.jsx";
 import ApprovalQueue from "./routes/admin/ApprovalQueue.jsx";
 import AddWorker from "./routes/admin/AddWorker.jsx";
 import Workers from "./routes/admin/Workers.jsx";
@@ -45,6 +46,7 @@ function Gate() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/dispatch/new" element={<DispatchForm />} />
           <Route path="/dispatch/:dispatchId/edit" element={<EditDispatch />} />
+          <Route path="/calendar" element={<Calendar />} />
           <Route path="/bookings" element={<Bookings />} />
           <Route path="/approvals" element={<ApprovalQueue />} />
           <Route path="/workers" element={<Workers />} />
