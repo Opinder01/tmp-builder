@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { uploadFile } from "../../lib/upload.js";
 
 const TITLE_OPTIONS = ["TCP", "LCT", "TCS"];
 
+function toDateTimeLocal(isoString) {
+  const d = new Date(isoString);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function DispatchForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const bookingId = searchParams.get("booking");
+  const [booking, setBooking] = useState(null);
   const [workers, setWorkers] = useState([]);
   const [contractors, setContractors] = useState([]);
   const [qboItems, setQboItems] = useState([]);
@@ -45,6 +54,26 @@ export default function DispatchForm() {
       .then((data) => setQboItems(data.items))
       .catch(() => setQboItems([]));
   }, []);
+
+  // Arriving from "Dispatch this" on the Bookings page: prefill what the
+  // booking already knows. Its private notes are shown but not copied into
+  // the dispatch, since dispatch notes go to the flaggers.
+  useEffect(() => {
+    if (!bookingId) return;
+    api
+      .get(`/api/bookings?action=get&id=${bookingId}`)
+      .then((data) => {
+        const b = data.booking;
+        setBooking(b);
+        setForm((f) => ({
+          ...f,
+          client_company_id: b.client_company_id || "",
+          location: b.location,
+          start_time: toDateTimeLocal(b.start_time),
+        }));
+      })
+      .catch((err) => setError(err.message));
+  }, [bookingId]);
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -102,6 +131,7 @@ export default function DispatchForm() {
         client_company_name: selectedContractor?.name || null,
         titles,
         attachments,
+        booking_id: booking?.id || null,
       });
       navigate("/");
     } catch (err) {
@@ -114,6 +144,16 @@ export default function DispatchForm() {
   return (
     <div>
       <h1>New Dispatch</h1>
+      {booking && (
+        <div className="dispatch-card" style={{ borderColor: "#1d4ed8", maxWidth: 420 }}>
+          <p>
+            <strong>From booking</strong> — {booking.client_company_name || "contractor not listed"},
+            booked via {booking.source}
+            {booking.flaggers_needed ? `, ${booking.flaggers_needed} flagger(s) needed` : ""}.
+          </p>
+          {booking.notes && <p className="subtle">Your private notes: {booking.notes}</p>}
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="form">
         <label>
           Job number (optional)

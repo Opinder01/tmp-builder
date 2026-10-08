@@ -20,7 +20,7 @@ export default async function handler(req, res) {
       customer_qbo_id, qbo_customer_name, qbo_item_id, qbo_item_name, rate,
       qbo_ot_item_id, qbo_ot_item_name, ot_rate,
       qbo_dt_item_id, qbo_dt_item_name, dt_rate,
-      client_company_id, client_company_name,
+      client_company_id, client_company_name, booking_id,
     } = req.body || {};
 
     // Accepts either a single worker_id (back-compat) or worker_ids (array,
@@ -80,6 +80,12 @@ export default async function handler(req, res) {
       );
       const { error: attError } = await supabase.from("dispatch_attachments").insert(rows);
       if (attError) return json(res, 500, { error: attError.message });
+    }
+
+    // Dispatching from a logged booking marks it done so it stops showing up
+    // in the day-before reminder. Best-effort: never fails the dispatch.
+    if (booking_id) {
+      await supabase.from("bookings").update({ status: "dispatched" }).eq("id", booking_id);
     }
 
     // Never blocks dispatch creation — a worker with no push subscription

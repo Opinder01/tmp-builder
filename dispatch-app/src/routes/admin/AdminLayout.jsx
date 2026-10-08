@@ -14,6 +14,7 @@ export default function AdminLayout() {
         </div>
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/bookings">Bookings</NavLink>
           <NavLink to="/dispatch/new">New Dispatch</NavLink>
           <NavLink to="/approvals">Approvals</NavLink>
           <NavLink to="/payroll-summary">Payroll Summary</NavLink>
