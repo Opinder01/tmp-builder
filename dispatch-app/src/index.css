@@ -463,7 +463,7 @@ th, td {
 }
 
 .cal-cell {
-  min-height: 104px;
+  min-height: 120px;
   padding: 0.25rem;
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
@@ -473,26 +473,26 @@ th, td {
 }
 
 .cal-outside { background: #f8fafc; color: #94a3b8; }
-.cal-past .cal-chip { opacity: 0.6; }
 .cal-today { box-shadow: inset 0 0 0 2px #2563eb; }
 .cal-selected { background: #eff6ff; }
 
 .cal-daynum { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.15rem; }
 
 .cal-chip {
-  font-size: 0.72rem;
-  line-height: 1.3;
-  padding: 0.1rem 0.3rem;
-  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  padding: 0.15rem 0.35rem;
+  margin-bottom: 0.2rem;
+  font-weight: 500;
   border-radius: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.cal-chip.cal-shift { background: #dbeafe; color: #1e3a8a; }
-.cal-chip.cal-booking { background: #fef3c7; color: #78350f; }
-.cal-more { font-size: 0.7rem; color: #64748b; }
+.cal-chip.cal-shift { background: #bfdbfe; color: #1e3a8a; }
+.cal-chip.cal-booking { background: #fde68a; color: #78350f; }
+.cal-more { font-size: 0.75rem; color: #475569; font-weight: 600; }
 
 .cal-dots { display: none; gap: 3px; flex-wrap: wrap; }
 .cal-dot { width: 7px; height: 7px; border-radius: 50%; }
