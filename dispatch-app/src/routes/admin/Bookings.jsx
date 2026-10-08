@@ -114,7 +114,7 @@ export default function Bookings() {
   async function sendReminderNow() {
     setReminderStatus("Sending...");
     try {
-      const result = await api.post("/api/cron/booking-reminders");
+      const result = await api.post("/api/bookings?action=remind");
       setReminderStatus(
         result.bookings === 0
           ? "No undispatched bookings tomorrow, so nothing to send."
