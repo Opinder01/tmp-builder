@@ -3,19 +3,20 @@
   <g transform="translate(50,50) rotate(45)">
     <rect x="-34" y="-34" width="68" height="68" rx="6" ry="6" fill="#FF7A00" stroke="#000" stroke-width="3.5"/>
   </g>
-  <!-- Head (smaller, higher up) -->
-  <circle cx="38" cy="30" r="5" fill="#000"/>
-  <!-- Body (taller, thinner) -->
-  <rect x="35.5" y="35" width="5" height="22" rx="2" fill="#000"/>
-  <!-- Left arm (hanging down-left) -->
-  <line x1="35" y1="42" x2="27" y2="54" stroke="#000" stroke-width="4" stroke-linecap="round"/>
-  <!-- Right arm (out to pole, slight upward angle) -->
-  <line x1="41" y1="40" x2="58" y2="36" stroke="#000" stroke-width="4" stroke-linecap="round"/>
-  <!-- Legs (spread slightly) -->
-  <line x1="37" y1="57" x2="33" y2="70" stroke="#000" stroke-width="4" stroke-linecap="round"/>
-  <line x1="41" y1="57" x2="45" y2="70" stroke="#000" stroke-width="4" stroke-linecap="round"/>
-  <!-- Pole -->
-  <line x1="59" y1="24" x2="59" y2="72" stroke="#000" stroke-width="3" stroke-linecap="round"/>
-  <!-- Octagon (smaller, top of pole) -->
-  <polygon points="54,18 64,18 69,23 69,31 64,36 54,36 49,31 49,23" fill="#000"/>
+  <!-- Head (large) -->
+  <circle cx="39" cy="29" r="7.5" fill="#000"/>
+  <!-- Wide solid body -->
+  <rect x="29" y="36" width="19" height="26" rx="3" fill="#000"/>
+  <!-- Left arm (thick, angled down-left) -->
+  <line x1="29" y1="41" x2="18" y2="56" stroke="#000" stroke-width="10" stroke-linecap="round"/>
+  <!-- Right arm (horizontal to pole) -->
+  <line x1="48" y1="41" x2="63" y2="41" stroke="#000" stroke-width="7" stroke-linecap="round"/>
+  <!-- Left leg (straight down, thick) -->
+  <line x1="35" y1="62" x2="32" y2="75" stroke="#000" stroke-width="8" stroke-linecap="round"/>
+  <!-- Right leg (straight down, thick) -->
+  <line x1="42" y1="62" x2="45" y2="75" stroke="#000" stroke-width="8" stroke-linecap="round"/>
+  <!-- Thin pole (full height) -->
+  <line x1="64" y1="26" x2="64" y2="76" stroke="#000" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Octagon stop sign (larger than head, upper right) -->
+  <polygon points="56,18 68,18 74,24 74,34 68,40 56,40 50,34 50,24" fill="#000"/>
 </svg>
