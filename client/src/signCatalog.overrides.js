@@ -42,7 +42,7 @@ export const manualEntries = [
     id: "C-001-1",
     label: "Flagger",
     category: "construction",
-    src: "/signs/C-001-1.png",
+    src: "/signs/C-001-1.svg",
     defaultWidth: DEFAULT_WIDTH,
     defaultHeight: DEFAULT_HEIGHT,
     supportsTripod: true,
