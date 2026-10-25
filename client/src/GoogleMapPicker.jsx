@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, Marker, useLoadScript } from "@react-google-maps/api";
 
 export default function GoogleMapPicker({ onConfirm }) {
@@ -15,17 +15,28 @@ export default function GoogleMapPicker({ onConfirm }) {
   const [label, setLabel] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [suggestions, setSuggestions] = useState([]);
+  const [placesLib, setPlacesLib] = useState(null);
   const sessionTokenRef = useRef(null);
 
   const defaultCenter = useMemo(() => ({ lat: 43.6532, lng: -79.3832 }), []);
 
+  // Load the new Places library once Maps JS API is ready
+  useEffect(() => {
+    if (!isLoaded) return;
+    window.google.maps.importLibrary("places").then((lib) => {
+      setPlacesLib(lib);
+    }).catch((err) => {
+      console.error("Failed to load Places library:", err);
+    });
+  }, [isLoaded]);
+
   const fetchSuggestions = useCallback(async (input) => {
-    if (!input || input.length < 2) { setSuggestions([]); return; }
+    if (!input || input.length < 2 || !placesLib) { setSuggestions([]); return; }
     try {
       if (!sessionTokenRef.current) {
-        sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+        sessionTokenRef.current = new placesLib.AutocompleteSessionToken();
       }
-      const { suggestions: s } = await window.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      const { suggestions: s } = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
         input,
         sessionToken: sessionTokenRef.current,
       });
@@ -34,7 +45,7 @@ export default function GoogleMapPicker({ onConfirm }) {
       console.error("Autocomplete error:", err);
       setSuggestions([]);
     }
-  }, []);
+  }, [placesLib]);
 
   const selectSuggestion = useCallback(async (suggestion) => {
     try {
