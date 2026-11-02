@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { generateWorkerSummaryPdf } from "../../lib/pdf/workerSummary.js";
+import PdfPreview, { useShiftSequence } from "../../components/PdfPreview.jsx";
 
 function toDateOnly(isoString) {
   return isoString.slice(0, 10);
@@ -83,7 +84,8 @@ export default function WorkerSchedule() {
     });
   }, [dispatches, dateFrom, dateTo]);
 
-  const withPhotos = filteredDispatches.filter((d) => d.timesheets?.slip_photo_url);
+  const sequence = useShiftSequence(filteredDispatches, `${dateFrom}|${dateTo}`);
+  const withPhotos = sequence.ordered.filter((d) => d.timesheets?.slip_photo_url);
 
   function rotate(dispatchId) {
     setRotations((r) => ({ ...r, [dispatchId]: ((r[dispatchId] || 0) + 90) % 360 }));
@@ -92,7 +94,7 @@ export default function WorkerSchedule() {
   async function downloadPdf() {
     setGenerating(true);
     try {
-      await generateWorkerSummaryPdf(worker, filteredDispatches, rotations);
+      await generateWorkerSummaryPdf(worker, sequence.ordered, rotations);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -195,44 +197,18 @@ export default function WorkerSchedule() {
       </p>
 
       {showPreview && (
-        <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "1rem", margin: "1rem 0" }}>
-          <h2 style={{ marginTop: 0 }}>PDF Preview</h2>
-          <p className="subtle">
-            {filteredDispatches.length} shift(s) in range, {withPhotos.length} with a timesheet
-            photo. Rotate any photo that's sideways before downloading — the PDF will include the
-            summary table plus one page per photo, at the rotation shown here.
-          </p>
-
-          {withPhotos.length === 0 && <p>No timesheet photos in this range.</p>}
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem" }}>
-            {withPhotos.map((d) => (
-              <div key={d.id} style={{ width: 160, textAlign: "center" }}>
-                <div style={{ height: 160, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", border: "1px solid #e2e8f0", borderRadius: 6 }}>
-                  <img
-                    src={d.timesheets.slip_photo_url}
-                    alt="Timesheet slip"
-                    style={{
-                      maxWidth: (rotations[d.id] || 0) % 180 === 0 ? "100%" : "160px",
-                      maxHeight: (rotations[d.id] || 0) % 180 === 0 ? "160px" : "100%",
-                      transform: `rotate(${rotations[d.id] || 0}deg)`,
-                    }}
-                  />
-                </div>
-                <p className="subtle" style={{ margin: "0.4rem 0" }}>
-                  Job {d.job_number || "-"} — {new Date(d.start_time).toLocaleDateString()}
-                </p>
-                <button type="button" onClick={() => rotate(d.id)}>
-                  Rotate
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <button onClick={downloadPdf} disabled={generating} style={{ marginTop: "1rem" }}>
-            {generating ? "Generating..." : "Download PDF"}
-          </button>
-        </div>
+        <PdfPreview
+          photos={withPhotos}
+          totalShifts={filteredDispatches.length}
+          rotations={rotations}
+          onRotate={rotate}
+          onMoveTo={sequence.moveTo}
+          onReset={sequence.reset}
+          isCustom={sequence.isCustom}
+          onDownload={downloadPdf}
+          generating={generating}
+          showFlagger={false}
+        />
       )}
 
       {!dispatches && !error && <p>Loading...</p>}
