@@ -12016,6 +12016,46 @@ height: pendingPictureTool.hPx * elementScale,
                                   style={{ width: 14 * standMapScale, height: 14 * standMapScale }}
                                 />
                               </div>
+                              {/* Delete button for stand */}
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  left: "50%",
+                                  bottom: -52 * standMapScale,
+                                  transform: "translateX(-50%)",
+                                  width: 18 * standMapScale,
+                                  height: 18 * standMapScale,
+                                  borderRadius: "999px",
+                                  background: "#ef4444",
+                                  border: "2px solid #fff",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  cursor: "pointer",
+                                  pointerEvents: "auto",
+                                  zIndex: 1,
+                                }}
+                                title="Delete stand"
+                                onPointerDown={(ev) => {
+                                  ev.preventDefault();
+                                  ev.stopPropagation();
+                                }}
+                                onClick={(ev) => {
+                                  ev.preventDefault();
+                                  ev.stopPropagation();
+                                  pushHistory();
+                                  setPlacedSigns((prev) => prev.map((sig) => ({
+                                    ...sig,
+                                    stands: (sig.stands || []).filter((st2) => st2.id !== st.id),
+                                  })));
+                                  setSelectedEntity(null);
+                                }}
+                              >
+                                <svg width={10 * standMapScale} height={10 * standMapScale} viewBox="0 0 10 10" fill="none">
+                                  <line x1="1" y1="1" x2="9" y2="9" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                                  <line x1="9" y1="1" x2="1" y2="9" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                                </svg>
+                              </div>
                             </div>
                           </OverlayViewF>
                           );
