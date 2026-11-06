@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { api } from "../../lib/api.js";
+import { addDays, todayKey } from "../../lib/tz.js";
 
 function isoDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return addDays(todayKey(), -days);
 }
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return todayKey();
 }
 
 export default function PayrollSummary() {
@@ -21,11 +20,9 @@ export default function PayrollSummary() {
     setLoading(true);
     setError("");
     // "to" is exclusive server-side, so bump it one day to make the picked
-    // end date inclusive of the whole day.
-    const toExclusive = new Date(to);
-    toExclusive.setDate(toExclusive.getDate() + 1);
+    // end date inclusive of the whole day. The server reads both as BC days.
     api
-      .get(`/api/timesheets?action=payroll-summary&from=${from}&to=${toExclusive.toISOString().slice(0, 10)}`)
+      .get(`/api/timesheets?action=payroll-summary&from=${from}&to=${addDays(to, 1)}`)
       .then((data) => setSummary(data.summary))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));

@@ -11,6 +11,15 @@ import { getConnection, qboQuery, qboFetch } from "../_lib/qbo.js";
 import { signState } from "../_lib/crypto.js";
 import { splitShiftHours } from "../_lib/overtime.js";
 import { createContractorBill, createCustomerInvoice } from "../_lib/qboSync.js";
+import { startOfDay, startOfNextDay } from "../_lib/tz.js";
+
+// from/to are BC calendar days ("YYYY-MM-DD", `to` inclusive), not UTC days, so
+// a late-evening shift on the last day isn't pushed into the next range.
+function limitToRange(query, from, to) {
+  if (from) query = query.gte("typed_start_time", startOfDay(from));
+  if (to) query = query.lt("typed_start_time", startOfNextDay(to));
+  return query;
+}
 
 function escapeQboString(s) {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
@@ -139,8 +148,7 @@ export default async function handler(req, res) {
       .eq("worker_id", worker_id)
       .eq("status", "approved")
       .order("typed_start_time", { ascending: true });
-    if (from) query = query.gte("typed_start_time", from);
-    if (to) query = query.lte("typed_start_time", to);
+    query = limitToRange(query, from, to);
 
     const { data, error } = await query;
     if (error) return json(res, 500, { error: error.message });
@@ -201,8 +209,7 @@ export default async function handler(req, res) {
       .eq("status", "approved")
       .in("dispatch_id", dispatchIds)
       .order("typed_start_time", { ascending: true });
-    if (from) query = query.gte("typed_start_time", from);
-    if (to) query = query.lte("typed_start_time", to);
+    query = limitToRange(query, from, to);
 
     const { data, error } = await query;
     if (error) return json(res, 500, { error: error.message });

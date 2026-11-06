@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import { dateKey as bcDateKey, formatTime, todayKey } from "../../lib/tz.js";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Key for a calendar-grid cell (a plain local date used only for day-of-month
+// arithmetic); shifts are placed on the grid by their BC day via bcDateKey.
 function dateKey(d) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function timeLabel(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return formatTime(iso, { hour: "numeric", minute: "2-digit" });
 }
 
 // One calendar entry per job: a "New Dispatch" sent to several flaggers is
@@ -55,7 +58,9 @@ function itemLabel(item) {
 }
 
 export default function Calendar() {
-  const today = new Date();
+  // "Today" is the current day in BC, whatever the device's own zone says.
+  const [todayY, todayM, todayD] = todayKey().split("-").map(Number);
+  const today = new Date(todayY, todayM - 1, todayD);
   const [month, setMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState(dateKey(today));
   const [dispatches, setDispatches] = useState(null);
@@ -71,7 +76,7 @@ export default function Calendar() {
     const map = new Map();
     if (!dispatches || !bookings) return map;
     for (const item of buildItems(dispatches, bookings)) {
-      const key = dateKey(new Date(item.start_time));
+      const key = bcDateKey(item.start_time);
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(item);
     }

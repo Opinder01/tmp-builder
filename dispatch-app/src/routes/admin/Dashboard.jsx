@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import { formatDateTime, formatTime } from "../../lib/tz.js";
 
 function statusLabel(dispatch) {
   // dispatches -> timesheets is 1:1 (timesheets.dispatch_id is unique), so
@@ -31,8 +32,8 @@ function ReviewPanel({ dispatch, busy, onReview }) {
           </div>
           <div className="review-card-details">
             <p>
-              Typed: {new Date(ts.typed_start_time).toLocaleTimeString()} –{" "}
-              {new Date(ts.typed_end_time).toLocaleTimeString()}
+              Typed: {formatTime(ts.typed_start_time)} –{" "}
+              {formatTime(ts.typed_end_time)}
               {ts.break_minutes > 0 && ` (${ts.break_minutes} min break)`}
             </p>
             <p>
@@ -173,7 +174,7 @@ export default function Dashboard() {
                     <td>{d.title || "-"}</td>
                     <td>{d.client_company_name || "-"}</td>
                     <td>{d.location}</td>
-                    <td>{new Date(d.start_time).toLocaleString()}</td>
+                    <td>{formatDateTime(d.start_time)}</td>
                     <td className={`status status-${status.tone}`}>{status.text}</td>
                     <td>
                       <Link to={`/dispatch/${d.id}/edit`}>Edit</Link>

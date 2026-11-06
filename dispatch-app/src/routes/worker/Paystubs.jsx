@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api.js";
+import { formatDate } from "../../lib/tz.js";
 
 export default function Paystubs() {
   const [paystubs, setPaystubs] = useState(null);
@@ -24,7 +25,7 @@ export default function Paystubs() {
           <p>
             <strong>{p.label}</strong>
           </p>
-          <p className="subtle">Uploaded {new Date(p.uploaded_at).toLocaleDateString()}</p>
+          <p className="subtle">Uploaded {formatDate(p.uploaded_at)}</p>
           {p.file_url ? (
             <a href={p.file_url} target="_blank" rel="noreferrer" className="button">
               View / Download

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api.js";
 import { splitShiftHours } from "../../lib/overtime.js";
+import { formatDate, todayKey } from "../../lib/tz.js";
 
 function estimateAmount(t) {
   const split = splitShiftHours(t.calculated_hours);
@@ -12,11 +13,10 @@ function estimateAmount(t) {
 }
 
 function startOfMonth() {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return `${todayKey().slice(0, 8)}01`;
 }
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return todayKey();
 }
 
 export default function CustomerInvoicing() {
@@ -167,7 +167,7 @@ export default function CustomerInvoicing() {
                     <td>{t.dispatch.job_number}</td>
                     <td>{t.worker?.full_name}</td>
                     <td>{t.dispatch.title || "-"}</td>
-                    <td>{new Date(t.dispatch.start_time).toLocaleDateString()}</td>
+                    <td>{formatDate(t.dispatch.start_time)}</td>
                     <td>{t.dispatch.location}</td>
                     <td>
                       {split.regular}

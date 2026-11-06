@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api.js";
+import { formatDate, formatTime } from "../../lib/tz.js";
 
 function statusTone(status) {
   if (status === "approved") return "ok";
@@ -32,9 +33,9 @@ export default function TimesheetHistory() {
             {t.dispatch?.job_number && ` — ${t.dispatch.location}`}
           </p>
           {t.dispatch?.client_company_name && <p className="subtle">Contractor: {t.dispatch.client_company_name}</p>}
-          <p className="subtle">{t.dispatch?.start_time && new Date(t.dispatch.start_time).toLocaleDateString()}</p>
+          <p className="subtle">{t.dispatch?.start_time && formatDate(t.dispatch.start_time)}</p>
           <p>
-            {new Date(t.typed_start_time).toLocaleTimeString()} – {new Date(t.typed_end_time).toLocaleTimeString()}
+            {formatTime(t.typed_start_time)} – {formatTime(t.typed_end_time)}
             {t.break_minutes > 0 && ` (${t.break_minutes} min break)`}
           </p>
           <p className={`status status-${statusTone(t.status)}`}>

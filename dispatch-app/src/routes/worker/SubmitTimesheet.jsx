@@ -3,13 +3,15 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { uploadFile } from "../../lib/upload.js";
 import { calculateHours } from "../../lib/time.js";
+import { addDays, dateKey, formatDate, fromInputValue } from "../../lib/tz.js";
 
-// Combines the dispatch's own date with a plain HH:MM time. If the end time
-// is earlier in the day than the start time, assumes the shift ran past
-// midnight and rolls the end date forward one day.
-function toLocalDateTime(baseDateStr, timeStr) {
+// Combines the dispatch's own date with a plain HH:MM time, read as BC time
+// (the typed times on a slip are always BC wall-clock times). If the end time
+// is earlier in the day than the start time, the shift is assumed to have run
+// past midnight and the end date rolls forward one day.
+function toBcDateTime(baseDateStr, timeStr) {
   if (!baseDateStr || !timeStr) return "";
-  return `${baseDateStr}T${timeStr}`;
+  return fromInputValue(`${baseDateStr}T${timeStr}`);
 }
 
 export default function SubmitTimesheet() {
@@ -33,15 +35,13 @@ export default function SubmitTimesheet() {
       .catch((err) => setError(err.message));
   }, [dispatchId]);
 
-  const shiftDate = dispatch ? new Date(dispatch.start_time).toISOString().slice(0, 10) : "";
+  const shiftDate = dispatch ? dateKey(dispatch.start_time) : "";
   const overnight = startTimeOfDay && endTimeOfDay && endTimeOfDay < startTimeOfDay;
-  const endDate = overnight
-    ? new Date(new Date(shiftDate).getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    : shiftDate;
+  const endDate = overnight ? addDays(shiftDate, 1) : shiftDate;
 
   const previewHours = calculateHours(
-    toLocalDateTime(shiftDate, startTimeOfDay),
-    toLocalDateTime(endDate, endTimeOfDay),
+    toBcDateTime(shiftDate, startTimeOfDay),
+    toBcDateTime(endDate, endTimeOfDay),
     breakMinutes
   );
 
@@ -58,8 +58,8 @@ export default function SubmitTimesheet() {
       await api.post("/api/timesheets?action=submit", {
         dispatch_id: dispatchId,
         slip_photo_path: path,
-        typed_start_time: new Date(toLocalDateTime(shiftDate, startTimeOfDay)).toISOString(),
-        typed_end_time: new Date(toLocalDateTime(endDate, endTimeOfDay)).toISOString(),
+        typed_start_time: toBcDateTime(shiftDate, startTimeOfDay),
+        typed_end_time: toBcDateTime(endDate, endTimeOfDay),
         break_minutes: Number(breakMinutes) || 0,
       });
       navigate("/");
@@ -77,7 +77,7 @@ export default function SubmitTimesheet() {
         <>
           <p className="subtle">
             {dispatch.job_number && `Job ${dispatch.job_number} — `}
-            {dispatch.location} — {new Date(dispatch.start_time).toLocaleDateString()}
+            {dispatch.location} — {formatDate(dispatch.start_time)}
           </p>
           {dispatch.title && <p className="subtle">Title: {dispatch.title}</p>}
           {dispatch.client_company_name && (

@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import { fromInputValue, toInputValue } from "../../lib/tz.js";
 
 const TITLE_OPTIONS = ["TCP", "LCT", "TCS"];
 
-function toDateTimeLocal(isoString) {
-  if (!isoString) return "";
-  const d = new Date(isoString);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+const toDateTimeLocal = toInputValue;
 
 export default function EditDispatch() {
   const { dispatchId } = useParams();
@@ -66,7 +62,7 @@ export default function EditDispatch() {
       await api.post("/api/dispatches?action=update", {
         id: dispatchId,
         ...form,
-        start_time: new Date(form.start_time).toISOString(),
+        start_time: fromInputValue(form.start_time),
         rate: form.rate ? Number(form.rate) : null,
         ot_rate: form.ot_rate ? Number(form.ot_rate) : null,
         dt_rate: form.dt_rate ? Number(form.dt_rate) : null,
@@ -175,7 +171,7 @@ export default function EditDispatch() {
         </label>
 
         <label>
-          Start time
+          Start time (BC time)
           <input
             required
             type="datetime-local"

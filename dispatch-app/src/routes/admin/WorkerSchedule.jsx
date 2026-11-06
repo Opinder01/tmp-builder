@@ -3,10 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { generateWorkerSummaryPdf } from "../../lib/pdf/workerSummary.js";
 import PdfPreview, { useShiftSequence } from "../../components/PdfPreview.jsx";
-
-function toDateOnly(isoString) {
-  return isoString.slice(0, 10);
-}
+import { dateKey as toDateOnly, formatDate } from "../../lib/tz.js";
 
 export default function WorkerSchedule() {
   const { workerId } = useParams();
@@ -234,7 +231,7 @@ export default function WorkerSchedule() {
                 <tr key={d.id}>
                   <td>{d.job_number}</td>
                   <td>{d.title || "-"}</td>
-                  <td>{new Date(d.start_time).toLocaleDateString()}</td>
+                  <td>{formatDate(d.start_time)}</td>
                   <td>{d.location}</td>
                   <td>{ts?.status === "approved" ? ts.calculated_hours : "-"}</td>
                   <td>{ts ? ts.status : "no timesheet"}</td>

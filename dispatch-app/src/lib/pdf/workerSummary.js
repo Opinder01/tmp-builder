@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { formatDate, todayKey } from "../tz.js";
 
 // The finished PDF must stay under 20 MB (easy to email / upload). Phone
 // photos are 2-5 MB each, so they are downscaled and recompressed; the budget
@@ -100,7 +101,7 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);
   pdf.setTextColor(100, 116, 139);
-  pdf.text(subtitle || `Generated ${new Date().toLocaleDateString()}`, marginX, y);
+  pdf.text(subtitle || `Generated ${formatDate(new Date())}`, marginX, y);
   y += 10;
 
   const columns = showWorkerColumn
@@ -159,7 +160,7 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
           d.job_number,
           d.worker?.full_name || "-",
           d.title || "-",
-          new Date(d.start_time).toLocaleDateString(),
+          formatDate(d.start_time),
           d.location,
           hours != null ? String(hours) : "-",
           ts ? ts.status : "no timesheet",
@@ -167,7 +168,7 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
       : [
           d.job_number,
           d.title || "-",
-          new Date(d.start_time).toLocaleDateString(),
+          formatDate(d.start_time),
           d.location,
           hours != null ? String(hours) : "-",
           ts ? ts.status : "no timesheet",
@@ -202,8 +203,8 @@ async function generateShiftsPdf({ title, subtitle, dispatches, rotations = {}, 
     pdf.setFontSize(11);
     pdf.setTextColor(15, 23, 42);
     const label = showWorkerColumn
-      ? `Job ${d.job_number || "-"} — ${d.worker?.full_name || "-"} — ${d.location} — ${new Date(d.start_time).toLocaleDateString()}`
-      : `Job ${d.job_number || "-"} — ${d.location} — ${new Date(d.start_time).toLocaleDateString()}`;
+      ? `Job ${d.job_number || "-"} — ${d.worker?.full_name || "-"} — ${d.location} — ${formatDate(d.start_time)}`
+      : `Job ${d.job_number || "-"} — ${d.location} — ${formatDate(d.start_time)}`;
     pdf.text(label, marginX, py);
     py += 8;
 
@@ -242,7 +243,7 @@ export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {
     rotations,
     showWorkerColumn: false,
   });
-  const dateStamp = new Date().toISOString().slice(0, 10);
+  const dateStamp = todayKey();
   const safeName = worker.full_name.replace(/[^a-zA-Z0-9]+/g, "-");
   pdf.save(`${safeName}-${dateStamp}.pdf`);
 }
@@ -250,12 +251,12 @@ export async function generateWorkerSummaryPdf(worker, dispatches, rotations = {
 export async function generateContractorSummaryPdf(company, dispatches, rotations = {}) {
   const pdf = await generateShiftsPdf({
     title: company.name,
-    subtitle: `Contractor — Generated ${new Date().toLocaleDateString()}`,
+    subtitle: `Contractor — Generated ${formatDate(new Date())}`,
     dispatches,
     rotations,
     showWorkerColumn: true,
   });
-  const dateStamp = new Date().toISOString().slice(0, 10);
+  const dateStamp = todayKey();
   const safeName = company.name.replace(/[^a-zA-Z0-9]+/g, "-");
   pdf.save(`${safeName}-${dateStamp}.pdf`);
 }

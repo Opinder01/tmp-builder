@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { formatDate } from "../lib/tz.js";
 
 // Earliest shift first by default, so a month's PDF reads Oct 1 -> Oct 31.
 // Dragging or the arrow buttons override that with a custom sequence; the
@@ -120,7 +121,7 @@ export default function PdfPreview({
                 />
               </div>
               <p className="subtle" style={{ margin: "0.4rem 0" }}>
-                {new Date(d.start_time).toLocaleDateString()}
+                {formatDate(d.start_time)}
                 <br />
                 {d.job_number ? `Job ${d.job_number}` : d.location}
                 {showFlagger && (

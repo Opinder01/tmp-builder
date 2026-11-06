@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./supabase.js";
 import { qboFetch, qboQuery } from "./qbo.js";
 import { splitShiftHours, hoursToHM } from "./overtime.js";
+import { dateKey } from "./tz.js";
 
 async function alreadySynced(timesheetId, target) {
   const supabase = getSupabaseAdmin();
@@ -115,7 +116,7 @@ export async function syncApprovedTimesheet(timesheet, dispatch, worker) {
     for (const entry of entries) {
       const { hours, minutes } = hoursToHM(entry.hours);
       const body = {
-        TxnDate: dispatch.start_time.slice(0, 10),
+        TxnDate: dateKey(dispatch.start_time),
         NameOf: "Employee",
         EmployeeRef: { value: employeeId },
         Hours: hours,
@@ -174,7 +175,7 @@ export async function createContractorBill(worker, timesheets) {
     Line: timesheets.map((t) => ({
       Amount: t.calculated_hours * worker.contractor_bill_rate,
       DetailType: "AccountBasedExpenseLineDetail",
-      Description: `Job ${t.dispatch.job_number} — ${t.dispatch.location}, ${new Date(t.dispatch.start_time).toLocaleDateString()}, ${t.calculated_hours}h`,
+      Description: `Job ${t.dispatch.job_number} — ${t.dispatch.location}, ${dateKey(t.dispatch.start_time)}, ${t.calculated_hours}h`,
       AccountBasedExpenseLineDetail: { AccountRef: { value: accountId } },
     })),
   };
@@ -230,7 +231,7 @@ export async function createCustomerInvoice(customerId, timesheets) {
       lines.push({
         Amount: p.hours * p.rate,
         DetailType: "SalesItemLineDetail",
-        Description: `Job ${t.dispatch.job_number} — ${t.dispatch.location}, ${new Date(t.dispatch.start_time).toLocaleDateString()} (${t.worker_full_name})${p.label}`,
+        Description: `Job ${t.dispatch.job_number} — ${t.dispatch.location}, ${dateKey(t.dispatch.start_time)} (${t.worker_full_name})${p.label}`,
         SalesItemLineDetail: { ItemRef: { value: p.itemId }, Qty: p.hours, UnitPrice: p.rate },
       });
     }

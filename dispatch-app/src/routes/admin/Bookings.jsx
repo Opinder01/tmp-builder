@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import NotificationBanner from "../../components/NotificationBanner.jsx";
+import { formatDateTime, fromInputValue, startOfDay, todayKey, toInputValue } from "../../lib/tz.js";
 
 const SOURCES = [
   { value: "website", label: "Website" },
@@ -20,11 +21,7 @@ const EMPTY_FORM = {
   notes: "",
 };
 
-function toDateTimeLocal(isoString) {
-  const d = new Date(isoString);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+const toDateTimeLocal = toInputValue;
 
 function sourceLabel(value) {
   return SOURCES.find((s) => s.value === value)?.label || value;
@@ -85,7 +82,7 @@ export default function Bookings() {
       await api.post(`/api/bookings?action=${editingId ? "update" : "create"}`, {
         id: editingId,
         ...form,
-        start_time: new Date(form.start_time).toISOString(),
+        start_time: fromInputValue(form.start_time),
         flaggers_needed: form.flaggers_needed ? Number(form.flaggers_needed) : null,
         client_company_id: form.client_company_id || null,
         client_company_name: contractor?.name || null,
@@ -129,8 +126,7 @@ export default function Bookings() {
 
   const upcoming = (bookings || []).filter((b) => b.status === "booked");
   const dispatched = (bookings || []).filter((b) => b.status === "dispatched").reverse();
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  const startOfToday = new Date(startOfDay(todayKey()));
 
   return (
     <div>
@@ -159,7 +155,7 @@ export default function Bookings() {
             </select>
           </label>
           <label>
-            Date & start time
+            Date & start time (BC time)
             <input required type="datetime-local" value={form.start_time} onChange={(e) => update("start_time", e.target.value)} />
           </label>
           <label>
@@ -214,7 +210,7 @@ export default function Bookings() {
               return (
                 <tr key={b.id}>
                   <td className={overdue ? "status status-bad" : ""}>
-                    {new Date(b.start_time).toLocaleString()}
+                    {formatDateTime(b.start_time)}
                     {overdue && " (past)"}
                   </td>
                   <td>{b.client_company_name || "-"}</td>
@@ -252,7 +248,7 @@ export default function Bookings() {
             <tbody>
               {dispatched.map((b) => (
                 <tr key={b.id}>
-                  <td>{new Date(b.start_time).toLocaleString()}</td>
+                  <td>{formatDateTime(b.start_time)}</td>
                   <td>{b.client_company_name || "-"}</td>
                   <td>{b.location}</td>
                   <td>{sourceLabel(b.source)}</td>

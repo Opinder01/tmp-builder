@@ -4,6 +4,7 @@ import { setCors, json } from "./_lib/cors.js";
 import { syncApprovedTimesheet } from "./_lib/qboSync.js";
 import { splitShiftHours } from "./_lib/overtime.js";
 import { sendPushToWorker } from "./_lib/push.js";
+import { startOfDay } from "./_lib/tz.js";
 
 export default async function handler(req, res) {
   setCors(req, res);
@@ -206,17 +207,21 @@ export default async function handler(req, res) {
 
     const { from, to } = req.query || {};
     if (!from || !to) return json(res, 400, { error: "from and to (dates) are required" });
+    const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    if (!isDay(from) || !isDay(to)) return json(res, 400, { error: "from and to must be YYYY-MM-DD dates" });
 
     const supabase = getSupabaseAdmin();
     // Grouped by the shift's own typed start time (when the work actually
     // happened), not when it was submitted or reviewed -- that's what
-    // determines which pay period a shift belongs to.
+    // determines which pay period a shift belongs to. from/to are BC calendar
+    // days (to exclusive), not UTC days, so a late-evening shift on the last
+    // day of the period still lands in that period.
     const { data, error } = await supabase
       .from("timesheets")
       .select("calculated_hours, typed_start_time, worker:profiles!timesheets_worker_id_fkey(id, full_name, worker_type)")
       .eq("status", "approved")
-      .gte("typed_start_time", from)
-      .lt("typed_start_time", to);
+      .gte("typed_start_time", startOfDay(from))
+      .lt("typed_start_time", startOfDay(to));
     if (error) return json(res, 500, { error: error.message });
 
     const byWorker = new Map();

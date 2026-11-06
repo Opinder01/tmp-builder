@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api.js";
 import { uploadFile } from "../../lib/upload.js";
+import { formatDate } from "../../lib/tz.js";
 
 export default function Paystubs() {
   const [workers, setWorkers] = useState([]);
@@ -135,7 +136,7 @@ export default function Paystubs() {
                 {paystubs.map((p) => (
                   <tr key={p.id}>
                     <td>{p.label}</td>
-                    <td>{new Date(p.uploaded_at).toLocaleDateString()}</td>
+                    <td>{formatDate(p.uploaded_at)}</td>
                     <td>
                       {p.file_url && (
                         <a href={p.file_url} target="_blank" rel="noreferrer">

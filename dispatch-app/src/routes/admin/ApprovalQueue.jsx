@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api.js";
 import { calculateHours } from "../../lib/time.js";
+import { formatDateTime, formatTime, fromInputValue, toInputValue } from "../../lib/tz.js";
 
-function toDateTimeLocal(isoString) {
-  if (!isoString) return "";
-  const d = new Date(isoString);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+const toDateTimeLocal = toInputValue;
 
 function ReviewCard({ t, busy, onReview }) {
   const [editing, setEditing] = useState(false);
@@ -21,12 +17,14 @@ function ReviewCard({ t, busy, onReview }) {
     end !== toDateTimeLocal(t.typed_end_time) ||
     Number(breakMinutes) !== (t.break_minutes || 0)
   );
-  const previewHours = editing ? calculateHours(start, end, breakMinutes) : t.calculated_hours;
+  const previewHours = editing
+    ? calculateHours(start && fromInputValue(start), end && fromInputValue(end), breakMinutes)
+    : t.calculated_hours;
 
   function handleApprove() {
     onReview(t.id, "approved", {
-      typed_start_time: editing ? new Date(start).toISOString() : undefined,
-      typed_end_time: editing ? new Date(end).toISOString() : undefined,
+      typed_start_time: editing ? fromInputValue(start) : undefined,
+      typed_end_time: editing ? fromInputValue(end) : undefined,
       break_minutes: editing ? Number(breakMinutes) : undefined,
       notify,
     });
@@ -50,14 +48,14 @@ function ReviewCard({ t, busy, onReview }) {
           {t.dispatch?.location}
         </p>
         <p className="subtle">
-          Dispatched: {t.dispatch?.start_time && new Date(t.dispatch.start_time).toLocaleString()}
+          Dispatched: {t.dispatch?.start_time && formatDateTime(t.dispatch.start_time)}
         </p>
 
         {!editing && (
           <>
             <p>
-              Typed: {new Date(t.typed_start_time).toLocaleTimeString()} –{" "}
-              {new Date(t.typed_end_time).toLocaleTimeString()}
+              Typed: {formatTime(t.typed_start_time)} –{" "}
+              {formatTime(t.typed_end_time)}
               {t.break_minutes > 0 && ` (${t.break_minutes} min break)`}
             </p>
             <p>

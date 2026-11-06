@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import { formatDateTime } from "../../lib/tz.js";
 
 export default function QboSettings() {
   const [params] = useSearchParams();
@@ -62,7 +63,7 @@ export default function QboSettings() {
           <p>
             Connected to realm <strong>{status.realmId}</strong> ({status.environment})
           </p>
-          <p className="subtle">Connected {new Date(status.connectedAt).toLocaleString()}</p>
+          <p className="subtle">Connected {formatDateTime(status.connectedAt)}</p>
           {status.refreshTokenExpired && (
             <p className="error">
               Connection has expired — reconnect below.
@@ -89,7 +90,7 @@ export default function QboSettings() {
           <tbody>
             {syncLog.map((s) => (
               <tr key={s.id}>
-                <td>{new Date(s.created_at).toLocaleString()}</td>
+                <td>{formatDateTime(s.created_at)}</td>
                 <td>{s.job_number}</td>
                 <td>{s.target}</td>
                 <td className={`status status-${s.status === "success" ? "ok" : "bad"}`}>{s.status}</td>

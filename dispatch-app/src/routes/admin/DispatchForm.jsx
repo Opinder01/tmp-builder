@@ -2,14 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { uploadFile } from "../../lib/upload.js";
+import { fromInputValue, toInputValue } from "../../lib/tz.js";
 
 const TITLE_OPTIONS = ["TCP", "LCT", "TCS"];
 
-function toDateTimeLocal(isoString) {
-  const d = new Date(isoString);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+const toDateTimeLocal = toInputValue;
 
 export default function DispatchForm() {
   const navigate = useNavigate();
@@ -113,7 +110,7 @@ export default function DispatchForm() {
       }
       await api.post("/api/dispatches?action=create", {
         ...form,
-        start_time: new Date(form.start_time).toISOString(),
+        start_time: fromInputValue(form.start_time),
         rate: form.rate ? Number(form.rate) : null,
         ot_rate: form.ot_rate ? Number(form.ot_rate) : null,
         dt_rate: form.dt_rate ? Number(form.dt_rate) : null,
@@ -229,7 +226,7 @@ export default function DispatchForm() {
         </label>
 
         <label>
-          Start time
+          Start time (BC time)
           <input
             required
             type="datetime-local"

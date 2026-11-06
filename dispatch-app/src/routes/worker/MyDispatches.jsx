@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import NotificationBanner from "../../components/NotificationBanner.jsx";
+import { formatDateTime } from "../../lib/tz.js";
 
 function statusFor(dispatch) {
   // dispatches -> timesheets is 1:1 (timesheets.dispatch_id is unique), so
@@ -25,7 +26,7 @@ function DispatchCard({ d, status }) {
       {d.colleagues?.length > 0 && (
         <p className="subtle">With: {d.colleagues.map((c) => c.full_name).join(", ")}</p>
       )}
-      <p className="subtle">{new Date(d.start_time).toLocaleString()}</p>
+      <p className="subtle">{formatDateTime(d.start_time)}</p>
       {d.notes && <p>{d.notes}</p>}
       <p className={`status status-${status.tone}`}>{status.text}</p>
       {status.actionable && (
