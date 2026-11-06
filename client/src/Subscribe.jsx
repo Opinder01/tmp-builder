@@ -31,8 +31,8 @@ function contactFormDefaultsFromUser(u) {
 
 // ---------- plans ----------
 const PLANS = [
-  { id: "monthly", title: "Monthly", price: 69.99,  period: "month" },
-  { id: "yearly",  title: "Yearly",  price: 699.99, period: "year", badge: "Save 20.2%" },
+  { id: "monthly", title: "Monthly", price: 49.99,  period: "month" },
+  { id: "yearly",  title: "Yearly",  price: 499.99, period: "year", badge: "Save 16.7%" },
 ];
 
 // ---------- component ----------

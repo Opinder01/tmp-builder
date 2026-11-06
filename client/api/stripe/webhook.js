@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
+import { planFromPrice } from "../_lib/plan.js";
 
 // ---------------------------------------------------------------------------
 // Supabase admin client
@@ -58,7 +59,7 @@ async function saveSubscription(email, record) {
 // ---------------------------------------------------------------------------
 // Receipt email via Resend
 // ---------------------------------------------------------------------------
-async function sendReceiptEmail({ toEmail, customerName, plan, amount, currency, invoiceUrl, date, isRenewal }) {
+async function sendReceiptEmail({ toEmail, customerName, plan, price, amount, currency, invoiceUrl, date, isRenewal }) {
   const resendKey   = process.env.RESEND_API_KEY;
   const fromEmail   = process.env.CONTACT_FROM_EMAIL;
   if (!resendKey || !fromEmail) {
@@ -69,7 +70,11 @@ async function sendReceiptEmail({ toEmail, customerName, plan, amount, currency,
   const resend = new Resend(resendKey);
 
   const planLabel    = plan === "yearly" ? "Annual Plan" : "Monthly Plan";
-  const planPrice    = plan === "yearly" ? "CAD $699.99 / year" : "CAD $69.99 / month";
+  // Show the price the subscriber is actually on (older subscribers keep the
+  // price they signed up at); fall back to the current list price.
+  const planPrice    = price?.unit_amount != null
+    ? `${(price.currency ?? "cad").toUpperCase()} $${(price.unit_amount / 100).toFixed(2)} / ${plan === "yearly" ? "year" : "month"}`
+    : plan === "yearly" ? "CAD $499.99 / year" : "CAD $49.99 / month";
   const subject      = isRenewal
     ? `Your TMP Builder payment receipt – ${date}`
     : `Welcome to TMP Builder — your subscription is active`;
@@ -265,9 +270,9 @@ export default async function handler(req, res) {
       const customerName   = session.customer_details?.name ?? "";
       const customerId     = typeof session.customer === "string" ? session.customer : session.customer?.id ?? "";
       const subscriptionId = typeof sub === "object" ? sub?.id : sub ?? "";
-      const priceId        = sub?.items?.data?.[0]?.price?.id ?? null;
-      const plan           = priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
-      const trialEnd       = sub?.trial_end
+      const price         = sub?.items?.data?.[0]?.price ?? null;
+      const plan           = planFromPrice(price);
+      const trialEnd      = sub?.trial_end
         ? new Date(sub.trial_end * 1000).toISOString()
         : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -291,6 +296,7 @@ export default async function handler(req, res) {
           toEmail:      email,
           customerName: customerName,
           plan,
+          price,
           amount:       null,   // no charge yet — trial
           currency:     "cad",
           invoiceUrl:   null,
@@ -307,8 +313,7 @@ export default async function handler(req, res) {
       try { const c = await stripe.customers.retrieve(sub.customer); email = c.email ?? ""; } catch {}
 
       const status  = sub.status;
-      const priceId = sub.items?.data?.[0]?.price?.id ?? null;
-      const plan    = priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
+      const plan    = planFromPrice(sub.items?.data?.[0]?.price);
       console.log(`[webhook] subscription.updated — ${sub.id} status=${status} plan=${plan} email=${email}`);
 
       await saveSubscription(email, {
@@ -356,15 +361,15 @@ export default async function handler(req, res) {
         } catch {}
 
         // Determine plan from subscription price
-        let plan = "monthly";
+        let price = null;
         try {
           const subId = typeof inv.subscription === "string" ? inv.subscription : inv.subscription?.id;
           if (subId) {
             const sub = await stripe.subscriptions.retrieve(subId);
-            const priceId = sub.items?.data?.[0]?.price?.id ?? null;
-            if (priceId === process.env.STRIPE_PRICE_YEARLY) plan = "yearly";
+            price = sub.items?.data?.[0]?.price ?? null;
           }
         } catch {}
+        const plan = planFromPrice(price);
 
         if (email) {
           await saveSubscription(email, { subscriptionStatus: "active" });
@@ -377,6 +382,7 @@ export default async function handler(req, res) {
             toEmail:      email,
             customerName: customerName,
             plan,
+            price,
             amount:       inv.amount_paid,
             currency:     inv.currency,
             invoiceUrl:   inv.hosted_invoice_url ?? null,

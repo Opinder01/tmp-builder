@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { planFromPrice } from "./_lib/plan.js";
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -111,8 +112,7 @@ export default async function handler(req, res) {
 
     if (!activeSub) return json(res, 200, { subscribed: false });
 
-    const priceId = activeSub.items?.data?.[0]?.price?.id;
-    const plan = priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
+    const plan = planFromPrice(activeSub.items?.data?.[0]?.price);
 
     // Backfill Supabase
     await supabase.from("subscriptions").upsert(

@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { planFromPrice } from "../_lib/plan.js";
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -69,12 +70,11 @@ export default async function handler(req, res) {
       : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // Determine which plan the customer chose
-    const priceId =
+    const price =
       typeof sub === "object"
-        ? sub?.items?.data?.[0]?.price?.id ?? null
+        ? sub?.items?.data?.[0]?.price ?? null
         : null;
-    const plan =
-      priceId === process.env.STRIPE_PRICE_YEARLY ? "yearly" : "monthly";
+    const plan = planFromPrice(price);
 
     // Subscription status: "trialing", "active", etc.
     const stripeStatus =

@@ -31,7 +31,7 @@ export default function Terms() {
         <h2>3. Subscription & Billing</h2>
         <ul>
           <li><strong>Free Trial:</strong> A 7-day free trial is available with full access to all features. A valid payment method is required to start the trial.</li>
-          <li><strong>Billing:</strong> After the trial period, your selected plan (Monthly at $69.99 CAD/mo or Annual at $699.99 CAD/yr) will be charged automatically.</li>
+          <li><strong>Billing:</strong> After the trial period, your selected plan (Monthly at $49.99 CAD/mo or Annual at $499.99 CAD/yr) will be charged automatically.</li>
           <li><strong>Money-Back Guarantee:</strong> If you are not satisfied within 14 days of your first payment, contact us for a full refund.</li>
           <li><strong>Cancellation:</strong> You may cancel your subscription at any time from your account dashboard. Your access continues until the end of the current billing period.</li>
           <li><strong>Price Changes:</strong> We will provide at least 30 days' notice before changing subscription prices.</li>

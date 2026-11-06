@@ -357,7 +357,7 @@ export default function Landing() {
             <div className="lp-price-grid">
               <div className="lp-price-card">
                 <div className="lp-price-name">Monthly</div>
-                <div className="lp-price-amount">$69.99<span>/mo CAD</span></div>
+                <div className="lp-price-amount">$49.99<span>/mo CAD</span></div>
                 <ul className="lp-price-list">
                   <li>✓ 7-day free trial</li>
                   <li>✓ Full access during trial</li>
@@ -374,7 +374,7 @@ export default function Landing() {
               <div className="lp-price-card lp-price-card-featured">
                 <div className="lp-price-badge">Best Value</div>
                 <div className="lp-price-name">Annual</div>
-                <div className="lp-price-amount">$699.99<span>/yr CAD</span></div>
+                <div className="lp-price-amount">$499.99<span>/yr CAD</span></div>
                 <ul className="lp-price-list">
                   <li>✓ 7-day free trial</li>
                   <li>✓ Full access during trial</li>
@@ -382,7 +382,7 @@ export default function Landing() {
                   <li>✓ Unlimited TMPs</li>
                   <li>✓ PDF export</li>
                   <li>✓ All sign catalog updates</li>
-                  <li>✓ Save ~$140 vs monthly</li>
+                  <li>✓ Save ~$100 vs monthly</li>
                 </ul>
                 <button className="lp-btn-cta lp-btn-block" onClick={() => nav("/signup")}>
                   Start Free Trial
