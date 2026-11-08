@@ -36,16 +36,56 @@ export default async function handler(req, res) {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
 
-    const { worker_id, phone, contracted_hours_per_period, contractor_bill_rate, job_title, wage, active } = req.body || {};
+    const {
+      worker_id, full_name, email, worker_type,
+      phone, contracted_hours_per_period, contractor_bill_rate, job_title, wage, active,
+    } = req.body || {};
     if (!worker_id) return json(res, 400, { error: "worker_id is required" });
     if (active !== undefined && typeof active !== "boolean") {
       return json(res, 400, { error: "active must be true or false" });
     }
+    if (full_name !== undefined && !String(full_name).trim()) {
+      return json(res, 400, { error: "Name can't be empty" });
+    }
+    if (worker_type !== undefined && !["employee", "contractor"].includes(worker_type)) {
+      return json(res, 400, { error: "worker_type must be 'employee' or 'contractor'" });
+    }
+    const newEmail = email !== undefined ? String(email).trim().toLowerCase() : undefined;
+    if (newEmail !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      return json(res, 400, { error: "Enter a valid email address" });
+    }
 
     const supabase = getSupabaseAdmin();
+
+    // The email is also the flagger's login, so it has to change in the auth
+    // system as well as on their profile (otherwise the two would disagree and
+    // they'd be locked out of the address shown). Auth first: it rejects an
+    // address that's already taken before anything else is touched.
+    let previousEmail = null;
+    if (newEmail !== undefined) {
+      const { data: current } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("id", worker_id)
+        .eq("role", "worker")
+        .maybeSingle();
+      if (!current) return json(res, 404, { error: "Worker not found" });
+      if (current.email.toLowerCase() !== newEmail) {
+        previousEmail = current.email;
+        const { error: authError } = await supabase.auth.admin.updateUserById(worker_id, {
+          email: newEmail,
+          email_confirm: true,
+        });
+        if (authError) return json(res, 400, { error: authError.message });
+      }
+    }
+
     const { data: profile, error } = await supabase
       .from("profiles")
       .update({
+        ...(full_name !== undefined ? { full_name: String(full_name).trim() } : {}),
+        ...(previousEmail !== null ? { email: newEmail } : {}),
+        ...(worker_type !== undefined ? { worker_type } : {}),
         ...(phone !== undefined ? { phone: phone || null } : {}),
         ...(contracted_hours_per_period !== undefined ? { contracted_hours_per_period: contracted_hours_per_period || null } : {}),
         ...(contractor_bill_rate !== undefined ? { contractor_bill_rate: contractor_bill_rate || null } : {}),
@@ -59,7 +99,13 @@ export default async function handler(req, res) {
       .eq("role", "worker")
       .select()
       .single();
-    if (error) return json(res, 500, { error: error.message });
+    if (error) {
+      // Keep login and profile in step: put the old login email back.
+      if (previousEmail !== null) {
+        await supabase.auth.admin.updateUserById(worker_id, { email: previousEmail, email_confirm: true });
+      }
+      return json(res, 500, { error: error.message });
+    }
     if (!profile) return json(res, 404, { error: "Worker not found" });
 
     return json(res, 200, { worker: profile });

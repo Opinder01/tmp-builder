@@ -102,6 +102,8 @@ export default function Workers() {
                     <td>{inactive ? "Inactive" : "Active"}</td>
                     <td>
                       <Link to={`/workers/${w.id}`}>View schedule</Link>
+                      {" | "}
+                      <Link to={`/workers/${w.id}/edit`}>Edit</Link>
                     </td>
                     <td>
                       <button type="button" disabled={busyId === w.id} onClick={() => resetPassword(w)}>

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { generateWorkerSummaryPdf } from "../../lib/pdf/workerSummary.js";
 import PdfPreview, { useShiftSequence } from "../../components/PdfPreview.jsx";
 import { dateKey as toDateOnly, formatDate } from "../../lib/tz.js";
+import BackButton from "../../components/BackButton.jsx";
 
 export default function WorkerSchedule() {
   const { workerId } = useParams();
@@ -101,13 +102,21 @@ export default function WorkerSchedule() {
 
   return (
     <div>
+      <BackButton fallback="/workers" />
       <div className="page-header">
         <h1>{worker ? worker.full_name : "Worker Schedule"}</h1>
-        {worker && dispatches && (
-          <button onClick={() => setShowPreview((s) => !s)}>
-            {showPreview ? "Hide PDF preview" : "Preview PDF"}
-          </button>
-        )}
+        <div>
+          {worker && (
+            <Link to={`/workers/${workerId}/edit`} className="button" style={{ marginRight: "0.5rem" }}>
+              Edit Flagger
+            </Link>
+          )}
+          {worker && dispatches && (
+            <button onClick={() => setShowPreview((s) => !s)}>
+              {showPreview ? "Hide PDF preview" : "Preview PDF"}
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <p className="error">{error}</p>}

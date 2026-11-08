@@ -14,6 +14,7 @@ import ApprovalQueue from "./routes/admin/ApprovalQueue.jsx";
 import AddWorker from "./routes/admin/AddWorker.jsx";
 import Workers from "./routes/admin/Workers.jsx";
 import WorkerSchedule from "./routes/admin/WorkerSchedule.jsx";
+import EditWorker from "./routes/admin/EditWorker.jsx";
 import QboSettings from "./routes/admin/QboSettings.jsx";
 import ClientCompanies from "./routes/admin/ClientCompanies.jsx";
 import ContractorSchedule from "./routes/admin/ContractorSchedule.jsx";
@@ -52,6 +53,7 @@ function Gate() {
           <Route path="/workers" element={<Workers />} />
           <Route path="/workers/new" element={<AddWorker />} />
           <Route path="/workers/:workerId" element={<WorkerSchedule />} />
+          <Route path="/workers/:workerId/edit" element={<EditWorker />} />
           <Route path="/quickbooks" element={<QboSettings />} />
           <Route path="/contractors" element={<ClientCompanies />} />
           <Route path="/contractors/:companyId" element={<ContractorSchedule />} />
