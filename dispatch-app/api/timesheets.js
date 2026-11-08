@@ -101,6 +101,45 @@ export default async function handler(req, res) {
     return json(res, 200, { timesheets: withPhotoUrls });
   }
 
+  // One timesheet in full (any status), with a short-lived link to the slip
+  // photo -- used by the dashboard's "View" on an approved timesheet.
+  if (action === "detail" && req.method === "GET") {
+    const admin = await requireRole(req, res, "admin");
+    if (!admin) return;
+
+    const timesheet_id = req.query?.timesheet_id;
+    if (!timesheet_id) return json(res, 400, { error: "timesheet_id is required" });
+
+    const supabase = getSupabaseAdmin();
+    const { data: timesheet, error } = await supabase
+      .from("timesheets")
+      .select("*")
+      .eq("id", timesheet_id)
+      .maybeSingle();
+    if (error) return json(res, 500, { error: error.message });
+    if (!timesheet) return json(res, 404, { error: "Timesheet not found" });
+
+    let slip_photo_url = null;
+    if (timesheet.slip_photo_path) {
+      const { data: signed } = await supabase.storage
+        .from("timesheet-photos")
+        .createSignedUrl(timesheet.slip_photo_path, 60 * 15);
+      slip_photo_url = signed?.signedUrl || null;
+    }
+
+    let reviewed_by_name = null;
+    if (timesheet.reviewed_by) {
+      const { data: reviewer } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", timesheet.reviewed_by)
+        .maybeSingle();
+      reviewed_by_name = reviewer?.full_name || null;
+    }
+
+    return json(res, 200, { timesheet: { ...timesheet, slip_photo_url, reviewed_by_name } });
+  }
+
   if (action === "review" && req.method === "POST") {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;

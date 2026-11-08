@@ -61,6 +61,65 @@ function ReviewPanel({ dispatch, busy, onReview }) {
   );
 }
 
+// Read-only view of an approved timesheet: fetches the full record (and a
+// fresh link to the slip photo) when opened.
+function ApprovedPanel({ dispatch }) {
+  const [ts, setTs] = useState(null);
+  const [error, setError] = useState("");
+  const timesheetId = dispatch.timesheets.id;
+
+  useEffect(() => {
+    api
+      .get(`/api/timesheets?action=detail&timesheet_id=${timesheetId}`)
+      .then((data) => setTs(data.timesheet))
+      .catch((err) => setError(err.message));
+  }, [timesheetId]);
+
+  return (
+    <tr className="review-panel-row">
+      <td colSpan={8}>
+        {error && <p className="error">{error}</p>}
+        {!ts && !error && <p>Loading...</p>}
+        {ts && (
+          <div className="review-card">
+            <div className="review-card-photo">
+              {ts.slip_photo_url ? (
+                <a href={ts.slip_photo_url} target="_blank" rel="noreferrer">
+                  <img src={ts.slip_photo_url} alt="Timesheet slip" />
+                </a>
+              ) : (
+                <p className="subtle">Photo unavailable</p>
+              )}
+            </div>
+            <div className="review-card-details">
+              <p>
+                <strong>{dispatch.worker?.full_name}</strong>
+                {dispatch.job_number ? ` — Job ${dispatch.job_number}` : ""}
+              </p>
+              <p>
+                Worked: {formatDateTime(ts.typed_start_time)} – {formatTime(ts.typed_end_time)}
+                {ts.break_minutes > 0 && ` (${ts.break_minutes} min break)`}
+              </p>
+              <p>
+                <strong>{ts.calculated_hours} hours</strong>
+              </p>
+              <p className="subtle">
+                {ts.submitted_at && <>Submitted {formatDateTime(ts.submitted_at)}. </>}
+                {ts.reviewed_at && (
+                  <>
+                    Approved {formatDateTime(ts.reviewed_at)}
+                    {ts.reviewed_by_name ? ` by ${ts.reviewed_by_name}` : ""}.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export default function Dashboard() {
   const [dispatches, setDispatches] = useState(null);
   const [error, setError] = useState("");
@@ -163,6 +222,7 @@ export default function Dashboard() {
             {dispatches.map((d) => {
               const status = statusLabel(d);
               const isPending = d.timesheets?.status === "pending";
+              const isApproved = d.timesheets?.status === "approved";
               const isMissing = !d.timesheets;
               const isRejected = d.timesheets?.status === "rejected";
               const isExpanded = expandedId === d.id;
@@ -190,6 +250,18 @@ export default function Dashboard() {
                           </button>
                         </>
                       )}
+                      {isApproved && (
+                        <>
+                          {" | "}
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setExpandedId(isExpanded ? null : d.id)}
+                          >
+                            {isExpanded ? "Hide" : "View Timesheet"}
+                          </button>
+                        </>
+                      )}
                       {(isMissing || isRejected) && (
                         <>
                           {" | "}
@@ -212,6 +284,7 @@ export default function Dashboard() {
                   {isPending && isExpanded && (
                     <ReviewPanel dispatch={d} busy={busyId === d.timesheets.id} onReview={review} />
                   )}
+                  {isApproved && isExpanded && <ApprovedPanel dispatch={d} />}
                 </Fragment>
               );
             })}
