@@ -181,7 +181,6 @@ export default function Calendar() {
               Flaggers:{" "}
               {item.flaggers.map((f) => (f.title ? `${f.name} (${f.title})` : f.name)).join(", ")}
             </p>
-            <Link to={`/dispatch/${item.editId}/edit`}>Edit</Link>
           </div>
         ) : (
           <div key={item.id} className="dispatch-card cal-detail-booking">
