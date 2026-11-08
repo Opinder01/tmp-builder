@@ -226,6 +226,12 @@ button {
   font-size: inherit;
 }
 
+/* Briefly marks the dispatch the admin just came back to from the Edit page. */
+.row-return-highlight td {
+  background: #fef9c3;
+  transition: background 0.6s;
+}
+
 .review-panel-row td {
   padding: 0;
   background: #f8fafc;

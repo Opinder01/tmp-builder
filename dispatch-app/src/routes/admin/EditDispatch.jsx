@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { fromInputValue, toInputValue } from "../../lib/tz.js";
 
@@ -10,6 +10,7 @@ const toDateTimeLocal = toInputValue;
 export default function EditDispatch() {
   const { dispatchId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [workers, setWorkers] = useState([]);
   const [contractors, setContractors] = useState([]);
   const [qboItems, setQboItems] = useState([]);
@@ -51,6 +52,13 @@ export default function EditDispatch() {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
+  // Back to wherever the admin opened this page from (the dashboard, the
+  // calendar...). "default" key = page was opened directly, nothing to go back to.
+  function goBack() {
+    if (location.key === "default") navigate("/");
+    else navigate(-1);
+  }
+
   async function save(notify) {
     setError("");
     setSubmitting(true);
@@ -78,7 +86,7 @@ export default function EditDispatch() {
         client_company_name: selectedContractor?.name || null,
         notify,
       });
-      navigate("/");
+      goBack();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -92,7 +100,7 @@ export default function EditDispatch() {
     setError("");
     try {
       await api.post("/api/dispatches?action=delete", { id: dispatchId });
-      navigate("/");
+      goBack();
     } catch (err) {
       setError(err.message);
       setDeleting(false);
@@ -102,6 +110,7 @@ export default function EditDispatch() {
   if (!form) {
     return (
       <div>
+        <button type="button" onClick={goBack}>← Back</button>
         <h1>Edit Dispatch</h1>
         {error && <p className="error">{error}</p>}
         {!error && <p>Loading...</p>}
@@ -111,6 +120,7 @@ export default function EditDispatch() {
 
   return (
     <div>
+      <button type="button" onClick={goBack}>← Back</button>
       <h1>Edit Dispatch</h1>
       <form onSubmit={(e) => { e.preventDefault(); save(false); }} className="form">
         <label>

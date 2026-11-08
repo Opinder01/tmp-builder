@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { formatDateTime, formatTime } from "../../lib/tz.js";
 
+// sessionStorage key holding the dispatch the admin left the dashboard from.
+const RETURN_KEY = "dashboardReturn";
+
 function statusLabel(dispatch) {
   // dispatches -> timesheets is 1:1 (timesheets.dispatch_id is unique), so
   // PostgREST embeds it as a single object rather than an array.
@@ -148,6 +151,36 @@ export default function Dashboard() {
 
   useEffect(load, []);
 
+  // Coming back from the Edit page: scroll to the dispatch the admin was
+  // editing (or the old scroll position if that row no longer exists).
+  useEffect(() => {
+    if (!dispatches) return;
+    let saved = null;
+    try {
+      saved = JSON.parse(sessionStorage.getItem(RETURN_KEY) || "null");
+      sessionStorage.removeItem(RETURN_KEY);
+    } catch {
+      return;
+    }
+    if (!saved) return;
+    const row = document.getElementById(`dispatch-${saved.id}`);
+    if (row) {
+      row.scrollIntoView({ block: "center" });
+      row.classList.add("row-return-highlight");
+      setTimeout(() => row.classList.remove("row-return-highlight"), 2500);
+    } else {
+      window.scrollTo(0, saved.scrollY || 0);
+    }
+  }, [dispatches]);
+
+  function rememberPosition(id) {
+    try {
+      sessionStorage.setItem(RETURN_KEY, JSON.stringify({ id, scrollY: window.scrollY }));
+    } catch {
+      // storage unavailable -- Back still works, it just won't restore the spot
+    }
+  }
+
   async function sendRemindersNow() {
     setReminderStatus("Sending...");
     try {
@@ -240,7 +273,7 @@ export default function Dashboard() {
               const isExpanded = expandedIds.has(d.id);
               return (
                 <Fragment key={d.id}>
-                  <tr>
+                  <tr id={`dispatch-${d.id}`}>
                     <td>{d.job_number}</td>
                     <td>{d.worker?.full_name}</td>
                     <td>{d.title || "-"}</td>
@@ -249,7 +282,7 @@ export default function Dashboard() {
                     <td>{formatDateTime(d.start_time)}</td>
                     <td className={`status status-${status.tone}`}>{status.text}</td>
                     <td>
-                      <Link to={`/dispatch/${d.id}/edit`}>Edit</Link>
+                      <Link to={`/dispatch/${d.id}/edit`} onClick={() => rememberPosition(d.id)}>Edit</Link>
                       {isPending && (
                         <>
                           {" | "}
