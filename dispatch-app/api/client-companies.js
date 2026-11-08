@@ -41,11 +41,13 @@ export default async function handler(req, res) {
   if (action === "update" && req.method === "POST") {
     const { id, name, phone, email, notes, qbo_customer_id, qbo_customer_name } = req.body || {};
     if (!id) return json(res, 400, { error: "id is required" });
+    const newName = name !== undefined ? String(name).trim() : undefined;
+    if (newName !== undefined && !newName) return json(res, 400, { error: "Contractor name can't be empty" });
 
     const { data, error } = await supabase
       .from("client_companies")
       .update({
-        ...(name !== undefined ? { name } : {}),
+        ...(newName !== undefined ? { name: newName } : {}),
         ...(phone !== undefined ? { phone: phone || null } : {}),
         ...(email !== undefined ? { email: email || null } : {}),
         ...(notes !== undefined ? { notes: notes || null } : {}),
@@ -56,6 +58,22 @@ export default async function handler(req, res) {
       .select()
       .single();
     if (error) return json(res, 500, { error: error.message });
+
+    // Dispatches and bookings keep their own copy of the contractor's name
+    // (it's what the dashboard, calendar and invoices show), so a rename has
+    // to be carried over or old shifts would keep the old name.
+    if (newName !== undefined) {
+      const [d, b] = await Promise.all([
+        supabase.from("dispatches").update({ client_company_name: newName }).eq("client_company_id", id),
+        supabase.from("bookings").update({ client_company_name: newName }).eq("client_company_id", id),
+      ]);
+      const cascadeError = d.error || b.error;
+      if (cascadeError) {
+        return json(res, 500, {
+          error: `The contractor was renamed, but updating the name on its existing dispatches/bookings failed: ${cascadeError.message}. Save again to retry.`,
+        });
+      }
+    }
     return json(res, 200, { company: data });
   }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import BackButton from "../../components/BackButton.jsx";
 import { api } from "../../lib/api.js";
 import { generateContractorSummaryPdf } from "../../lib/pdf/workerSummary.js";
 import PdfPreview, { useShiftSequence } from "../../components/PdfPreview.jsx";
@@ -59,13 +60,21 @@ export default function ContractorSchedule() {
 
   return (
     <div>
+      <BackButton fallback="/contractors" />
       <div className="page-header">
         <h1>{company ? company.name : "Contractor Schedule"}</h1>
-        {company && dispatches && (
-          <button onClick={() => setShowPreview((s) => !s)}>
-            {showPreview ? "Hide PDF preview" : "Preview PDF"}
-          </button>
-        )}
+        <div>
+          {company && (
+            <Link to={`/contractors/${companyId}/edit`} className="button" style={{ marginRight: "0.5rem" }}>
+              Edit Contractor
+            </Link>
+          )}
+          {company && dispatches && (
+            <button onClick={() => setShowPreview((s) => !s)}>
+              {showPreview ? "Hide PDF preview" : "Preview PDF"}
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <p className="error">{error}</p>}

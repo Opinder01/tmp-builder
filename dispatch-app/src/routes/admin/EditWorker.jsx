@@ -46,24 +46,18 @@ export default function EditWorker() {
     e.preventDefault();
     setError("");
 
-    const emailChanged = form.email.trim().toLowerCase() !== original.email.toLowerCase();
     const typeChanged = form.worker_type !== original.worker_type;
     if (typeChanged && !confirm(
       `Change ${original.full_name} from ${original.worker_type} to ${form.worker_type}?\n\n` +
       `Their existing approved timesheets will then be counted as ${form.worker_type === "employee" ? "payroll hours" : "contractor billing"} ` +
       `instead. Anything already sent to QuickBooks is not changed. Continue?`
     )) return;
-    if (emailChanged && !confirm(
-      `${original.full_name} signs in with their email, so changing it to ${form.email.trim()} changes how they log in. ` +
-      `Their password stays the same. Continue?`
-    )) return;
-
     setSaving(true);
     try {
       await api.post("/api/workers?action=update", {
         worker_id: workerId,
         full_name: form.full_name,
-        email: form.email,
+        // Email is deliberately not sent: it's the flagger's login, and changing it is on hold for now.
         worker_type: form.worker_type,
         phone: form.phone,
         // Only the fields that apply to the chosen type are sent; the rest are cleared.
@@ -108,8 +102,8 @@ export default function EditWorker() {
         </label>
 
         <label>
-          Email (also their login)
-          <input required type="email" value={form.email} onChange={(e) => update("email", e.target.value)} />
+          Email (their login — can't be changed here for now)
+          <input readOnly disabled value={form.email} />
         </label>
 
         <label>

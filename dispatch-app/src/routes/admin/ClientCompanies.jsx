@@ -152,6 +152,8 @@ export default function ClientCompanies() {
                 <td>
                   <Link to={`/contractors/${c.id}`}>View schedule</Link>
                   {" | "}
+                  <Link to={`/contractors/${c.id}/edit`}>Edit</Link>
+                  {" | "}
                   <button type="button" className="link-button" onClick={() => handleDelete(c)}>
                     Delete
                   </button>
