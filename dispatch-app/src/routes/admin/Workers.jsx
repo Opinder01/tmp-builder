@@ -15,6 +15,23 @@ export default function Workers() {
       .catch((err) => setError(err.message));
   }, []);
 
+  async function setActive(w, active) {
+    const message = active
+      ? `Reactivate ${w.full_name}? They'll show up in the dispatch lists again.`
+      : `Deactivate ${w.full_name}? They won't appear when you create or edit dispatches. Their login, history and timesheets stay as they are.`;
+    if (!confirm(message)) return;
+    setBusyId(w.id);
+    setError("");
+    try {
+      await api.post("/api/workers?action=update", { worker_id: w.id, active });
+      setWorkers((list) => list.map((x) => (x.id === w.id ? { ...x, active } : x)));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function resetPassword(w) {
     if (!confirm(`Reset ${w.full_name}'s password? Their current password will stop working immediately.`)) return;
     setBusyId(w.id);
@@ -65,26 +82,51 @@ export default function Workers() {
               <th>Name</th>
               <th>Type</th>
               <th>Email</th>
+              <th>Status</th>
+              <th></th>
               <th></th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {workers.map((w) => (
-              <tr key={w.id}>
-                <td>{w.full_name}</td>
-                <td>{w.worker_type}</td>
-                <td>{w.email}</td>
-                <td>
-                  <Link to={`/workers/${w.id}`}>View schedule</Link>
-                </td>
-                <td>
-                  <button type="button" disabled={busyId === w.id} onClick={() => resetPassword(w)}>
-                    {busyId === w.id ? "Resetting..." : "Reset password"}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {/* Active flaggers first, inactive ones below (each group A-Z). */}
+            {[...workers]
+              .sort((a, b) => Number(b.active !== false) - Number(a.active !== false))
+              .map((w) => {
+                const inactive = w.active === false;
+                return (
+                  <tr key={w.id} style={inactive ? { opacity: 0.6 } : undefined}>
+                    <td>{w.full_name}</td>
+                    <td>{w.worker_type}</td>
+                    <td>{w.email}</td>
+                    <td>{inactive ? "Inactive" : "Active"}</td>
+                    <td>
+                      <Link to={`/workers/${w.id}`}>View schedule</Link>
+                    </td>
+                    <td>
+                      <button type="button" disabled={busyId === w.id} onClick={() => resetPassword(w)}>
+                        {busyId === w.id ? "Resetting..." : "Reset password"}
+                      </button>
+                    </td>
+                    <td>
+                      {inactive ? (
+                        <button type="button" disabled={busyId === w.id} onClick={() => setActive(w, true)}>
+                          Reactivate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button-danger"
+                          disabled={busyId === w.id}
+                          onClick={() => setActive(w, false)}
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       )}

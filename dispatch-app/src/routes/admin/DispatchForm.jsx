@@ -39,7 +39,8 @@ export default function DispatchForm() {
   useEffect(() => {
     api
       .get("/api/workers?action=list")
-      .then((data) => setWorkers(data.workers))
+      // Deactivated flaggers can't be picked for new dispatches.
+      .then((data) => setWorkers(data.workers.filter((w) => w.active !== false)))
       .catch((err) => setError(err.message));
     api
       .get("/api/client-companies?action=list")

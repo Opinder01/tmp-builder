@@ -205,11 +205,14 @@ export default function EditDispatch() {
             value={form.worker_id}
             onChange={(e) => update("worker_id", e.target.value)}
           >
-            {workers.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.full_name} ({w.worker_type})
-              </option>
-            ))}
+            {/* Deactivated flaggers are hidden, except the one already on this dispatch. */}
+            {workers
+              .filter((w) => w.active !== false || w.id === originalWorkerId)
+              .map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.full_name} ({w.worker_type}){w.active === false ? " — inactive" : ""}
+                </option>
+              ))}
           </select>
           {workerChanged && (
             <span className="subtle">

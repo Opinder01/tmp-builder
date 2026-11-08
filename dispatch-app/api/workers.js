@@ -36,8 +36,11 @@ export default async function handler(req, res) {
     const admin = await requireRole(req, res, "admin");
     if (!admin) return;
 
-    const { worker_id, phone, contracted_hours_per_period, contractor_bill_rate, job_title, wage } = req.body || {};
+    const { worker_id, phone, contracted_hours_per_period, contractor_bill_rate, job_title, wage, active } = req.body || {};
     if (!worker_id) return json(res, 400, { error: "worker_id is required" });
+    if (active !== undefined && typeof active !== "boolean") {
+      return json(res, 400, { error: "active must be true or false" });
+    }
 
     const supabase = getSupabaseAdmin();
     const { data: profile, error } = await supabase
@@ -48,6 +51,9 @@ export default async function handler(req, res) {
         ...(contractor_bill_rate !== undefined ? { contractor_bill_rate: contractor_bill_rate || null } : {}),
         ...(job_title !== undefined ? { job_title: job_title || null } : {}),
         ...(wage !== undefined ? { wage: wage || null } : {}),
+        // Deactivating only hides the flagger from the dispatch pickers; their
+        // login, history and timesheets are untouched.
+        ...(active !== undefined ? { active } : {}),
       })
       .eq("id", worker_id)
       .eq("role", "worker")
