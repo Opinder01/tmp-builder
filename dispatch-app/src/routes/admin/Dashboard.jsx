@@ -124,7 +124,17 @@ export default function Dashboard() {
   const [dispatches, setDispatches] = useState(null);
   const [error, setError] = useState("");
   const [reminderStatus, setReminderStatus] = useState("");
-  const [expandedId, setExpandedId] = useState(null);
+  // Dispatch ids whose panel is open -- any number can be open at once.
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+
+  function togglePanel(id) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   const [busyId, setBusyId] = useState(null);
   const [reminderBusyId, setReminderBusyId] = useState(null);
   const [reminderSentId, setReminderSentId] = useState(null);
@@ -177,7 +187,9 @@ export default function Dashboard() {
     setError("");
     try {
       await api.post("/api/timesheets?action=review", { timesheet_id, decision, rejection_reason, ...extra });
-      setExpandedId(null);
+      // Close just the panel that was reviewed; leave any others open.
+      const reviewed = dispatches?.find((d) => d.timesheets?.id === timesheet_id);
+      if (reviewed) setExpandedIds((prev) => { const next = new Set(prev); next.delete(reviewed.id); return next; });
       load();
     } catch (err) {
       setError(err.message);
@@ -225,7 +237,7 @@ export default function Dashboard() {
               const isApproved = d.timesheets?.status === "approved";
               const isMissing = !d.timesheets;
               const isRejected = d.timesheets?.status === "rejected";
-              const isExpanded = expandedId === d.id;
+              const isExpanded = expandedIds.has(d.id);
               return (
                 <Fragment key={d.id}>
                   <tr>
@@ -244,7 +256,7 @@ export default function Dashboard() {
                           <button
                             type="button"
                             className="link-button"
-                            onClick={() => setExpandedId(isExpanded ? null : d.id)}
+                            onClick={() => togglePanel(d.id)}
                           >
                             {isExpanded ? "Hide" : "Approve"}
                           </button>
@@ -256,7 +268,7 @@ export default function Dashboard() {
                           <button
                             type="button"
                             className="link-button"
-                            onClick={() => setExpandedId(isExpanded ? null : d.id)}
+                            onClick={() => togglePanel(d.id)}
                           >
                             {isExpanded ? "Hide" : "View Timesheet"}
                           </button>
