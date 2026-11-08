@@ -5,6 +5,32 @@ import { setCors, json } from "./_lib/cors.js";
 import { sendPushToWorker } from "./_lib/push.js";
 import { shiftSummary } from "./_lib/shiftSummary.js";
 
+// Which QuickBooks targets ('payroll_time_activity', 'vendor_bill', 'invoice')
+// already have a successful entry created from this timesheet.
+async function syncedTargets(supabase, timesheetId) {
+  const { data } = await supabase
+    .from("qbo_sync_log")
+    .select("target")
+    .eq("timesheet_id", timesheetId)
+    .eq("status", "success");
+  return [...new Set((data || []).map((r) => r.target))];
+}
+
+// How many of a flagger's dispatches still have no timesheet (the app badge).
+async function missingTimesheetCount(supabase, workerId) {
+  const { data } = await supabase.from("dispatches").select("id, timesheets(id)").eq("worker_id", workerId);
+  return (data || []).filter((d) => !d.timesheets).length;
+}
+
+// Best-effort push: never fails the save (no subscription / VAPID missing / etc).
+async function notifyWorker(supabase, workerId, payload) {
+  try {
+    await sendPushToWorker(workerId, { url: "/", ...payload, badgeCount: await missingTimesheetCount(supabase, workerId) });
+  } catch (err) {
+    console.error("[dispatches] push notify failed:", err.message);
+  }
+}
+
 export default async function handler(req, res) {
   setCors(req, res);
   if (req.method === "OPTIONS") { res.statusCode = 204; return res.end(); }
@@ -125,10 +151,25 @@ export default async function handler(req, res) {
     const supabase = getSupabaseAdmin();
     const { data: dispatch, error } = await supabase
       .from("dispatches")
-      .select("*, timesheets(id, status)")
+      .select(
+        "*, timesheets(id, status, typed_start_time, typed_end_time, break_minutes, calculated_hours, slip_photo_path, submitted_at, reviewed_at)"
+      )
       .eq("id", id)
       .single();
     if (error) return json(res, 404, { error: "Dispatch not found" });
+
+    // For the edit screen: a link to the slip photo, and which QuickBooks
+    // entries (payroll time entry / contractor bill / customer invoice) were
+    // already created from this timesheet -- changing it here can't undo those.
+    if (dispatch.timesheets) {
+      const ts = dispatch.timesheets;
+      let slip_photo_url = null;
+      if (ts.slip_photo_path) {
+        const { data: signed } = await supabase.storage.from("timesheet-photos").createSignedUrl(ts.slip_photo_path, 60 * 15);
+        slip_photo_url = signed?.signedUrl || null;
+      }
+      dispatch.timesheets = { ...ts, slip_photo_url, qbo_synced: await syncedTargets(supabase, ts.id) };
+    }
     return json(res, 200, { dispatch });
   }
 
@@ -142,6 +183,11 @@ export default async function handler(req, res) {
       qbo_ot_item_id, qbo_ot_item_name, ot_rate,
       qbo_dt_item_id, qbo_dt_item_name, dt_rate,
       client_company_id, client_company_name,
+      // Optional timesheet changes (admin can fix a timesheet at any status,
+      // including after it was approved):
+      timesheet,            // { typed_start_time, typed_end_time, break_minutes } -- new hours
+      delete_timesheet,     // true -> remove the timesheet so the flagger can resubmit
+      timesheet_on_reassign, // "move" | "delete" -- what to do with it if the flagger changes
     } = req.body || {};
     if (!id || !location || !start_time || !worker_id) {
       return json(res, 400, { error: "id, location, start_time, and worker_id are required" });
@@ -151,19 +197,54 @@ export default async function handler(req, res) {
 
     const { data: existing, error: fetchError } = await supabase
       .from("dispatches")
-      .select("worker_id, timesheets(id)")
+      .select(
+        "worker_id, job_number, location, start_time, timesheets(id, status, typed_start_time, typed_end_time, break_minutes, calculated_hours)"
+      )
       .eq("id", id)
       .single();
     if (fetchError) return json(res, 404, { error: "Dispatch not found" });
 
-    // Reassigning the worker after a timesheet already exists would leave
-    // that timesheet pointing at the old worker while the dispatch points
-    // at a new one -- an inconsistent, orphaned record. Everything else
-    // (time, location, contractor, billing) stays freely editable.
-    if (existing.timesheets && existing.worker_id !== worker_id) {
+    const oldTs = existing.timesheets || null;
+    const workerChanged = existing.worker_id !== worker_id;
+
+    // Changing the flagger on a dispatch that already has a timesheet: the
+    // admin must say whether the timesheet follows the dispatch to the new
+    // flagger (the wrong person was assigned) or is removed (the new flagger
+    // submits their own).
+    if (oldTs && workerChanged && !delete_timesheet && !["move", "delete"].includes(timesheet_on_reassign)) {
       return json(res, 400, {
-        error: "Can't reassign the worker — a timesheet has already been submitted for this dispatch.",
+        error: "This dispatch already has a timesheet — choose whether to move it to the new flagger or delete it.",
       });
+    }
+    const removeTimesheet = !!oldTs && (!!delete_timesheet || (workerChanged && timesheet_on_reassign === "delete"));
+
+    // Validate new hours up front, before anything is written.
+    let hoursUpdate = null;
+    if (oldTs && !removeTimesheet && timesheet) {
+      const start = new Date(timesheet.typed_start_time);
+      const end = new Date(timesheet.typed_end_time);
+      const brk = Number(timesheet.break_minutes ?? 0);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return json(res, 400, { error: "Timesheet start and end times must be valid dates." });
+      }
+      if (!Number.isInteger(brk) || brk < 0) {
+        return json(res, 400, { error: "Break minutes must be a whole number, 0 or more." });
+      }
+      const hours = (end - start) / 3600000 - brk / 60;
+      if (hours <= 0) return json(res, 400, { error: "Timesheet end time must be after the start time (after the break)." });
+      if (hours > 24) return json(res, 400, { error: "That timesheet works out to more than 24 hours — check the dates." });
+
+      const unchanged =
+        start.getTime() === new Date(oldTs.typed_start_time).getTime() &&
+        end.getTime() === new Date(oldTs.typed_end_time).getTime() &&
+        brk === oldTs.break_minutes;
+      if (!unchanged) {
+        hoursUpdate = {
+          typed_start_time: start.toISOString(),
+          typed_end_time: end.toISOString(),
+          break_minutes: brk,
+        };
+      }
     }
 
     const { data: dispatch, error } = await supabase
@@ -194,26 +275,66 @@ export default async function handler(req, res) {
       .single();
     if (error) return json(res, 500, { error: error.message });
 
-    if (notify) {
+    // ── Timesheet changes (after the dispatch itself has saved) ─────────────
+    let hoursNow = null;        // new calculated hours, if they were edited
+    let timesheetChanged = false;
+    let qboSynced = [];
+    if (oldTs) {
+      qboSynced = await syncedTargets(supabase, oldTs.id);
       try {
-        const { data: workerDispatches } = await supabase
-          .from("dispatches")
-          .select("id, timesheets(id)")
-          .eq("worker_id", worker_id);
-        const badgeCount = (workerDispatches || []).filter((wd) => !wd.timesheets).length;
-
-        await sendPushToWorker(worker_id, {
-          title: "Dispatch updated",
-          body: shiftSummary({ job_number, location, start_time }),
-          url: "/",
-          badgeCount,
-        });
+        if (removeTimesheet) {
+          // Keep the record of anything already sent to QuickBooks (just
+          // detach it from the deleted timesheet); drop failed/pending attempts.
+          await supabase.from("qbo_sync_log").delete().eq("timesheet_id", oldTs.id).neq("status", "success");
+          await supabase.from("qbo_sync_log").update({ timesheet_id: null }).eq("timesheet_id", oldTs.id);
+          const { error: delError } = await supabase.from("timesheets").delete().eq("id", oldTs.id);
+          if (delError) throw delError;
+          timesheetChanged = true;
+        } else {
+          const update = { ...(hoursUpdate || {}) };
+          if (workerChanged) update.worker_id = worker_id; // timesheet follows the dispatch
+          if (Object.keys(update).length > 0) {
+            const { data: updatedTs, error: tsError } = await supabase
+              .from("timesheets")
+              .update(update)
+              .eq("id", oldTs.id)
+              .select("calculated_hours")
+              .single();
+            if (tsError) throw tsError;
+            if (hoursUpdate) hoursNow = updatedTs.calculated_hours;
+            timesheetChanged = true;
+          }
+        }
       } catch (err) {
-        console.error("[dispatches] push notify failed:", err.message);
+        return json(res, 500, {
+          error: `The dispatch was saved, but the timesheet change failed: ${err.message}`,
+        });
       }
     }
 
-    return json(res, 200, { dispatch });
+    // ── Notifications (only when the admin chose "Save & Notify") ───────────
+    if (notify) {
+      const summary = shiftSummary({ job_number, location, start_time });
+
+      if (workerChanged) {
+        // The flagger who was taken off, and the one who was added.
+        await notifyWorker(supabase, existing.worker_id, {
+          title: "Dispatch removed",
+          body: `You're no longer on: ${shiftSummary(existing)}`,
+        });
+        await notifyWorker(supabase, worker_id, { title: "New dispatch", body: summary });
+      } else {
+        const extras = [];
+        if (removeTimesheet) extras.push("Timesheet removed — please resubmit");
+        else if (hoursNow !== null) extras.push(`Timesheet hours updated to ${hoursNow}h`);
+        await notifyWorker(supabase, worker_id, {
+          title: "Dispatch updated",
+          body: [...extras, summary].join(" — "),
+        });
+      }
+    }
+
+    return json(res, 200, { dispatch, timesheetChanged, qboSynced: timesheetChanged ? qboSynced : [] });
   }
 
   if (action === "delete" && req.method === "POST") {
