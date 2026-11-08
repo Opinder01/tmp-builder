@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
-import { dateKey as bcDateKey, formatTime, todayKey } from "../../lib/tz.js";
+import { dateKey as bcDateKey, formatTime, todayKey as bcTodayKey } from "../../lib/tz.js";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -59,7 +59,7 @@ function itemLabel(item) {
 
 export default function Calendar() {
   // "Today" is the current day in BC, whatever the device's own zone says.
-  const [todayY, todayM, todayD] = todayKey().split("-").map(Number);
+  const [todayY, todayM, todayD] = bcTodayKey().split("-").map(Number);
   const today = new Date(todayY, todayM - 1, todayD);
   const [month, setMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState(dateKey(today));
