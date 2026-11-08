@@ -15,13 +15,22 @@ function pacificTime(date) {
   return date.toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
 }
 
-async function isAuthorizedForRemind(req) {
+// "cron" (Vercel's daily run), "admin" (a manual test from the Bookings page),
+// or null. Only the cron run also notifies flaggers, so testing the button
+// can't ping crews or send them the same reminder twice.
+async function remindCaller(req) {
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && (req.headers.authorization || "") === `Bearer ${cronSecret}`) return true;
-  // Also lets an admin trigger it from the Bookings page to test the reminder.
+  if (cronSecret && (req.headers.authorization || "") === `Bearer ${cronSecret}`) return "cron";
   const profile = await getSessionProfile(req);
-  return profile?.role === "admin";
+  return profile?.role === "admin" ? "admin" : null;
 }
+
+// Shown if the 0014 migration (worker_ids / notify_flaggers columns) hasn't been run yet.
+function isMissingColumn(error) {
+  return /worker_ids|notify_flaggers/.test(error?.message || "") && /column|schema cache/i.test(error?.message || "");
+}
+const MIGRATION_MESSAGE =
+  "Selecting flaggers needs a one-time database update (supabase/migrations/0014_booking_flaggers.sql). Run it in the Supabase SQL editor, then try again.";
 
 
 const SOURCES = ["website", "email", "text", "phone", "other"];
@@ -35,7 +44,8 @@ export default async function handler(req, res) {
   // Daily day-before reminder. Called by Vercel Cron (CRON_SECRET) or by an
   // admin from the Bookings page to test it.
   if (action === "remind" && (req.method === "GET" || req.method === "POST")) {
-    if (!(await isAuthorizedForRemind(req))) return json(res, 401, { error: "Not authorized" });
+    const caller = await remindCaller(req);
+    if (!caller) return json(res, 401, { error: "Not authorized" });
     const supabase = getSupabaseAdmin();
     const now = new Date();
     const tomorrow = pacificDate(new Date(now.getTime() + 24 * HOUR_MS));
@@ -76,7 +86,51 @@ export default async function handler(req, res) {
       }
     }
 
-    return json(res, 200, { bookings: bookings.length, notified });
+    // Flaggers the admin chose to notify get their own day-before reminder --
+    // only from the daily cron run, and only for bookings where the admin
+    // switched "notify flaggers" on. Deactivated flaggers are skipped. Only
+    // the time, place and contractor are sent; the private notes never are.
+    let flaggersNotified = 0;
+    if (caller === "cron") {
+      const byWorker = new Map();
+      for (const b of bookings) {
+        if (!b.notify_flaggers) continue;
+        for (const wid of b.worker_ids || []) {
+          if (!byWorker.has(wid)) byWorker.set(wid, []);
+          byWorker.get(wid).push(b);
+        }
+      }
+      if (byWorker.size > 0) {
+        const { data: active } = await supabase
+          .from("profiles")
+          .select("id")
+          .in("id", [...byWorker.keys()])
+          .eq("role", "worker")
+          .neq("active", false);
+        const activeIds = new Set((active || []).map((p) => p.id));
+        for (const [wid, list] of byWorker) {
+          if (!activeIds.has(wid)) continue;
+          const f = list[0];
+          const where = f.client_company_name ? `${f.location} (${f.client_company_name})` : f.location;
+          const body =
+            list.length === 1
+              ? `${pacificTime(new Date(f.start_time))} — ${where}`
+              : `${list.length} shifts tomorrow, first at ${pacificTime(new Date(f.start_time))} — ${where}`;
+          try {
+            const result = await sendPushToWorker(wid, {
+              title: list.length === 1 ? "Shift tomorrow" : "Shifts tomorrow",
+              body,
+              url: "/",
+            });
+            if (result.sent > 0) flaggersNotified++;
+          } catch (err) {
+            console.error("[booking-reminders] flagger push failed:", err.message);
+          }
+        }
+      }
+    }
+
+    return json(res, 200, { bookings: bookings.length, notified, flaggersNotified });
   }
 
   const admin = await requireRole(req, res, "admin");
@@ -99,9 +153,22 @@ export default async function handler(req, res) {
   }
 
   if ((action === "create" || action === "update") && req.method === "POST") {
-    const { id, client_company_id, client_company_name, start_time, location, flaggers_needed, source, notes } = req.body || {};
+    const { id, client_company_id, client_company_name, start_time, location, flaggers_needed, source, notes, worker_ids, notify_flaggers } = req.body || {};
     if (!start_time || !location) return json(res, 400, { error: "start_time and location are required" });
+    if (Number.isNaN(new Date(start_time).getTime())) return json(res, 400, { error: "start_time is not a valid date and time" });
     if (source && !SOURCES.includes(source)) return json(res, 400, { error: "Invalid source" });
+
+    // Flaggers picked for this booking (optional). Each must be a real flagger.
+    const pickedIds = Array.isArray(worker_ids) ? [...new Set(worker_ids)] : [];
+    if (pickedIds.length > 0) {
+      const { data: found, error: findError } = await supabase
+        .from("profiles")
+        .select("id")
+        .in("id", pickedIds)
+        .eq("role", "worker");
+      if (findError) return json(res, 500, { error: findError.message });
+      if ((found || []).length !== pickedIds.length) return json(res, 400, { error: "One of the selected flaggers wasn't found" });
+    }
 
     const row = {
       client_company_id: client_company_id || null,
@@ -113,15 +180,27 @@ export default async function handler(req, res) {
       notes: notes || null,
     };
 
+    // Notifying flaggers only makes sense when some are selected.
+    const flaggerFields = { worker_ids: pickedIds, notify_flaggers: pickedIds.length > 0 && notify_flaggers === true };
+
     if (action === "create") {
-      const { data, error } = await supabase.from("bookings").insert(row).select().single();
-      if (error) return json(res, 500, { error: error.message });
+      // The new columns are only written when used, so bookings without
+      // flaggers keep saving even before the 0014 migration has been run.
+      const insertRow = pickedIds.length > 0 ? { ...row, ...flaggerFields } : row;
+      const { data, error } = await supabase.from("bookings").insert(insertRow).select().single();
+      if (error) return json(res, 500, { error: isMissingColumn(error) ? MIGRATION_MESSAGE : error.message });
       return json(res, 201, { booking: data });
     }
 
     if (!id) return json(res, 400, { error: "id is required" });
-    const { data, error } = await supabase.from("bookings").update(row).eq("id", id).select().single();
-    if (error) return json(res, 500, { error: error.message });
+    const { data: existing } = await supabase.from("bookings").select("*").eq("id", id).maybeSingle();
+    if (!existing) return json(res, 404, { error: "Booking not found" });
+    // Write the flagger columns if the table has them (so they can be cleared)
+    // or if flaggers are being added.
+    const hasFlaggerColumns = "worker_ids" in existing;
+    const updateRow = hasFlaggerColumns || pickedIds.length > 0 ? { ...row, ...flaggerFields } : row;
+    const { data, error } = await supabase.from("bookings").update(updateRow).eq("id", id).select().single();
+    if (error) return json(res, 500, { error: isMissingColumn(error) ? MIGRATION_MESSAGE : error.message });
     return json(res, 200, { booking: data });
   }
 

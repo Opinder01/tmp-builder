@@ -68,6 +68,8 @@ export default function DispatchForm() {
           client_company_id: b.client_company_id || "",
           location: b.location,
           start_time: toDateTimeLocal(b.start_time),
+          // Flaggers already picked on the booking start out selected.
+          worker_ids: b.worker_ids || [],
         }));
       })
       .catch((err) => setError(err.message));
@@ -104,13 +106,17 @@ export default function DispatchForm() {
       const selectedOtItem = qboItems.find((i) => i.id === form.qbo_ot_item_id);
       const selectedDtItem = qboItems.find((i) => i.id === form.qbo_dt_item_id);
       const selectedContractor = contractors.find((c) => c.id === form.client_company_id);
-      if (form.worker_ids.length === 0) {
+      // Only flaggers still in the (active) list -- a booking may have been
+      // made for someone who has since been deactivated.
+      const worker_ids = form.worker_ids.filter((id) => workers.some((w) => w.id === id));
+      if (worker_ids.length === 0) {
         setError("Select at least one worker.");
         setSubmitting(false);
         return;
       }
       await api.post("/api/dispatches?action=create", {
         ...form,
+        worker_ids,
         start_time: fromInputValue(form.start_time),
         rate: form.rate ? Number(form.rate) : null,
         ot_rate: form.ot_rate ? Number(form.ot_rate) : null,
@@ -165,12 +171,12 @@ export default function DispatchForm() {
           Flaggers
           <span className="subtle">Select one or more — everyone gets their own dispatch and timesheet for this job.</span>
           <button type="button" onClick={() => setWorkerListOpen((o) => !o)}>
-            {form.worker_ids.length === 0
-              ? "Select flaggers..."
-              : `${form.worker_ids.length} flagger(s) selected — ${workers
-                  .filter((w) => form.worker_ids.includes(w.id))
-                  .map((w) => w.full_name)
-                  .join(", ")}`}
+            {(() => {
+              const picked = workers.filter((w) => form.worker_ids.includes(w.id));
+              return picked.length === 0
+                ? "Select flaggers..."
+                : `${picked.length} flagger(s) selected — ${picked.map((w) => w.full_name).join(", ")}`;
+            })()}
           </button>
           {workerListOpen && (
             <div className="worker-checklist">
