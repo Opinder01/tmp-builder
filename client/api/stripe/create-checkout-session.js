@@ -27,24 +27,31 @@ export default async function handler(req, res) {
     return json(res, 405, { error: "Method not allowed" });
   }
 
-  // ── Session authentication ─────────────────────────────────────────────────
-  const authHeader = req.headers?.authorization || "";
-  const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
-  if (!sessionToken) return json(res, 401, { error: "Authentication required." });
-
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceKey) return json(res, 500, { error: "Server configuration error." });
 
-  const supabase = createClient(supabaseUrl, serviceKey);
+  const supabase = supabaseUrl && serviceKey ? createClient(supabaseUrl, serviceKey) : null;
 
-  const { data: session } = await supabase
-    .from("user_sessions").select("email")
-    .eq("session_token", sessionToken).maybeSingle();
-  if (!session) return json(res, 401, { error: "Invalid or expired session." });
+  // ── Identify the user ──────────────────────────────────────────────────────
+  // Prefer session token (more secure), fall back to email in body
+  const authHeader = req.headers?.authorization || "";
+  const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  let normalizedEmail = null;
 
-  // Use the session's email as the authoritative identity — ignore body email
-  const normalizedEmail = session.email;
+  if (sessionToken && supabase) {
+    const { data: session } = await supabase
+      .from("user_sessions").select("email")
+      .eq("session_token", sessionToken).maybeSingle();
+    if (session?.email) normalizedEmail = session.email;
+  }
+
+  // Fall back to email sent in request body
+  if (!normalizedEmail) {
+    const { email } = req.body || {};
+    if (email && email.includes("@")) normalizedEmail = email.toLowerCase().trim();
+  }
+
+  if (!normalizedEmail) return json(res, 401, { error: "Authentication required. Please log out and log back in." });
 
   const { plan } = req.body || {};
   if (!plan || !["monthly", "yearly"].includes(plan)) {
