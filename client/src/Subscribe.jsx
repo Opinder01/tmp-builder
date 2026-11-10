@@ -162,7 +162,7 @@ export default function Subscribe() {
           "Content-Type":  "application/json",
           "Authorization": `Bearer ${sessionToken}`,
         },
-        body: JSON.stringify({ plan: plan.id }),
+        body: JSON.stringify({ plan: plan.id, email: user.email }),
       });
 
       console.log("[Stripe] Response status:", res.status, res.ok ? "OK" : "ERROR");
