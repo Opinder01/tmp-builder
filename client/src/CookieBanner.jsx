@@ -22,20 +22,41 @@ export default function CookieBanner() {
 
   return (
     <div style={{
-      position: "fixed", left: 16, right: 16, bottom: 16,
-      border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "white"
+      position: "fixed", left: 0, right: 0, bottom: 0,
+      background: "#0f172a",
+      borderTop: "1px solid #1e293b",
+      padding: "16px 24px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      flexWrap: "wrap",
+      gap: 16,
+      zIndex: 9999,
+      boxShadow: "0 -4px 24px rgba(0,0,0,0.3)",
     }}>
-      <b>Cookies</b>
-      <p style={{ marginTop: 8 }}>
-        We use cookies to keep you signed in and to improve your experience.
-        You can accept all cookies or reject non-essential cookies.
+      <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", flex: "1 1 300px", lineHeight: 1.5 }}>
+        🍪 We use cookies to keep you signed in and improve your experience.{" "}
+        <a href="/privacy" style={{ color: "#f97316", textDecoration: "none", fontWeight: 500 }}>Privacy Policy</a>
       </p>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={acceptAll} style={{ padding: 10, borderRadius: 10, border: "none" }}>Accept</button>
-        <button onClick={rejectNonEssential} style={{ padding: 10, borderRadius: 10 }}>
+      <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+        <button
+          onClick={rejectNonEssential}
+          style={{
+            padding: "9px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+            background: "transparent", border: "1px solid #334155", color: "#94a3b8", cursor: "pointer",
+          }}
+        >
           Reject non-essential
         </button>
-        <a href="/privacy" style={{ alignSelf: "center" }}>Privacy & Cookies</a>
+        <button
+          onClick={acceptAll}
+          style={{
+            padding: "9px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+            background: "linear-gradient(135deg,#f97316,#ea580c)", border: "none", color: "#fff", cursor: "pointer",
+          }}
+        >
+          Accept All
+        </button>
       </div>
     </div>
   );

@@ -37,10 +37,10 @@ export default function Privacy() {
         <h2>3. Data Sharing</h2>
         <p>We do not sell or rent your personal information. We share data only with trusted third-party service providers necessary to operate our service:</p>
         <ul>
-          <li><strong>Stripe</strong> — payment processing</li>
-          <li><strong>Vercel</strong> — hosting and infrastructure</li>
-          <li><strong>Resend</strong> — transactional email delivery</li>
-          <li><strong>Google Maps API</strong> — map and aerial imagery</li>
+          <li><strong>Stripe</strong>: payment processing</li>
+          <li><strong>Vercel</strong>: hosting and infrastructure</li>
+          <li><strong>Resend</strong>: transactional email delivery</li>
+          <li><strong>Google Maps API</strong>: map and aerial imagery</li>
         </ul>
 
         <h2>4. Data Retention</h2>

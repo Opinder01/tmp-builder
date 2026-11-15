@@ -207,6 +207,7 @@ export default function Landing() {
             </div>
             <div className="lp-nav-links">
               <button className="lp-nav-link" onClick={() => scrollTo("features")}>Features</button>
+              <button className="lp-nav-link" onClick={() => nav("/we-make-your-tmp")}>We Make Your TMP</button>
               <button className="lp-nav-link" onClick={() => scrollTo("contact")}>Contact</button>
               <button className="lp-btn-ghost" onClick={() => nav("/login")}>Login</button>
               <button className="lp-btn-primary" onClick={() => nav("/signup")}>Start Free Trial</button>
@@ -228,7 +229,7 @@ export default function Landing() {
               </h1>
               <p className="lp-hero-sub">
                 BC-based TMP software built for Canadian traffic control companies.
-                Place signs, cones, work areas, and export clean PDFs — all in your browser.
+                Place signs, cones, work areas, and export clean PDFs, all in your browser.
               </p>
               <div className="lp-hero-btns">
                 <button className="lp-btn-cta lp-btn-lg" onClick={() => nav("/signup")}>
@@ -238,6 +239,19 @@ export default function Landing() {
                   Login
                 </button>
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
+                <div style={{ flex: 1, height: 1, background: "rgba(148,163,184,0.2)" }} />
+                <span style={{ fontSize: 11, color: "#64748b", letterSpacing: "0.5px", textTransform: "uppercase", whiteSpace: "nowrap" }}>or get it done for you</span>
+                <div style={{ flex: 1, height: 1, background: "rgba(148,163,184,0.2)" }} />
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <button
+                  className="lp-btn-ghost lp-btn-lg"
+                  onClick={() => nav("/we-make-your-tmp")}
+                >
+                  Order TMP: We Draw It For You
+                </button>
+              </div>
             </div>
 
             {/* hero video */}
@@ -245,7 +259,7 @@ export default function Landing() {
               <div className="lp-hero-video-card">
                 <div className="lp-map-bar">
                   <span className="lp-dot red" /><span className="lp-dot yellow" /><span className="lp-dot green" />
-                  <span className="lp-map-bar-title">TMP Builder — Demo</span>
+                  <span className="lp-map-bar-title">TMP Builder: Demo</span>
                 </div>
                 <div className="lp-hero-video-body">
                   <iframe
@@ -267,9 +281,9 @@ export default function Landing() {
           <div className="lp-proof-inner">
             <span className="lp-proof-label">Built for BC traffic control professionals</span>
             <div className="lp-proof-stats">
-              <div className="lp-proof-stat"><span className="lp-proof-num">100%</span><span className="lp-proof-text">Browser-based — no install</span></div>
+              <div className="lp-proof-stat"><span className="lp-proof-num">100%</span><span className="lp-proof-text">Browser-based, no install</span></div>
               <div className="lp-proof-divider" />
-              <div className="lp-proof-stat"><span className="lp-proof-num">BC TMM MOTI</span><span className="lp-proof-text">Sign catalog included</span></div>
+              <div className="lp-proof-stat"><span className="lp-proof-num">TMM MOTI 2020</span><span className="lp-proof-text">Sign catalog included</span></div>
               <div className="lp-proof-divider" />
               <div className="lp-proof-stat"><span className="lp-proof-num">PDF</span><span className="lp-proof-text">Submission-ready export</span></div>
               <div className="lp-proof-divider" />
@@ -318,7 +332,7 @@ export default function Landing() {
                   icon: <FileText size={26} strokeWidth={2} />,
                   color: "#10b981",
                   title: "Export Clean Professional PDFs",
-                  desc: "One-click PDF export with title block, north arrow, scale bar, legend, and manifest — ready for submission.",
+                  desc: "One-click PDF export with title block, north arrow, scale bar, legend, and manifest, ready for submission.",
                 },
                 {
                   icon: <Map size={26} strokeWidth={2} />,
@@ -388,6 +402,22 @@ export default function Landing() {
                   Start Free Trial
                 </button>
               </div>
+
+              <div className="lp-price-card">
+                <div className="lp-price-badge" style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}>New Service</div>
+                <div className="lp-price-name">We Make Your TMP</div>
+                <div className="lp-price-amount">$200<span>/drawing CAD</span></div>
+                <ul className="lp-price-list">
+                  <li>✓ One-time payment, no subscription</li>
+                  <li>✓ TMM MOTI 2020 compliant drawing</li>
+                  <li>✓ Delivered in 2 days</li>
+                  <li>✓ All revisions included</li>
+                  <li>✓ PDF format</li>
+                </ul>
+                <button className="lp-btn-cta lp-btn-block" onClick={() => nav("/we-make-your-tmp")}>
+                  Order a Drawing →
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -401,7 +431,7 @@ export default function Landing() {
               {[
                 {
                   q: "How does the 7-day free trial work?",
-                  a: "You get full access to every feature for 7 days — no restrictions. Create real TMPs, export PDFs, and explore the full sign catalog. Your trial starts the moment you sign up.",
+                  a: "You get full access to every feature for 7 days with no restrictions. Create real TMPs, export PDFs, and explore the full sign catalog. Your trial starts the moment you sign up.",
                 },
                 {
                   q: "When will I be charged?",
@@ -409,7 +439,7 @@ export default function Landing() {
                 },
                 {
                   q: "Can I cancel anytime?",
-                  a: "Yes, anytime — no questions asked. Cancel from your account dashboard before the trial or billing period ends and you won't be charged.",
+                  a: "Yes, anytime, no questions asked. Cancel from your account dashboard before the trial or billing period ends and you won't be charged.",
                 },
                 {
                   q: "Is there a money-back guarantee?",
@@ -417,7 +447,7 @@ export default function Landing() {
                 },
                 {
                   q: "Do I need to install anything?",
-                  a: "No. TMP Builder runs entirely in your browser. No downloads, no plugins, no IT setup required — just log in and start building.",
+                  a: "No. TMP Builder runs entirely in your browser. No downloads, no plugins, no IT setup required. Just log in and start building.",
                 },
                 {
                   q: "What sign catalog is included?",

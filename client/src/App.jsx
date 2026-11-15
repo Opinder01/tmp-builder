@@ -13,6 +13,9 @@ import ProtectedRoute from "./ProtectedRoute";
 import Privacy from "./Privacy";
 import Terms from "./Terms";
 import Admin from "./Admin";
+import WeMakeYourTMP from "./WeMakeYourTMP";
+import TMPOrderForm from "./TMPOrderForm";
+import TMPOrderSuccess from "./TMPOrderSuccess";
 
 export default function App() {
   return (
@@ -48,6 +51,10 @@ export default function App() {
         />
 
         <Route path="/admin" element={<Admin />} />
+
+        <Route path="/we-make-your-tmp" element={<WeMakeYourTMP />} />
+        <Route path="/tmp-order" element={<TMPOrderForm />} />
+        <Route path="/tmp-order-success" element={<TMPOrderSuccess />} />
 
         {/* Catch-all: any unknown URL → landing page */}
         <Route path="*" element={<Navigate to="/" replace />} />
