@@ -299,15 +299,7 @@ export default function WeMakeYourTMP() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <h2 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: 0 }}>What our customers say</h2>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
-              <StarRating rating={5} />
-              <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>5.0</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-              {REVIEWS.map((r) => (
-                <ReviewCard key={r.name} {...r} />
-              ))}
-            </div>
+            <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16, marginTop: 0 }}>Be the first to leave a review and help others find us.</p>
             <a
               href={GOOGLE_REVIEW_URL}
               target="_blank"
