@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 function HeroCanvas() {
   const canvasRef = useRef(null);
@@ -100,7 +100,15 @@ function ReviewCard({ name, rating, text }) {
 
 export default function WeMakeYourTMP() {
   const nav = useNavigate();
+  const [exOpen, setExOpen] = useState(false);
+  const exRef = useRef(null);
   useEffect(() => { window.scrollTo(0, 0); }, []);
+  useEffect(() => {
+    if (!exOpen) return;
+    const handler = (e) => { if (exRef.current && !exRef.current.contains(e.target)) setExOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [exOpen]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "Inter,system-ui,-apple-system,Arial,sans-serif" }}>
@@ -137,24 +145,34 @@ export default function WeMakeYourTMP() {
             >
               Order Your TMP
             </button>
-            <a
-              href="/example-tmp-1.pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ background: "transparent", border: "1px solid #38bdf8", borderRadius: 8, color: "#38bdf8", padding: "12px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              Example TMP 1
-            </a>
-            <a
-              href="/example-tmp-2.pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ background: "transparent", border: "1px solid #38bdf8", borderRadius: 8, color: "#38bdf8", padding: "12px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              Example TMP 2
-            </a>
+            <div ref={exRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setExOpen((v) => !v)}
+                style={{ background: "transparent", border: "1px solid #38bdf8", borderRadius: 8, color: "#38bdf8", padding: "12px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                View Example TMPs
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: exOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              {exOpen && (
+                <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, background: "#1e293b", border: "1px solid #334155", borderRadius: 10, padding: "6px", minWidth: 240, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                  {[
+                    { label: "1111 50 B Ave, Surrey", href: "/example-tmp-1.pdf" },
+                    { label: "King George Blvd & 84 Ave", href: "/example-tmp-2.pdf" },
+                  ].map((ex) => (
+                    <a key={ex.href} href={ex.href} target="_blank" rel="noopener noreferrer"
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 7, color: "#e2e8f0", textDecoration: "none", fontSize: 13, fontWeight: 500 }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = "#334155"}
+                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      {ex.label}
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto" }}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
             <a
               href={GOOGLE_REVIEW_URL}
               target="_blank"
@@ -229,15 +247,20 @@ export default function WeMakeYourTMP() {
                 </div>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              <a href="/example-tmp-1.pdf" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 14px", fontSize: 13, fontWeight: 600, color: "#0f172a", textDecoration: "none" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                Example 1
-              </a>
-              <a href="/example-tmp-2.pdf" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 14px", fontSize: 13, fontWeight: 600, color: "#0f172a", textDecoration: "none" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                Example 2
-              </a>
+            <div style={{ marginTop: 16 }}>
+              <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 8px" }}>See what a completed TMP looks like:</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[
+                  { label: "1111 50 B Ave, Surrey", href: "/example-tmp-1.pdf" },
+                  { label: "King George Blvd & 84 Ave", href: "/example-tmp-2.pdf" },
+                ].map((ex) => (
+                  <a key={ex.href} href={ex.href} target="_blank" rel="noopener noreferrer"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 14px", fontSize: 12, fontWeight: 600, color: "#0f172a", textDecoration: "none" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    {ex.label}
+                  </a>
+                ))}
+              </div>
             </div>
           </div>
         </div>
