@@ -1131,16 +1131,15 @@ function MeasureLabel({
   const el = inputRef.current;
   if (!el) return;
 
-  // keep focus even if OverlayView causes a blur
+  // Only move caret to end when editing first opens, not on every keystroke
   const raf = requestAnimationFrame(() => {
     el.focus();
-    // put caret at end
     const n = el.value?.length ?? 0;
     try { el.setSelectionRange(n, n); } catch {}
   });
 
   return () => cancelAnimationFrame(raf);
-}, [isEditing, editValue]);
+}, [isEditing]);
   return (
     <OverlayViewF position={position} mapPaneName="overlayMouseTarget">
       <div
