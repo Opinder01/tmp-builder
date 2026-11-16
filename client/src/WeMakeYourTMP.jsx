@@ -155,10 +155,10 @@ export default function WeMakeYourTMP() {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: exOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               {exOpen && (
-                <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, background: "#1e293b", border: "1px solid #334155", borderRadius: 10, padding: "6px", minWidth: 240, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 0, background: "#1e293b", border: "1px solid #334155", borderRadius: 10, padding: "6px", minWidth: 220, zIndex: 100, boxShadow: "0 -8px 24px rgba(0,0,0,0.4)" }}>
                   {[
-                    { label: "1111 50 B Ave, Surrey", href: "/example-tmp-1.pdf" },
-                    { label: "King George Blvd & 84 Ave", href: "/example-tmp-2.pdf" },
+                    { label: "Example 1", href: "/example-tmp-1.pdf" },
+                    { label: "Example 2", href: "/example-tmp-2.pdf" },
                   ].map((ex) => (
                     <a key={ex.href} href={ex.href} target="_blank" rel="noopener noreferrer"
                       style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 7, color: "#e2e8f0", textDecoration: "none", fontSize: 13, fontWeight: 500 }}
@@ -251,8 +251,8 @@ export default function WeMakeYourTMP() {
               <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 8px" }}>See what a completed TMP looks like:</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
-                  { label: "1111 50 B Ave, Surrey", href: "/example-tmp-1.pdf" },
-                  { label: "King George Blvd & 84 Ave", href: "/example-tmp-2.pdf" },
+                  { label: "Example 1", href: "/example-tmp-1.pdf" },
+                  { label: "Example 2", href: "/example-tmp-2.pdf" },
                 ].map((ex) => (
                   <a key={ex.href} href={ex.href} target="_blank" rel="noopener noreferrer"
                     style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 14px", fontSize: 12, fontWeight: 600, color: "#0f172a", textDecoration: "none" }}>
