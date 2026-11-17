@@ -618,7 +618,7 @@ const getConeSpacingMeters = (typeId, speedKmH) => {
 const MIN_MOVE_PX = 2;
 
 const WORKAREA_STROKE = "#39D353";  // parrot green
-const WORKAREA_FILL_OPACITY = 0; // no fill — outline only
+const WORKAREA_FILL_OPACITY = 0.3;
 const WORKAREA_STROKE_OPACITY = 0.9;
 const WORKAREA_STROKE_WEIGHT = 3;
 const WORKAREA_POLY_OPTS = {
@@ -10490,7 +10490,7 @@ draggingCursor:
 
   strokeColor: wa.color || "#00c853",
   fillColor: wa.color || "#00c853",
-  fillOpacity: 0,
+  fillOpacity: 0.3,
 
   // ✅ Selection feedback without changing color
   strokeWeight: wa.id === selectedWorkAreaId ? 3 : 2,
@@ -10696,7 +10696,7 @@ onUnmount={(polygon) => {
           strokeOpacity: 0.9,
           strokeWeight: 2,
           fillColor: workAreaColor,
-          fillOpacity: 0,
+          fillOpacity: 0.3,
         }}
       />
     )}
@@ -11837,7 +11837,7 @@ height: pendingPictureTool.hPx * elementScale,
         strokeOpacity: 0.9,
         strokeWeight: 2,
         fillColor: a.color || "#00c853",
-        fillOpacity: 0,
+        fillOpacity: 0.3,
       }}
     />
   ))}
@@ -11854,7 +11854,7 @@ height: pendingPictureTool.hPx * elementScale,
       ...WORKAREA_POLY_OPTS,
       strokeColor: workAreaColor,
       fillColor: workAreaColor,
-      fillOpacity: 0,
+      fillOpacity: 0.3,
     }}
   />
 )}
