@@ -618,7 +618,7 @@ const getConeSpacingMeters = (typeId, speedKmH) => {
 const MIN_MOVE_PX = 2;
 
 const WORKAREA_STROKE = "#39D353";  // parrot green
-const WORKAREA_FILL_OPACITY = 0.22; // transparent fill
+const WORKAREA_FILL_OPACITY = 0; // no fill — outline only
 const WORKAREA_STROKE_OPACITY = 0.9;
 const WORKAREA_STROKE_WEIGHT = 3;
 const WORKAREA_POLY_OPTS = {
@@ -1968,7 +1968,7 @@ const WORK_AREA_STYLE = {
   strokeOpacity: 1,
   strokeWeight: 3,
   fillColor: "#2AA6B8",
-  fillOpacity: 0.22,
+  fillOpacity: 0,
 };
 
 // ─── Road drawing constants & helpers ────────────────────────────────────────
@@ -9378,40 +9378,12 @@ const tileIconStyle = {
           </div>
         )}
 
-        {/* ===== Work Area color picker panel ===== */}
+        {/* ===== Work Area draw hint panel ===== */}
         {activeTool === "work_area" && activeTab === "Plan Elements" && (
           <div className="no-print" style={{ ...panelStyle, left: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <div style={{ fontWeight: 800, fontSize: 14, flex: 1 }}>Work Area</div>
-            </div>
-            <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#0369a1", lineHeight: 1.4 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Work Area</div>
+            <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "8px 10px", fontSize: 12, color: "#0369a1", lineHeight: 1.4 }}>
               Click map to add points. Double-click to finish.
-            </div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>Zone Colour</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              {["#00c853","#f97316","#ef4444","#3b82f6","#a855f7","#eab308","#ffffff"].map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setWorkAreaColor(c)}
-                  style={{
-                    width: 28, height: 28, borderRadius: "50%",
-                    background: c,
-                    border: workAreaColor === c ? "3px solid #111" : "2px solid #ccc",
-                    cursor: "pointer", padding: 0,
-                  }}
-                  title={c}
-                />
-              ))}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, color: "#555" }}>Custom:</span>
-              <input
-                type="color"
-                value={workAreaColor}
-                onChange={(e) => setWorkAreaColor(e.target.value)}
-                style={{ width: 36, height: 28, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", padding: 0 }}
-              />
             </div>
           </div>
         )}
@@ -9422,34 +9394,17 @@ const tileIconStyle = {
           if (!selWa) return null;
           return (
             <div className="no-print" style={{ ...panelStyle, left: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                 <div style={{ fontWeight: 800, fontSize: 14, flex: 1 }}>Work Area</div>
                 <button type="button" onClick={() => setSelectedWorkAreaId(null)} style={panelCloseBtn}>Close</button>
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>Zone Colour</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                {["#00c853","#f97316","#ef4444","#3b82f6","#a855f7","#eab308","#ffffff"].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setWorkAreas((prev) => prev.map((w) => w.id === selectedWorkAreaId ? { ...w, color: c } : w))}
-                    style={{
-                      width: 28, height: 28, borderRadius: "50%",
-                      background: c,
-                      border: (selWa.color || "#00c853") === c ? "3px solid #111" : "2px solid #ccc",
-                      cursor: "pointer", padding: 0,
-                    }}
-                    title={c}
-                  />
-                ))}
-              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 12, color: "#555" }}>Custom:</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>Colour:</span>
                 <input
                   type="color"
                   value={selWa.color || "#00c853"}
                   onChange={(e) => setWorkAreas((prev) => prev.map((w) => w.id === selectedWorkAreaId ? { ...w, color: e.target.value } : w))}
-                  style={{ width: 36, height: 28, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", padding: 0 }}
+                  style={{ width: 44, height: 32, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", padding: 0 }}
                 />
               </div>
               <button
@@ -10535,7 +10490,7 @@ draggingCursor:
 
   strokeColor: wa.color || "#00c853",
   fillColor: wa.color || "#00c853",
-  fillOpacity: 0.12,
+  fillOpacity: 0,
 
   // ✅ Selection feedback without changing color
   strokeWeight: wa.id === selectedWorkAreaId ? 3 : 2,
@@ -10741,7 +10696,7 @@ onUnmount={(polygon) => {
           strokeOpacity: 0.9,
           strokeWeight: 2,
           fillColor: workAreaColor,
-          fillOpacity: 0.12,
+          fillOpacity: 0,
         }}
       />
     )}
@@ -11882,7 +11837,7 @@ height: pendingPictureTool.hPx * elementScale,
         strokeOpacity: 0.9,
         strokeWeight: 2,
         fillColor: a.color || “#00c853”,
-        fillOpacity: 0.12,
+        fillOpacity: 0,
       }}
     />
   ))}
@@ -11899,7 +11854,7 @@ height: pendingPictureTool.hPx * elementScale,
       ...WORKAREA_POLY_OPTS,
       strokeColor: workAreaColor,
       fillColor: workAreaColor,
-      fillOpacity: 0.28,
+      fillOpacity: 0,
     }}
   />
 )}
