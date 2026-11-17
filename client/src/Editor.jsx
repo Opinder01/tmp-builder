@@ -10701,25 +10701,6 @@ onUnmount={(polygon) => {
   </>
 )}
 
-{/* =========================
-    Work Area (saved polygons)
-========================= */}
-{workAreas.map((a) => (
-  <PolygonF
-    key={a.id}
-    path={a.path}
-    options={{
-      clickable: false,       // ✅ MUST for reliable clicking while drawing
-      zIndex: 0,
-      strokeColor: "#00c853",
-      strokeOpacity: 0.9,
-      strokeWeight: 2,
-      fillColor: "#00c853",
-      fillOpacity: 0.10,
-    }}
-  />
-))}
-
 
               {/* CONES: preview */}
               {conesIsDrawing && conesPreviewPath && conesPreviewPath.length >= 2 && (
