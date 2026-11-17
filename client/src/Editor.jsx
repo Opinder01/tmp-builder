@@ -1209,9 +1209,9 @@ onKeyDown={(e) => {
 }}
 onKeyUp={(e) => e.stopPropagation()}
 onKeyPress={(e) => e.stopPropagation()}
-            // ✅ IMPORTANT: do NOT auto-commit on blur (prevents “one letter only” issue)
+            // ✅ IMPORTANT: do NOT auto-commit on blur (prevents "one letter only" issue)
             onBlur={() => {
-  // If we are still editing, immediately regain focus (prevents “one letter only”)
+  // If we are still editing, immediately regain focus (prevents "one letter only")
   if (!isEditing) return;
   setTimeout(() => inputRef.current?.focus(), 0);
 }}
@@ -3025,7 +3025,7 @@ const doDelete = React.useCallback(() => {
     return;
   }
 
-  // delete “Tools / Signs / Arrow / Scale” via selectedEntity
+  // delete "Tools / Signs / Arrow / Scale" via selectedEntity
   if (!selectedEntity) return;
 
   pushHistory();
@@ -4876,7 +4876,7 @@ if (measIsDrawing) cancelMeasDrawing();
   setWorkDraft([]);
   setWorkHover(null);
 
-  // clear any selection/edit states so it feels “professional”
+  // clear any selection/edit states so it feels "professional"
   setEditingInsertId?.(null);
   setEditingCell?.(null);
   setSelectedInsertId?.(null);
@@ -5572,7 +5572,7 @@ if (activeTool === "title") {
     },
   ]);
 
-  setSelectedInsertId(id); // selecting opens ribbon (we’ll add ribbon below)
+  setSelectedInsertId(id); // selecting opens ribbon (we'll add ribbon below)
   setActiveTool(null);     // tool off after placement (one tool at a time)
   return;
 }
@@ -10524,7 +10524,7 @@ draggingCursor:
   polygon.getPath().addListener("insert_at", polygon.__syncPath);
   polygon.getPath().addListener("remove_at", polygon.__syncPath);
 
-  // ✅ 2) whole-polygon drag (MOVE) — THIS is what stops “copy”
+  // ✅ 2) whole-polygon drag (MOVE) — THIS is what stops "copy"
   polygon.__dragEndListener = polygon.addListener("dragend", () => {
     polygon.__syncPath(); // read the new moved path and update SAME id
   });
@@ -10557,7 +10557,7 @@ onUnmount={(polygon) => {
       setTimeout(() => {
         // no polygon ref here, but edit listeners will have captured vertex moves.
         // dragging whole polygon doesn't trigger set_at, so we force-save by using event latLng offset isn't easy.
-        // If you want perfect drag-save, tell me and I’ll add polygon refs map.
+        // If you want perfect drag-save, tell me and I'll add polygon refs map.
       }, 0);
     }}
   />
@@ -11833,10 +11833,10 @@ height: pendingPictureTool.hPx * elementScale,
       options={{
         clickable: false,
         zIndex: 0,
-        strokeColor: a.color || “#00c853”,
+        strokeColor: a.color || "#00c853",
         strokeOpacity: 0.9,
         strokeWeight: 2,
-        fillColor: a.color || “#00c853”,
+        fillColor: a.color || "#00c853",
         fillOpacity: 0,
       }}
     />
@@ -11844,7 +11844,7 @@ height: pendingPictureTool.hPx * elementScale,
 
 
 {/* ================= WORK AREA (LIVE PREVIEW) ================= */}
-{activeTool === “work_area” &&
+{activeTool === "work_area" &&
   isDrawingWorkArea &&
   !selectedWorkAreaId &&
   workDraft.length >= 3 && (
