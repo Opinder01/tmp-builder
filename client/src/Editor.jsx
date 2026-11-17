@@ -9416,6 +9416,53 @@ const tileIconStyle = {
           </div>
         )}
 
+        {/* ===== Selected Work Area properties panel ===== */}
+        {selectedWorkAreaId && !isDrawingWorkArea && (() => {
+          const selWa = workAreas.find((w) => w.id === selectedWorkAreaId);
+          if (!selWa) return null;
+          return (
+            <div className="no-print" style={{ ...panelStyle, left: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, flex: 1 }}>Work Area</div>
+                <button type="button" onClick={() => setSelectedWorkAreaId(null)} style={panelCloseBtn}>Close</button>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>Zone Colour</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                {["#00c853","#f97316","#ef4444","#3b82f6","#a855f7","#eab308","#ffffff"].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setWorkAreas((prev) => prev.map((w) => w.id === selectedWorkAreaId ? { ...w, color: c } : w))}
+                    style={{
+                      width: 28, height: 28, borderRadius: "50%",
+                      background: c,
+                      border: (selWa.color || "#00c853") === c ? "3px solid #111" : "2px solid #ccc",
+                      cursor: "pointer", padding: 0,
+                    }}
+                    title={c}
+                  />
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <span style={{ fontSize: 12, color: "#555" }}>Custom:</span>
+                <input
+                  type="color"
+                  value={selWa.color || "#00c853"}
+                  onChange={(e) => setWorkAreas((prev) => prev.map((w) => w.id === selectedWorkAreaId ? { ...w, color: e.target.value } : w))}
+                  style={{ width: 36, height: 28, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", padding: 0 }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => { pushHistory(); setWorkAreas((prev) => prev.filter((w) => w.id !== selectedWorkAreaId)); setSelectedWorkAreaId(null); }}
+                style={{ width: "100%", padding: "7px 0", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, color: "#b91c1c", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+              >
+                Delete Work Area
+              </button>
+            </div>
+          );
+        })()}
+
         {/* ===== Cone selection properties panel ===== */}
         {selectedConeId && !conesIsDrawing && (() => {
           const selCone = conesFeatures.find((f) => f.id === selectedConeId);
@@ -10578,7 +10625,7 @@ onUnmount={(polygon) => {
     height: 14,
     borderRadius: "50%",
     background: "#fff",
-    border: "2px solid #00c853",
+    border: `2px solid ${wa.color || "#00c853"}`,
     cursor: isResizing ? "grabbing" : "grab",
     pointerEvents: "auto",
     transform: "translate(-50%, -50%)",
