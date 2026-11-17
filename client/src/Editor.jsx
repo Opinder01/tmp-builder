@@ -6123,7 +6123,7 @@ useEffect(() => {
         // Work area: Enter finalizes polygon
         if (activeTool === "work_area" && isDrawingWorkArea && workDraft.length >= 3) {
           pushHistory();
-          setWorkAreas((prev) => [...prev, { id: crypto.randomUUID(), path: [...workDraft] }]);
+          setWorkAreas((prev) => [...prev, { id: crypto.randomUUID(), path: [...workDraft], color: workAreaColor }]);
           setIsDrawingWorkArea(false);
           setWorkDraft([]);
           setWorkHover(null);
@@ -11831,10 +11831,10 @@ height: pendingPictureTool.hPx * elementScale,
       options={{
         clickable: false,
         zIndex: 0,
-        strokeColor: "#00c853",
+        strokeColor: a.color || “#00c853”,
         strokeOpacity: 0.9,
         strokeWeight: 2,
-        fillColor: "#00c853",
+        fillColor: a.color || “#00c853”,
         fillOpacity: 0.12,
       }}
     />
@@ -11842,7 +11842,7 @@ height: pendingPictureTool.hPx * elementScale,
 
 
 {/* ================= WORK AREA (LIVE PREVIEW) ================= */}
-{activeTool === "work_area" &&
+{activeTool === “work_area” &&
   isDrawingWorkArea &&
   !selectedWorkAreaId &&
   workDraft.length >= 3 && (
@@ -11850,7 +11850,8 @@ height: pendingPictureTool.hPx * elementScale,
     paths={workDraft}
     options={{
       ...WORKAREA_POLY_OPTS,
-      // make preview slightly stronger so user “feels” it live
+      strokeColor: workAreaColor,
+      fillColor: workAreaColor,
       fillOpacity: 0.28,
     }}
   />
