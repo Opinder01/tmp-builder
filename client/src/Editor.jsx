@@ -2342,6 +2342,7 @@ async function fetchStaticMapAsDataUrl(url) {
 const [isDrawingWorkArea, setIsDrawingWorkArea] = useState(false);
 const [workDraft, setWorkDraft] = useState([]);     // points while drawing
 const [workHover, setWorkHover] = useState(null);
+const [workAreaColor, setWorkAreaColor] = useState("#00c853");
 
   /* ================= Cones tool ================= */
   const [conesPanelOpen, setConesPanelOpen] = useState(false);
@@ -5846,7 +5847,7 @@ if (activeTool === "work_area" && isDrawingWorkArea) {
     pushHistory();
     setWorkAreas((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), path: finalPath },
+      { id: crypto.randomUUID(), path: finalPath, color: workAreaColor },
     ]);
   }
 
@@ -9328,7 +9329,13 @@ const tileIconStyle = {
               <button type="button" onClick={closeConesPanel} style={panelCloseBtn}>Close</button>
             </div>
 
-            <div style={{ height: 10 }} />
+            {/* Drawing hint */}
+            <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "8px 10px", marginBottom: 10, fontSize: 12, color: "#0369a1", lineHeight: 1.4 }}>
+              {conesIsDrawing
+                ? "✦ Drawing — click to add points. Double-click to finish."
+                : "1. Pick a type below  2. Click map to start  3. Double-click to finish"}
+            </div>
+            <div style={{ height: 4 }} />
             <div style={gridStyle}>
               {CONE_ITEMS.map((it) => {
                 const active = selectedConeType === it.id;
@@ -9367,6 +9374,44 @@ const tileIconStyle = {
                   </button>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* ===== Work Area color picker panel ===== */}
+        {activeTool === "work_area" && activeTab === "Plan Elements" && (
+          <div className="no-print" style={{ ...panelStyle, left: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, flex: 1 }}>Work Area</div>
+            </div>
+            <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#0369a1", lineHeight: 1.4 }}>
+              Click map to add points. Double-click to finish.
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>Zone Colour</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              {["#00c853","#f97316","#ef4444","#3b82f6","#a855f7","#eab308","#ffffff"].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setWorkAreaColor(c)}
+                  style={{
+                    width: 28, height: 28, borderRadius: "50%",
+                    background: c,
+                    border: workAreaColor === c ? "3px solid #111" : "2px solid #ccc",
+                    cursor: "pointer", padding: 0,
+                  }}
+                  title={c}
+                />
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#555" }}>Custom:</span>
+              <input
+                type="color"
+                value={workAreaColor}
+                onChange={(e) => setWorkAreaColor(e.target.value)}
+                style={{ width: 36, height: 28, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", padding: 0 }}
+              />
             </div>
           </div>
         )}
@@ -10441,9 +10486,8 @@ draggingCursor:
     options={{
   ...WORK_AREA_STYLE,
 
-  // ✅ Always green (selected or not)
-  strokeColor: "#00c853",
-  fillColor: "#00c853",
+  strokeColor: wa.color || "#00c853",
+  fillColor: wa.color || "#00c853",
   fillOpacity: 0.12,
 
   // ✅ Selection feedback without changing color
@@ -10632,7 +10676,7 @@ onUnmount={(polygon) => {
       options={{
         clickable: false,         // ✅ MUST: don't steal clicks
         zIndex: 1,
-        strokeColor: "#00c853",   // ✅ visible green
+        strokeColor: workAreaColor,
         strokeOpacity: 1,
         strokeWeight: 3,
         geodesic: false,
@@ -10646,10 +10690,10 @@ onUnmount={(polygon) => {
         options={{
           clickable: false,       // ✅ MUST
           zIndex: 0,
-          strokeColor: "#00c853",
+          strokeColor: workAreaColor,
           strokeOpacity: 0.9,
           strokeWeight: 2,
-          fillColor: "#00c853",
+          fillColor: workAreaColor,
           fillOpacity: 0.12,
         }}
       />
