@@ -6427,7 +6427,14 @@ useEffect(() => {
         uiDrag.type === "resizeRoadWidth" ||
         uiDrag.type === "moveRoadMarking" ||
         uiDrag.type === "resizeRoadMarking" ||
-        uiDrag.type === "rotateRoadMarking"
+        uiDrag.type === "rotateRoadMarking" ||
+        uiDrag.type === "moveLegend" ||
+        uiDrag.type === "resizeLegend" ||
+        uiDrag.type === "moveManifest" ||
+        uiDrag.type === "resizeManifest" ||
+        uiDrag.type === "moveNorthArrow" ||
+        uiDrag.type === "moveInsert" ||
+        uiDrag.type === "resizeInsert"
       ) {
         lockMapInteractions(false);
       }
@@ -7064,13 +7071,15 @@ useEffect(() => {
       );
     }
 
-    function onUp() { setUiDrag(null); }
+    function onUp() { setUiDrag(null); lockMapInteractions(false); }
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [uiDrag]);
 
@@ -7236,13 +7245,16 @@ useEffect(() => {
 
   function onUp() {
     setUiDrag(null);
+    lockMapInteractions(false);
   }
 
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
+  window.addEventListener("pointerup", onUp);
   return () => {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
+    window.removeEventListener("pointerup", onUp);
   };
 }, [uiDrag, setInsertObjects, zoomNow]);
 
@@ -7310,13 +7322,15 @@ useEffect(() => {
       );
     }
 
-    function onUp() { setUiDrag(null); }
+    function onUp() { setUiDrag(null); lockMapInteractions(false); }
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [uiDrag]);
 
@@ -7348,9 +7362,11 @@ useEffect(() => {
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [uiDrag]);
 
@@ -7420,9 +7436,11 @@ useEffect(() => {
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [uiDrag]);
 
@@ -7460,12 +7478,14 @@ useEffect(() => {
         }));
       }
     }
-    function onUp() { setUiDrag(null); }
+    function onUp() { setUiDrag(null); lockMapInteractions(false); }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [uiDrag]);
 
@@ -7531,9 +7551,11 @@ useEffect(() => {
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [uiDrag]);
 
@@ -7862,6 +7884,7 @@ const beginMoveNorthArrow = (arrowId, startLatLng, grabClientPt) => {
   if (!centerPx) return;
   const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
   if (!grabPx) return;
+  lockMapInteractions(true);
   setUiDrag({
     type: "moveNorthArrow",
     arrowId,
@@ -8144,6 +8167,7 @@ const handleLegendToggle = (typeId) => {
     if (!centerPx) return;
     const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
     if (!grabPx) return;
+    lockMapInteractions(true);
     setUiDrag({
       type: "moveLegend",
       legendId,
@@ -8161,6 +8185,7 @@ const handleLegendToggle = (typeId) => {
     // Store centerPx once at drag-start — matches beginResizeInsert pattern exactly
     const centerPx = latLngToPx(legend.pos);
     if (!centerPx) return;
+    lockMapInteractions(true);
     setUiDrag({
       type: "resizeLegend",
       legendId,
@@ -8179,6 +8204,7 @@ const handleLegendToggle = (typeId) => {
     if (!centerPx) return;
     const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
     if (!grabPx) return;
+    lockMapInteractions(true);
     setUiDrag({
       type: "moveManifest",
       manifestId,
@@ -8197,6 +8223,7 @@ const handleLegendToggle = (typeId) => {
     const centerPx = latLngToPx(manifest.pos);
     if (!centerPx) return;
     const manifestNaturalH0 = manifestCanvasPixelHeight(manifestRows, manifestNaturalW0, manifestNaturalW0);
+    lockMapInteractions(true);
     setUiDrag({
       type: "resizeManifest",
       manifestId,
@@ -8259,6 +8286,7 @@ const beginMoveInsert = (insertId, startLatLng, grabClientPt) => {
   if (!centerPx) return;
   const grabPx = grabClientPt ? clientToDivPx(grabClientPt.x, grabClientPt.y) : centerPx;
   if (!grabPx) return;
+  lockMapInteractions(true);
   setUiDrag({
     type: "moveInsert",
     insertId,
@@ -10160,11 +10188,14 @@ draggingCursor:
                             function onUp() {
                               window.removeEventListener("mousemove", onMove);
                               window.removeEventListener("mouseup", onUp);
+                              window.removeEventListener("pointerup", onUp);
+                              coneSelectionGuardRef.current = false;
                               lockMapInteractions(false);
                               pushHistory();
                             }
                             window.addEventListener("mousemove", onMove);
                             window.addEventListener("mouseup", onUp);
+                            window.addEventListener("pointerup", onUp);
                           }}
                         />
                       </OverlayViewF>
@@ -10226,11 +10257,14 @@ draggingCursor:
                               function onUp() {
                                 window.removeEventListener("mousemove", onMove);
                                 window.removeEventListener("mouseup", onUp);
+                                window.removeEventListener("pointerup", onUp);
+                                coneSelectionGuardRef.current = false;
                                 lockMapInteractions(false);
                                 pushHistory();
                               }
                               window.addEventListener("mousemove", onMove);
                               window.addEventListener("mouseup", onUp);
+                              window.addEventListener("pointerup", onUp);
                             }}
                           />
                         </OverlayViewF>
