@@ -64,6 +64,13 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── Trial check: app_users.trial_until ───────────────────────────────────
+  const { data: trialUser } = await supabase
+    .from("app_users").select("trial_until").eq("email", email).maybeSingle();
+  if (trialUser?.trial_until && new Date(trialUser.trial_until) > new Date()) {
+    return json(res, 200, { subscribed: true, isTrial: true, plan: "trial" });
+  }
+
   // ── Step 1: check Supabase ────────────────────────────────────────────────
   const subQuery = session.user_id
     ? supabase.from("subscriptions").select("email, stripe_customer_id, stripe_subscription_id, plan").eq("user_id", session.user_id)
